@@ -13,8 +13,10 @@ plan's build table (§13). Out of scope this run: Phase 5 (see `PHASE5-TODO.md`)
 
 ## Phase 1 — Spine (weeks 1–2)
 
-**Status:** complete — local gate green, e2e verified. Draft PR
-[#1](https://github.com/tomnguyen103/stopgap/pull/1) going ready for CodeRabbit.
+**Status:** ✅ MERGED to main — [PR #1](https://github.com/tomnguyen103/stopgap/pull/1),
+local gate green, e2e verified (backend + auto-poll + UI), CodeRabbit clean after 4
+remediation rounds (21 real findings fixed across the whole branch, 3 architectural items
+deferred to `PHASE5-TODO.md` with documented reasons).
 
 **GitHub:** public repo `tomnguyen103/stopgap`; `main` pushed (scaffold baseline);
 Actions **disabled** (verified `enabled:false`) per zero-Actions-minutes policy.
@@ -55,3 +57,4 @@ case, console renders it, time-skipped Temporal test proves a multi-week case re
 ## Merged-PR log
 
 <!-- append one line per merged PR: ✅ <PR title> — <what it proved> -->
+✅ Phase 1 — Spine: durable case engine, provider routing, live feeds ([#1](https://github.com/tomnguyen103/stopgap/pull/1)) — Temporal + Postgres + live openFDA/ASHP polling, Gemini/Ollama provider registry with failover, Next.js 15 console, `pollFeedsWorkflow` auto-opening cases (57 real cases opened live in verification), weekly-tick monitoring loop, retry-safe hash-chained audit log. 23/23 tests green, `pnpm gate` clean, CodeRabbit clean after 4 rounds.
