@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "audit_case_action_uq" ON "audit_log" USING btree ("case_id","action");

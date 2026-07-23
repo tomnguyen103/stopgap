@@ -58,7 +58,14 @@ export const auditLog = pgTable(
     prevHash: text("prev_hash").notNull(),
     hash: text("hash").notNull(),
   },
-  (t) => [index("audit_case_idx").on(t.caseId), index("audit_ts_idx").on(t.ts)],
+  (t) => [
+    index("audit_case_idx").on(t.caseId),
+    index("audit_ts_idx").on(t.ts),
+    // Each case action fires at most once (case state machine has no repeating legs), so
+    // (case_id, action) is a natural idempotency key: a Temporal activity retry after a
+    // committed insert lands here as a no-op instead of double-appending (CodeRabbit finding).
+    uniqueIndex("audit_case_action_uq").on(t.caseId, t.action),
+  ],
 );
 
 /** Raw feed records for dedup + provenance; `(source, sourceId)` is unique. */
