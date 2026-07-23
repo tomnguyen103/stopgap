@@ -13,21 +13,26 @@ plan's build table (§13). Out of scope this run: Phase 5 (see `PHASE5-TODO.md`)
 
 ## Phase 1 — Spine (weeks 1–2)
 
-**Status:** in progress
+**Status:** in progress — draft PR [#1](https://github.com/tomnguyen103/stopgap/pull/1)
+(console + e2e screenshot remain before ready-for-CodeRabbit)
+
+**GitHub:** public repo `tomnguyen103/stopgap`; `main` pushed (scaffold baseline);
+Actions **disabled** (verified `enabled:false`) per zero-Actions-minutes policy.
 
 Target deliverable: Temporal + Postgres (Drizzle) + live FDA/ASHP/RxNorm polling; AI SDK
 provider routing (Gemini + Ollama, health-check failover); one shortage case end-to-end
 with mocked activities; Next.js 15 console skeleton. Verified by: Temporal UI shows the
 case, console renders it, time-skipped Temporal test proves a multi-week case resumes.
 
-- [ ] Monorepo scaffold + local gate wiring
-- [ ] docker-compose (Postgres + Temporal + UI)
-- [ ] `@stopgap/db` — Drizzle schema (cases, audit) + migrations
-- [ ] `@stopgap/providers` — provider registry + health-check failover
-- [ ] `@stopgap/ingest` — real openFDA / ASHP / RxNorm clients + fixtures
-- [ ] `@stopgap/workflows` — case workflow + mocked activities + time-skip test
+- [x] Monorepo scaffold + local gate wiring (lint+typecheck+test+build, `--if-present`)
+- [x] docker-compose (Postgres + Temporal + UI) — running locally
+- [x] `@stopgap/db` — Drizzle schema (cases, audit, feed_records) + migrations applied
+- [x] `@stopgap/providers` — Gemini+Ollama registry + health-check failover + telemetry sink
+- [x] `@stopgap/ingest` — real openFDA/RxNorm clients + fixtures; ASHP client (stubbed w/o key); cross-feed dedupe
+- [x] `@stopgap/workflows` — case workflow + mocked activities + time-skip test (3 pass)
 - [ ] `apps/console` — Next.js 15 skeleton listing cases
-- [ ] End-to-end: one case opens, visible in Temporal UI + console
+- [x] End-to-end (backend): live openFDA → durable case → Postgres `awaiting_review`, severity `critical`, audit chain intact
+- [ ] End-to-end (UI): case visible in console; screenshot Temporal UI + console
 
 ## Phase 2 — Intelligence (weeks 2–4)
 
