@@ -1,4 +1,5 @@
 import type { CaseStatus, Severity, ShortageRecord } from "@stopgap/core";
+import type { AlternativesResearch, ImpactAssessment } from "@stopgap/agents";
 
 /** Input to a shortage case workflow: the (possibly merged) detected shortage. */
 export interface CaseInput {
@@ -7,21 +8,11 @@ export interface CaseInput {
   sources: ShortageRecord["source"][];
 }
 
-/** Result of the (Phase 1 mocked) impact assessment activity. */
-export interface ImpactResult {
-  severity: Severity;
-  /** How many formulary items the shortage touches (mock inventory match). */
-  affectedFormularyItems: number;
-  rationale: string;
-}
+/** Result of the impact assessment activity (Zod-validated, schema owned by @stopgap/agents). */
+export type ImpactResult = ImpactAssessment;
 
-/** Result of the (Phase 1 mocked) alternatives research activity. */
-export interface ResearchResult {
-  /** Candidate substitute drug names. Empty ⇒ no therapeutic equivalent (exception path). */
-  alternatives: string[];
-  /** Draft substitution protocol text. */
-  draft: string;
-}
+/** Result of the alternatives research activity (Zod-validated, schema owned by @stopgap/agents). */
+export type ResearchResult = AlternativesResearch;
 
 /** A pharmacist's HITL decision on the drafted protocol. */
 export type ReviewDecision =

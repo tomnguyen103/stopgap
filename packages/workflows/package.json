@@ -13,6 +13,7 @@
     "start-schedule": "tsx src/scripts/start-schedule.ts"
   },
   "dependencies": {
+    "@stopgap/agents": "workspace:*",
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
     "@stopgap/ingest": "workspace:*",

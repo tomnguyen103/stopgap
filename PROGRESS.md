@@ -42,7 +42,26 @@ case, console renders it, time-skipped Temporal test proves a multi-week case re
 
 ## Phase 2 — Intelligence (weeks 2–4)
 
-**Status:** not started
+**Status:** in progress — core agents wired and verified live; Langfuse tracing and golden
+dataset expansion (v1 has 4 cases, plan targets 60-100) still open.
+
+Target deliverable: impact + alternatives agents, structured outputs, confidence routing;
+golden dataset v1; Langfuse; eval CI gate on Ollama.
+
+- [x] `@stopgap/agents` — Zod-validated `assessImpact`/`researchAlternatives` via
+  `generateStructured` (Gemini/Ollama, health-routed), replacing Phase 1's deterministic mocks
+- [x] Confidence routing: `research.confidence < 0.5` routes to the exception queue instead of
+  auto-drafting a shaky protocol (PROJECT_PLAN §8: under-escalation target ≈ 0)
+- [x] Golden dataset v1 (4 cases) + eval test running live against Ollama (`mistral`,
+  temperature 0) as part of `pnpm test`/`pnpm gate` — no exact-match, severity-floor +
+  alternative-existence checks tuned to a small local model's realistic ceiling
+- [x] Verified live end-to-end: real Temporal worker (webpack bundle confirmed clean — the
+  workflow-side import is an isolated `@stopgap/agents/schemas` subpath so provider/network
+  code never enters the deterministic workflow sandbox) opened a fresh insulin-lispro case
+  through the real agents: severity `critical`, full audit trail to `awaiting_review`
+- [ ] Langfuse self-hosted + OTel GenAI tracing (currently: local console/no-op sink)
+- [ ] Golden dataset expansion toward 60-100 cases
+- [ ] Gemini-vs-Ollama comparison table (blocked on `GEMINI_API_KEY`, see `PHASE5-TODO.md`)
 
 ## Phase 3 — Memory + shadow (weeks 4–6)
 

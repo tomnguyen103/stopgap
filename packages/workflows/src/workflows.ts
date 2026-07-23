@@ -1,4 +1,5 @@
 import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
+import { ALTERNATIVES_CONFIDENCE_THRESHOLD } from "@stopgap/agents/schemas";
 import type * as activities from "./activities.js";
 import {
   MAX_MONITORING_MS,
@@ -59,10 +60,14 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   state.alternatives = research.alternatives;
   state.draft = research.draft;
 
-  // No therapeutic equivalent → exception queue (always human; PROJECT_PLAN §2 exception matrix).
-  if (research.alternatives.length === 0) {
+  // No therapeutic equivalent, or the agent isn't confident enough to auto-draft → exception
+  // queue (always human; PROJECT_PLAN §2 exception matrix, §8 under-escalation target ≈ 0).
+  if (research.alternatives.length === 0 || research.confidence < ALTERNATIVES_CONFIDENCE_THRESHOLD) {
     state.status = "exception";
-    await acts.persistStatus(key, "exception", { reason: "no-therapeutic-equivalent" });
+    await acts.persistStatus(key, "exception", {
+      reason: research.alternatives.length === 0 ? "no-therapeutic-equivalent" : "low-confidence-alternatives",
+      confidence: research.confidence,
+    });
     return state;
   }
 
