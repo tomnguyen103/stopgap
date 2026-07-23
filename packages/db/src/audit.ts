@@ -45,6 +45,9 @@ function hashEntry(prevHash: string, e: Required<Omit<AuditEntry, "caseId">> & {
  */
 export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: string }> {
   return db.transaction(async (tx) => {
+    // Bound the wait: a stalled lock holder must not back up every appendAudit caller across
+    // all cases (single global chain lock) and exhaust the connection pool.
+    await tx.execute(sql`set local lock_timeout = '5s'`);
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('audit_log_chain'))`);
 
     if (entry.caseId) {

@@ -38,6 +38,14 @@ deferred to Phase 5.
   Phase 1's threat model is internal correctness (concurrent writers, retries), not a
   compromised DB. Before this is a real compliance control, add either a keyed HMAC (secret
   outside the DB) or anchor the chain head to an external append-only store.
+- **Monitoring doesn't auto-detect feed resolution.** `pollFeedsWorkflow`/`pollAndOpenCases`
+  only opens cases for `current` shortages; it never checks whether a case already in
+  `monitoring` has dropped off the feed (i.e. resolved) and doesn't call `markResolved` for
+  it. Today resolution requires an external caller (console action, ops script) to signal
+  the case — the weekly tick just re-checks the deadline, not the feed. Wiring
+  `pollAndOpenCases` to also cross-check open `monitoring` cases against the latest feed
+  snapshot and signal resolution is real feature work (Phase 2/3 territory: it needs a
+  feed-diff strategy, not just a poll), deferred rather than bolted on here.
 - **Build gate doesn't build library packages.** `pnpm gate`'s build step only produces
   output for `apps/console` (the only package with a `build` script) — `packages/*` are
   consumed as workspace TS source directly (via `tsx`/Temporal's bundler/Next's transpiler),

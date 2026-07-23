@@ -99,10 +99,15 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   while (!state.resolved) {
     const remaining = MAX_MONITORING_MS - (Date.now() - monitorStart);
     if (remaining <= 0) break;
-    const resolvedInTime = await condition(() => state.resolved, Math.min(MONITOR_POLL_MS, remaining));
+    const waitMs = Math.min(MONITOR_POLL_MS, remaining);
+    const resolvedInTime = await condition(() => state.resolved, waitMs);
     if (resolvedInTime) break;
-    state.monitoringWeeks += 1;
-    await acts.persistStatus(key, "monitoring", { monitoringWeeks: state.monitoringWeeks });
+    // Only a full week's wait counts as a week — the last tick before MAX_MONITORING_MS may
+    // be a shortened remainder, and that shouldn't round up to a full monitoringWeeks tick.
+    if (waitMs === MONITOR_POLL_MS) {
+      state.monitoringWeeks += 1;
+      await acts.persistStatus(key, "monitoring", { monitoringWeeks: state.monitoringWeeks });
+    }
   }
   const deadlineHit = !state.resolved;
   if (deadlineHit) {
