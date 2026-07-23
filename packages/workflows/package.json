@@ -17,6 +17,7 @@
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
     "@stopgap/ingest": "workspace:*",
+    "@stopgap/observability": "workspace:*",
     "@temporalio/activity": "^1.11.0",
     "@temporalio/client": "^1.11.0",
     "@temporalio/worker": "^1.11.0",

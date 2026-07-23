@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { assessImpact } from "./impact.js";
 import { researchAlternatives } from "./alternatives.js";
-import { GOLDEN_DATASET, severityMeetsFloor, severityWithinCeiling } from "./golden-dataset.js";
+import { GOLDEN_DATASET, evalSubset, severityMeetsFloor, severityWithinCeiling } from "./golden-dataset.js";
+
+/**
+ * `pnpm eval` runs a deterministic stride through the corpus; `pnpm eval:full` (EVAL_FULL=1)
+ * runs all ~85 cases. See `evalSubset` for why the default is a subset.
+ */
+const CASES = process.env.EVAL_FULL === "1" ? GOLDEN_DATASET : evalSubset();
 
 /**
  * Eval gate (PROJECT_PLAN §8): runs the golden dataset against the live agents on Ollama
@@ -25,8 +31,8 @@ async function majorityVote(trials: number, attempt: () => Promise<boolean>): Pr
   return passes > trials / 2;
 }
 
-describe("golden dataset eval (live Ollama)", () => {
-  for (const goldenCase of GOLDEN_DATASET) {
+describe(`golden dataset eval (live Ollama, ${CASES.length}/${GOLDEN_DATASET.length} cases)`, () => {
+  for (const goldenCase of CASES) {
     it(`${goldenCase.id}: severity >= ${goldenCase.expected.severityAtLeast}, alternative expected = ${goldenCase.expected.hasAlternative}`, async () => {
       const severityOk = await majorityVote(3, async () => {
         const impact = await assessImpact(goldenCase.record);
