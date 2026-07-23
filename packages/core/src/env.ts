@@ -1,0 +1,54 @@
+import { z } from "zod";
+
+/**
+ * Central environment schema. Parsed lazily so packages that only need a subset (e.g.
+ * ingest needs feed URLs, not DB) don't crash on unrelated missing vars. Every field has
+ * a sensible local-dev default so the local gate runs with zero configuration.
+ */
+const EnvSchema = z.object({
+  DATABASE_URL: z.string().default("postgres://stopgap:stopgap@localhost:5433/stopgap"),
+
+  TEMPORAL_ADDRESS: z.string().default("localhost:7233"),
+  TEMPORAL_NAMESPACE: z.string().default("default"),
+  TEMPORAL_TASK_QUEUE: z.string().default("stopgap-cases"),
+
+  LLM_PROVIDER: z.enum(["gemini", "ollama"]).default("ollama"),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
+  OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
+  OLLAMA_MODEL: z.string().default("mistral"),
+
+  OPENFDA_BASE_URL: z.string().default("https://api.fda.gov"),
+  OPENFDA_API_KEY: z.string().optional(),
+  RXNORM_BASE_URL: z.string().default("https://rxnav.nlm.nih.gov"),
+  // ASHP AHFS drug-shortages feed (ASHP-Software/drugShortagesDoc). The live feed requires
+  // an auth key from softwaresupport@ashp.org; absent it, the ASHP poller is stubbed.
+  ASHP_BASE_URL: z.string().default("https://ahfs-staging.firebaseio.com"),
+  ASHP_AUTH_KEY: z.string().optional(),
+
+  LANGFUSE_BASE_URL: z.string().default("http://localhost:3001"),
+  LANGFUSE_PUBLIC_KEY: z.string().optional(),
+  LANGFUSE_SECRET_KEY: z.string().optional(),
+
+  RESEND_API_KEY: z.string().optional(),
+  COMMS_FROM: z.string().default("stopgap@example.com"),
+  COMMS_DEMO_INBOX: z.string().optional(),
+  EHR_WEBHOOK_URL: z.string().default("http://localhost:4000/ehr/formulary-flag"),
+});
+
+export type Env = z.infer<typeof EnvSchema>;
+
+let cached: Env | undefined;
+
+/** Parse and cache process.env against the schema. */
+export function getEnv(): Env {
+  if (!cached) {
+    cached = EnvSchema.parse(process.env);
+  }
+  return cached;
+}
+
+/** Test helper: reset the cache so a mutated process.env is re-read. */
+export function resetEnvCache(): void {
+  cached = undefined;
+}

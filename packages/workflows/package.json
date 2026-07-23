@@ -1,0 +1,28 @@
+{
+  "name": "@stopgap/workflows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "worker": "tsx src/worker.ts",
+    "start-case": "tsx src/scripts/start-case.ts",
+    "start-schedule": "tsx src/scripts/start-schedule.ts"
+  },
+  "dependencies": {
+    "@stopgap/core": "workspace:*",
+    "@stopgap/db": "workspace:*",
+    "@stopgap/ingest": "workspace:*",
+    "@temporalio/activity": "^1.11.0",
+    "@temporalio/client": "^1.11.0",
+    "@temporalio/worker": "^1.11.0",
+    "@temporalio/workflow": "^1.11.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@temporalio/testing": "^1.11.0"
+  }
+}

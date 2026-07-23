@@ -8,11 +8,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "lint": "eslint .",
+    "lint": "eslint . --ignore-pattern apps/console/next-env.d.ts",
     "typecheck": "pnpm -r --no-bail typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "pnpm -r --no-bail build",
+    "build": "pnpm -r --no-bail --if-present build",
     "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @stopgap/db generate",
     "db:migrate": "pnpm --filter @stopgap/db migrate",

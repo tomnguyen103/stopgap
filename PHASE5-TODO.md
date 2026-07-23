@@ -24,6 +24,33 @@ deferred to Phase 5.
   export to a local/console OTel exporter. Provision Langfuse + keys for real tracing.
 - **openFDA API key absent (optional).** Polling works unauthenticated at a lower rate
   limit; add `OPENFDA_API_KEY` for higher throughput.
+- **`ASHP_AUTH_KEY` absent.** `pollAshp()` returns `[]` (see `ashpStubbed()`) so the ASHP
+  feed contributes nothing to `pollFeedsWorkflow`/`pollAndOpenCases` in this run — only
+  openFDA opens cases live. ASHP mappers are unit-tested against a recorded fixture.
+  Set `ASHP_AUTH_KEY` for ASHP to actually poll and merge into the dedup/auto-open path.
+
+## Deferred CodeRabbit findings (PR #1)
+
+- **Audit chain is tamper-evident, not tamper-proof (CWE-345).** `packages/db/src/audit.ts`'s
+  SHA-256 hash chain detects accidental corruption/bugs (verified: manually deleting a row
+  makes `verifyAuditChain` correctly report the break) but anyone with DB write access can
+  recompute the whole chain after editing rows — there's no secret key or external anchor.
+  Phase 1's threat model is internal correctness (concurrent writers, retries), not a
+  compromised DB. Before this is a real compliance control, add either a keyed HMAC (secret
+  outside the DB) or anchor the chain head to an external append-only store.
+- **Monitoring doesn't auto-detect feed resolution.** `pollFeedsWorkflow`/`pollAndOpenCases`
+  only opens cases for `current` shortages; it never checks whether a case already in
+  `monitoring` has dropped off the feed (i.e. resolved) and doesn't call `markResolved` for
+  it. Today resolution requires an external caller (console action, ops script) to signal
+  the case — the weekly tick just re-checks the deadline, not the feed. Wiring
+  `pollAndOpenCases` to also cross-check open `monitoring` cases against the latest feed
+  snapshot and signal resolution is real feature work (Phase 2/3 territory: it needs a
+  feed-diff strategy, not just a poll), deferred rather than bolted on here.
+- **Build gate doesn't build library packages.** `pnpm gate`'s build step only produces
+  output for `apps/console` (the only package with a `build` script) — `packages/*` are
+  consumed as workspace TS source directly (via `tsx`/Temporal's bundler/Next's transpiler),
+  not compiled artifacts, so there's nothing for them to build in this run. Revisit if any
+  package needs standalone publishing or a compiled entrypoint.
 
 ## Notes
 
