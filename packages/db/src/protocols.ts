@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "./client.js";
 import { protocols, protocolVersions } from "./schema.js";
 import type { ProtocolRow, ProtocolVersionRow } from "./schema.js";
@@ -22,12 +22,19 @@ export interface DraftProtocolInput {
   rationale?: string | null;
 }
 
+/** The protocol row for a shortage key, if one has ever been written. */
+async function findProtocol(key: string): Promise<ProtocolRow | undefined> {
+  const db = getDb();
+  const [protocol] = await db.select().from(protocols).where(eq(protocols.key, key)).limit(1);
+  return protocol;
+}
+
 /** The approved version a new case should reuse, or undefined if the protocol is unwritten. */
 export async function getApprovedProtocol(
   key: string,
 ): Promise<{ protocol: ProtocolRow; version: ProtocolVersionRow } | undefined> {
   const db = getDb();
-  const [protocol] = await db.select().from(protocols).where(eq(protocols.key, key)).limit(1);
+  const protocol = await findProtocol(key);
   if (!protocol) return undefined;
   const [version] = await db
     .select()
@@ -41,7 +48,7 @@ export async function getApprovedProtocol(
 /** Every version of a protocol, newest first — the provenance/history view. */
 export async function listProtocolVersions(key: string): Promise<ProtocolVersionRow[]> {
   const db = getDb();
-  const [protocol] = await db.select().from(protocols).where(eq(protocols.key, key)).limit(1);
+  const protocol = await findProtocol(key);
   if (!protocol) return [];
   return db
     .select()
@@ -110,6 +117,11 @@ export async function approveProtocolVersion(
       .where(eq(protocolVersions.id, versionId))
       .limit(1);
     if (!target) throw new Error(`protocol version ${versionId} not found`);
+    // Serialize approvals per protocol. Without this lock two concurrent approvals both read
+    // "no approved version" (each superseding what the other has not committed yet) and both
+    // commit, leaving two approved versions — the exact state this function promises can
+    // never exist.
+    await tx.execute(sql`select id from ${protocols} where id = ${target.protocolId} for update`);
     if (target.state === "approved") return target;
     if (target.state === "superseded") {
       throw new Error(`protocol version ${versionId} is superseded and cannot be approved`);

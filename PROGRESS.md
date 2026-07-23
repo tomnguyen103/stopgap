@@ -117,6 +117,12 @@ replay corpus + agreement dashboard; promotion gates.
 - [x] Shadow replay of 24 corpus entries: injectable 74% mean agreement / 63% severity match
   (19 runs), oncology 80% / 100% (5 runs) — both correctly held at the `shadow` stage by the
   promotion gates
+- [x] Audit-chain check during Phase 3 verification: `verifyAuditChain` reports a break at row
+  7 in the local dev database. Investigated — 58 forked links, all inside one 4-second window
+  on 2026-07-23 20:14 (the 57-case bulk poll), i.e. a stale pre-PR-#1 worker process that was
+  still running without the advisory-lock fix. Current code is correct: 12 concurrent
+  `appendAudit` calls against the same database produced zero forks. The dev database keeps
+  the historical break; a fresh database does not reproduce it.
 - [ ] Extract `shadow-ledger` as a standalone npm library (PROJECT_PLAN §12 artifact 5 —
   Phase 5 packaging work)
 

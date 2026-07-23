@@ -61,8 +61,13 @@ export const auditLog = pgTable(
     detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
     prevHash: text("prev_hash").notNull(),
     hash: text("hash").notNull(),
-    /** Temporal workflow run this entry belongs to; part of the idempotency key. */
-    runId: text("run_id"),
+    /**
+     * Temporal workflow run this entry belongs to; part of the idempotency key. Empty string
+     * (not NULL) outside a workflow run: Postgres treats NULLs as distinct in a unique index,
+     * so a nullable column here would silently switch the idempotency backstop off for
+     * exactly the rows that need it.
+     */
+    runId: text("run_id").notNull().default(""),
   },
   (t) => [
     index("audit_case_idx").on(t.caseId),

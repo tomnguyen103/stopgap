@@ -9,13 +9,15 @@
  * did the severity call match, and did the agent agree that a substitute exists at all.
  */
 
+import type { Severity } from "@stopgap/core";
+
 export interface ShadowProposal {
-  severity: string;
+  severity: Severity;
   alternatives: string[];
 }
 
 export interface ShadowBaseline {
-  severity: string;
+  severity: Severity;
   /** Whether a real therapeutic alternative exists, per the human label. */
   hasAlternative: boolean;
 }

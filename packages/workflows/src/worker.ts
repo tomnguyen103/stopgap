@@ -22,6 +22,9 @@ async function main() {
   });
   console.log(`[worker] listening on task queue "${env.TEMPORAL_TASK_QUEUE}" @ ${env.TEMPORAL_ADDRESS}`);
   await worker.run();
+  // Reached on a normal shutdown (SIGTERM/SIGINT, which Worker.run handles): whatever is
+  // still in the batch span buffer would otherwise be dropped on exit.
+  await flushTracing().catch(() => {});
 }
 
 main().catch(async (err) => {

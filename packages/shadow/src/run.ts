@@ -12,8 +12,10 @@ import { scoreAgreement } from "./score.js";
  * say "the agent would have done X" for inputs where letting it act would have been unsafe.
  */
 export async function runShadowEntry(entry: ReplayEntry): Promise<void> {
-  // Which provider actually served this run — resolved up front so the ledger row records
-  // the same routing decision (including a Gemini→Ollama failover) that the agents used.
+  // The provider this run is expected to use. It is resolved separately from the agents' own
+  // internal routing, so a failover that happens *inside* one of the two agent calls is not
+  // reflected here — the per-call truth lives in the Langfuse spans (ADR-0003). Good enough
+  // for aggregating the ledger by provider; not a per-call attribution.
   const routed = await routeModel();
   const start = Date.now();
   const impact = await assessImpact(entry.record);
@@ -38,8 +40,10 @@ export async function runShadowEntry(entry: ReplayEntry): Promise<void> {
     agreement: score.agreement.toFixed(3),
     severityAgreed: score.severityAgreed,
     latencyMs,
-    // Cost per shadow run comes from the provider telemetry sink (Langfuse); local Ollama
-    // runs are free, so this is 0 until the corpus is replayed against a paid provider.
+    // Local Ollama is free, so 0 is the true cost of today's runs. Attributing real cost to a
+    // paid-provider replay needs per-call token counts plumbed back from the telemetry sink
+    // (they exist in the Langfuse span, not here) — logged as an open item rather than
+    // guessed, because a made-up number in a cost column is worse than an obvious zero.
     usdCost: "0",
     provider: routed.info.name,
     modelId: routed.info.modelId,

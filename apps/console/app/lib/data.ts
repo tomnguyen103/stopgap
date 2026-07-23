@@ -3,7 +3,6 @@ import {
   getCaseByWorkflowId,
   getDb,
   listCases,
-  listProtocolVersions,
   listShadowRuns,
   schema,
   shadowStatsByClass,
@@ -60,10 +59,15 @@ export async function getProtocols(): Promise<
 > {
   const db = getDb();
   const rows = await db.select().from(schema.protocols).orderBy(desc(schema.protocols.updatedAt));
-  return Promise.all(
-    rows.map(async (protocol) => ({
-      protocol,
-      versions: await listProtocolVersions(protocol.key),
-    })),
-  );
+  if (rows.length === 0) return [];
+  // One query for every version, grouped in memory — a per-protocol lookup would re-find the
+  // protocol row this function already holds, twice per protocol per page render.
+  const versions = await db
+    .select()
+    .from(schema.protocolVersions)
+    .orderBy(desc(schema.protocolVersions.version));
+  return rows.map((protocol) => ({
+    protocol,
+    versions: versions.filter((version) => version.protocolId === protocol.id),
+  }));
 }

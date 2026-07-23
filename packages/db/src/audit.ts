@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { auditLog } from "./schema.js";
 
@@ -29,21 +29,18 @@ export interface AuditEntry {
   runId?: string;
 }
 
+/**
+ * `runId` is deliberately NOT hashed. It is idempotency metadata, not a claim about what
+ * happened, and leaving it out keeps the chain formula stable — entries written before the
+ * column existed still verify against entries written after it.
+ */
 function hashEntry(
   prevHash: string,
-  e: { caseId?: string; actor: string; action: string; detail: Record<string, unknown>; runId?: string },
+  e: { caseId?: string; actor: string; action: string; detail: Record<string, unknown> },
 ): string {
   return createHash("sha256")
     .update(prevHash)
-    .update(
-      canonical({
-        caseId: e.caseId ?? null,
-        actor: e.actor,
-        action: e.action,
-        detail: e.detail,
-        runId: e.runId ?? null,
-      }),
-    )
+    .update(canonical({ caseId: e.caseId ?? null, actor: e.actor, action: e.action, detail: e.detail }))
     .digest("hex");
 }
 
@@ -78,7 +75,7 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
           and(
             eq(auditLog.caseId, entry.caseId),
             eq(auditLog.action, entry.action),
-            entry.runId ? eq(auditLog.runId, entry.runId) : isNull(auditLog.runId),
+            eq(auditLog.runId, entry.runId ?? ""),
           ),
         )
         .limit(1);
@@ -93,7 +90,6 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
       action: entry.action,
       detail,
       caseId: entry.caseId,
-      runId: entry.runId,
     });
     await tx.insert(auditLog).values({
       caseId: entry.caseId,
@@ -102,7 +98,7 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
       detail,
       prevHash,
       hash,
-      runId: entry.runId ?? null,
+      runId: entry.runId ?? "",
     });
     return { hash };
   });
@@ -118,7 +114,6 @@ export async function verifyAuditChain(db: Db): Promise<{ ok: boolean; brokenAtI
       action: row.action,
       detail: row.detail,
       caseId: row.caseId ?? undefined,
-      runId: row.runId ?? undefined,
     });
     if (row.prevHash !== prevHash || row.hash !== expected) {
       return { ok: false, brokenAtId: row.id };

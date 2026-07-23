@@ -1,5 +1,5 @@
 import { GOLDEN_DATASET } from "@stopgap/agents";
-import type { ShortageRecord } from "@stopgap/core";
+import type { Severity, ShortageRecord } from "@stopgap/core";
 
 /**
  * Replay corpus (PROJECT_PLAN §3A). Each entry is a shortage record plus the simulated
@@ -18,7 +18,7 @@ export interface ReplayEntry {
   record: ShortageRecord;
   /** Drug class the promotion gates aggregate by. Derived, see `drugClassFor`. */
   drugClass: string;
-  baseline: { severity: string; hasAlternative: boolean };
+  baseline: { severity: Severity; hasAlternative: boolean };
 }
 
 /**

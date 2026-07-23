@@ -163,6 +163,10 @@ export async function lookupProtocol(key: string): Promise<ProtocolMemoryHit | u
 export async function recordProtocolVersion(input: RecordProtocolInput): Promise<void> {
   const db = getDb();
   const row = await getCaseByWorkflowId(db, workflowIdForKey(input.key));
+  // Idempotent under retry: an activity whose insert committed before the worker crashed
+  // would otherwise write a second identical version and supersede the one it just approved.
+  const current = await getApprovedProtocol(input.key);
+  if (current && current.version.body === input.body) return;
   const drafted = await draftProtocolVersion({
     key: input.key,
     title: input.title,

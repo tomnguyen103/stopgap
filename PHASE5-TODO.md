@@ -55,3 +55,16 @@ deferred to Phase 5.
 ## Notes
 
 - `.env.example` documents every variable. Copy to `.env` and fill before deploy.
+
+## Phase 3 deferrals
+
+- **Shadow-ledger cost attribution.** `shadow_runs.usd_cost` is written as `0`, which is the
+  true cost of a local-Ollama replay but would be wrong for a paid provider. Real attribution
+  needs per-call token counts routed from the provider telemetry sink into the run record
+  (they already exist in the Langfuse span). Until then the per-class cost aggregate on
+  `/shadow` is only meaningful for local runs.
+- **Per-call provider attribution in shadow runs.** `runShadowEntry` resolves the route once
+  and records that; a failover happening inside one of the two agent calls is not reflected in
+  the ledger row. The per-call truth is in the OTel spans.
+- **Per-case Langfuse traces.** Spans are emitted per LLM call, not grouped into one trace per
+  shortage case — that needs the Temporal workflow id propagated into the activity context.
