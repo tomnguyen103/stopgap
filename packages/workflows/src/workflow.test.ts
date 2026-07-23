@@ -41,12 +41,12 @@ const mockActivities: typeof activities = {
     severity: input.record.ndcs.length >= 2 ? "high" : "moderate",
     affectedFormularyItems: input.record.ndcs.length,
     rationale: "test",
-    confidence: 0.9,
+    confidence: /low impact confidence/i.test(input.record.genericName) ? 0.2 : 0.9,
   }),
   researchAlternatives: async (input: CaseInput) =>
     /immune globulin/i.test(input.record.genericName)
       ? { alternatives: [], draft: "", confidence: 0.9 }
-      : /low confidence/i.test(input.record.genericName)
+      : /low alt confidence/i.test(input.record.genericName)
         ? { alternatives: ["alt-a"], draft: "draft protocol", confidence: 0.2 }
         : { alternatives: ["alt-a", "alt-b"], draft: "draft protocol", confidence: 0.9 },
   sendComms: async () => {},
@@ -121,7 +121,7 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
 
   it("routes low-confidence alternatives to the exception queue instead of auto-drafting", async () => {
     await withWorker(async () => {
-      const record = { ...heparin(), genericName: "Low Confidence Drug", key: "low confidence drug" };
+      const record = { ...heparin(), genericName: "Low Alt Confidence Drug", key: "low alt confidence drug" };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
         args: [{ record, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
@@ -129,6 +129,20 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
       });
       const final = await handle.result();
       expect(final.status).toBe("exception");
+    });
+  }, 60_000);
+
+  it("routes low-confidence impact assessment to exception without spending a research call", async () => {
+    await withWorker(async () => {
+      const record = { ...heparin(), genericName: "Low Impact Confidence Drug", key: "low impact confidence drug" };
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record, sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-lowimpactconf-${Date.now()}`,
+      });
+      const final = await handle.result();
+      expect(final.status).toBe("exception");
+      expect(final.alternatives).toEqual([]);
     });
   }, 60_000);
 

@@ -29,5 +29,9 @@ export const AlternativesResearch = z.object({
 });
 export type AlternativesResearch = z.infer<typeof AlternativesResearch>;
 
-/** Below this, alternatives research is treated as "no equivalent" and routed to exception. */
-export const ALTERNATIVES_CONFIDENCE_THRESHOLD = 0.5;
+/**
+ * Below this, either agent's output is treated as too uncertain to act on and the case
+ * routes to the exception queue instead — applies to both `ImpactAssessment.confidence`
+ * (a shaky severity call) and `AlternativesResearch.confidence` (a shaky substitution).
+ */
+export const CONFIDENCE_THRESHOLD = 0.5;

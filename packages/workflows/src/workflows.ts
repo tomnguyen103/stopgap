@@ -1,5 +1,9 @@
 import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
-import { ALTERNATIVES_CONFIDENCE_THRESHOLD } from "@stopgap/agents/schemas";
+// Deliberately imported from the isolated `/schemas` subpath, not the package root: the
+// root barrel also exports the agent functions (network calls, provider SDKs), which must
+// never enter Temporal's deterministic workflow sandbox. This subpath is pure Zod + a
+// constant, safe to bundle here.
+import { CONFIDENCE_THRESHOLD } from "@stopgap/agents/schemas";
 import type * as activities from "./activities.js";
 import {
   MAX_MONITORING_MS,
@@ -53,6 +57,15 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   const impact = await acts.assessImpact(input);
   state.severity = impact.severity;
 
+  // A shaky severity call is as dangerous as a shaky substitution — don't spend a research
+  // call building on an assessment the agent itself isn't confident in (§8 under-escalation
+  // target ≈ 0).
+  if (impact.confidence < CONFIDENCE_THRESHOLD) {
+    state.status = "exception";
+    await acts.persistStatus(key, "exception", { reason: "low-confidence-impact", confidence: impact.confidence });
+    return state;
+  }
+
   // Research alternatives.
   state.status = "researching";
   await acts.persistStatus(key, "researching", { severity: impact.severity });
@@ -62,7 +75,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
 
   // No therapeutic equivalent, or the agent isn't confident enough to auto-draft → exception
   // queue (always human; PROJECT_PLAN §2 exception matrix, §8 under-escalation target ≈ 0).
-  if (research.alternatives.length === 0 || research.confidence < ALTERNATIVES_CONFIDENCE_THRESHOLD) {
+  if (research.alternatives.length === 0 || research.confidence < CONFIDENCE_THRESHOLD) {
     state.status = "exception";
     await acts.persistStatus(key, "exception", {
       reason: research.alternatives.length === 0 ? "no-therapeutic-equivalent" : "low-confidence-alternatives",

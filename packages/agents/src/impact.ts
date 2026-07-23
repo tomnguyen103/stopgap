@@ -1,5 +1,6 @@
 import type { ShortageRecord } from "@stopgap/core";
 import { generateStructured } from "@stopgap/providers";
+import { formatRecordPrompt } from "./prompt.js";
 import { ImpactAssessment } from "./schemas.js";
 
 /**
@@ -15,12 +16,7 @@ export async function assessImpact(record: ShortageRecord): Promise<ImpactAssess
       "platform. Given a drug shortage record, rate its severity and explain why. Be " +
       "conservative: when the record is ambiguous or you lack enough information, report " +
       "low confidence rather than guessing.",
-    prompt: [
-      `Generic name: ${record.genericName}`,
-      `Status: ${record.status}`,
-      `Affected NDCs: ${record.ndcs.length > 0 ? record.ndcs.join(", ") : "none reported"}`,
-      `Feed note: ${record.note ?? "none"}`,
-    ].join("\n"),
+    prompt: formatRecordPrompt(record),
   });
   return object;
 }

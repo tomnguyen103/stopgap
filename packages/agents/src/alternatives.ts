@@ -1,5 +1,6 @@
 import type { ShortageRecord } from "@stopgap/core";
 import { generateStructured } from "@stopgap/providers";
+import { formatRecordPrompt } from "./prompt.js";
 import { AlternativesResearch } from "./schemas.js";
 
 /**
@@ -20,13 +21,9 @@ export async function researchAlternatives(record: ShortageRecord): Promise<Alte
       "a brief substitution protocol for pharmacist review. Report low confidence when you are " +
       "unsure of a specific alternative, but still name your best clinical guess rather than " +
       "defaulting to an empty list.",
-    prompt: [
-      `Generic name: ${record.genericName}`,
-      `Status: ${record.status}`,
-      `Affected NDCs: ${record.ndcs.length > 0 ? record.ndcs.join(", ") : "none reported"}`,
+    prompt: formatRecordPrompt(record, [
       `RxCUIs: ${record.rxcuis.length > 0 ? record.rxcuis.join(", ") : "none reported"}`,
-      `Feed note: ${record.note ?? "none"}`,
-    ].join("\n"),
+    ]),
   });
   return object;
 }
