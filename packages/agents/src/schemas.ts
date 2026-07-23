@@ -8,6 +8,17 @@ import { Severity } from "@stopgap/core";
  * instead of a shaky auto-drafted protocol (PROJECT_PLAN §8: under-escalation target ≈ 0).
  */
 
+/**
+ * Confidence, normalized to 0-1. Small local models sometimes ignore the "0 to 1" prompt
+ * instruction and report a 0-100 percentage instead (observed live: `confidence: 90`) — at
+ * temperature 0 that's a deterministic, permanently-repeating schema failure, not a
+ * transient one, so normalize rather than reject. Values already in [0,1] pass through.
+ */
+const confidenceScore = z.preprocess(
+  (v) => (typeof v === "number" && v > 1 ? v / 100 : v),
+  z.number().min(0).max(1),
+);
+
 export const ImpactAssessment = z.object({
   severity: Severity,
   /** Estimated formulary items affected by this shortage. */
@@ -15,18 +26,25 @@ export const ImpactAssessment = z.object({
   /** One or two sentences explaining the severity call. */
   rationale: z.string().min(1),
   /** Model's self-reported confidence in this assessment, 0 (guessing) to 1 (certain). */
-  confidence: z.number().min(0).max(1),
+  confidence: confidenceScore,
 });
 export type ImpactAssessment = z.infer<typeof ImpactAssessment>;
 
-export const AlternativesResearch = z.object({
-  /** Candidate substitute drugs/protocols. Empty when no therapeutic equivalent exists. */
-  alternatives: z.array(z.string()),
-  /** Draft substitution protocol text for pharmacist review. Empty if no alternatives. */
-  draft: z.string(),
-  /** Model's self-reported confidence in the alternatives/draft, 0 to 1. */
-  confidence: z.number().min(0).max(1),
-});
+export const AlternativesResearch = z
+  .object({
+    /** Candidate substitute drugs/protocols. Empty when no therapeutic equivalent exists. */
+    alternatives: z.array(z.string()),
+    /** Draft substitution protocol text for pharmacist review. Empty if no alternatives. */
+    draft: z.string(),
+    /** Model's self-reported confidence in the alternatives/draft, 0 to 1. */
+    confidence: confidenceScore,
+  })
+  // A non-empty draft with zero alternatives is a contradictory protocol (e.g. the model
+  // writes advisory text like "consult the physician" instead of a real substitution). Clear
+  // it rather than reject: this runs at temperature 0, so a rejecting `.refine()` here would
+  // fail the same way on every retry — a permanent failure for that input, not a transient
+  // one. Normalizing keeps the invariant (empty alternatives => empty draft) without that.
+  .transform((v) => (v.alternatives.length === 0 && v.draft.trim().length > 0 ? { ...v, draft: "" } : v));
 export type AlternativesResearch = z.infer<typeof AlternativesResearch>;
 
 /**

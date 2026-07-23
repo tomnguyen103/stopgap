@@ -62,7 +62,11 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // target ≈ 0).
   if (impact.confidence < CONFIDENCE_THRESHOLD) {
     state.status = "exception";
-    await acts.persistStatus(key, "exception", { reason: "low-confidence-impact", confidence: impact.confidence });
+    await acts.persistStatus(key, "exception", {
+      reason: "low-confidence-impact",
+      confidence: impact.confidence,
+      severity: impact.severity,
+    });
     return state;
   }
 
@@ -73,12 +77,20 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   state.alternatives = research.alternatives;
   state.draft = research.draft;
 
-  // No therapeutic equivalent, or the agent isn't confident enough to auto-draft → exception
-  // queue (always human; PROJECT_PLAN §2 exception matrix, §8 under-escalation target ≈ 0).
-  if (research.alternatives.length === 0 || research.confidence < CONFIDENCE_THRESHOLD) {
+  // No therapeutic equivalent, no draft text, or the agent isn't confident enough to
+  // auto-draft → exception queue (always human; PROJECT_PLAN §2 exception matrix, §8
+  // under-escalation target ≈ 0). A missing draft with alternatives present would otherwise
+  // reach the HITL review with nothing for the pharmacist to approve/edit/reject.
+  const missingDraft = research.draft.trim().length === 0;
+  if (research.alternatives.length === 0 || missingDraft || research.confidence < CONFIDENCE_THRESHOLD) {
     state.status = "exception";
     await acts.persistStatus(key, "exception", {
-      reason: research.alternatives.length === 0 ? "no-therapeutic-equivalent" : "low-confidence-alternatives",
+      reason:
+        research.alternatives.length === 0
+          ? "no-therapeutic-equivalent"
+          : missingDraft
+            ? "missing-protocol-draft"
+            : "low-confidence-alternatives",
       confidence: research.confidence,
     });
     return state;

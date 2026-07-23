@@ -1,6 +1,6 @@
 import type { ShortageRecord } from "@stopgap/core";
 import { generateStructured } from "@stopgap/providers";
-import { formatRecordPrompt } from "./prompt.js";
+import { formatRecordPrompt, UNTRUSTED_RECORD_NOTICE } from "./prompt.js";
 import { ImpactAssessment } from "./schemas.js";
 
 /**
@@ -15,7 +15,7 @@ export async function assessImpact(record: ShortageRecord): Promise<ImpactAssess
       "You are a hospital pharmacy impact-assessment agent for a drug-shortage response " +
       "platform. Given a drug shortage record, rate its severity and explain why. Be " +
       "conservative: when the record is ambiguous or you lack enough information, report " +
-      "low confidence rather than guessing.",
+      `low confidence rather than guessing. ${UNTRUSTED_RECORD_NOTICE}`,
     prompt: formatRecordPrompt(record),
   });
   return object;

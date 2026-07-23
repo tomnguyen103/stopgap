@@ -1,6 +1,6 @@
 import type { ShortageRecord } from "@stopgap/core";
 import { generateStructured } from "@stopgap/providers";
-import { formatRecordPrompt } from "./prompt.js";
+import { formatRecordPrompt, UNTRUSTED_RECORD_NOTICE } from "./prompt.js";
 import { AlternativesResearch } from "./schemas.js";
 
 /**
@@ -20,7 +20,7 @@ export async function researchAlternatives(record: ShortageRecord): Promise<Alte
       "(e.g. plasma-derived products like immune globulin, or compounded preparations). Draft " +
       "a brief substitution protocol for pharmacist review. Report low confidence when you are " +
       "unsure of a specific alternative, but still name your best clinical guess rather than " +
-      "defaulting to an empty list.",
+      `defaulting to an empty list. ${UNTRUSTED_RECORD_NOTICE}`,
     prompt: formatRecordPrompt(record, [
       `RxCUIs: ${record.rxcuis.length > 0 ? record.rxcuis.join(", ") : "none reported"}`,
     ]),

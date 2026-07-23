@@ -9,17 +9,28 @@ export interface GoldenCase {
   id: string;
   record: ShortageRecord;
   expected: {
-    /** Severity should land in this set (agents may reasonably disagree within-bucket). */
+    /** Severity should land at or above this rung (agents may reasonably disagree within-bucket). */
     severityAtLeast: "none" | "low" | "moderate" | "high" | "critical";
+    /**
+     * Severity should land at or below this rung. Optional — most cases only need a floor;
+     * set this when over-escalation itself is the failure mode being tested (e.g. a resolved
+     * shortage that should NOT come back as "critical").
+     */
+    severityAtMost?: "none" | "low" | "moderate" | "high" | "critical";
     /** True if a real therapeutic alternative is expected to exist. */
     hasAlternative: boolean;
   };
 }
 
 const SEVERITY_RANK = ["none", "low", "moderate", "high", "critical"] as const;
+type SeverityRank = (typeof SEVERITY_RANK)[number];
 
 export function severityMeetsFloor(actual: string, floor: string): boolean {
-  return SEVERITY_RANK.indexOf(actual as (typeof SEVERITY_RANK)[number]) >= SEVERITY_RANK.indexOf(floor as (typeof SEVERITY_RANK)[number]);
+  return SEVERITY_RANK.indexOf(actual as SeverityRank) >= SEVERITY_RANK.indexOf(floor as SeverityRank);
+}
+
+export function severityWithinCeiling(actual: string, ceiling: string): boolean {
+  return SEVERITY_RANK.indexOf(actual as SeverityRank) <= SEVERITY_RANK.indexOf(ceiling as SeverityRank);
 }
 
 export const GOLDEN_DATASET: GoldenCase[] = [
@@ -77,6 +88,10 @@ export const GOLDEN_DATASET: GoldenCase[] = [
       rxcuis: ["2180"],
       note: "Manufacturer resumed full supply.",
     },
-    expected: { severityAtLeast: "none", hasAlternative: true },
+    // A resolved shortage never actually reaches these agents in production
+    // (pollAndOpenCases only opens cases for status === "current") — this case exists purely
+    // to check the severity ceiling doesn't over-escalate. A sensible agent reasonably
+    // returns no alternatives for something already resolved (nothing to substitute for).
+    expected: { severityAtLeast: "none", severityAtMost: "low", hasAlternative: false },
   },
 ];
