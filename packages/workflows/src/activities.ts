@@ -8,14 +8,16 @@ import {
   workflowIdForKey,
 } from "@stopgap/db";
 import { mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
+import * as agents from "@stopgap/agents";
 import { makeClient, startCase } from "./client.js";
 import type { CaseInput, ImpactResult, ResearchResult, ReviewDecision } from "./shared.js";
 
 /**
- * Activities are the only place workflows touch the outside world (DB, feeds, LLMs). In
- * Phase 1 the judgment activities (`assessImpact`, `researchAlternatives`) are deterministic
- * mocks; Phase 2 replaces their bodies with the Vercel AI SDK agents. The DB-side effects
- * are real. Every activity is idempotent so Temporal retries are safe.
+ * Activities are the only place workflows touch the outside world (DB, feeds, LLMs). The
+ * judgment activities (`assessImpact`, `researchAlternatives`) call the Zod-validated AI SDK
+ * agents in `@stopgap/agents` (PROJECT_PLAN §8: "schema-validated outputs everywhere",
+ * temperature 0 for eval reproducibility). The DB-side effects are real. Every activity is
+ * idempotent so Temporal retries are safe.
  */
 
 /** Persist a newly detected case and open the audit chain. Idempotent (upsert). */
@@ -52,33 +54,14 @@ export async function persistStatus(
   });
 }
 
-/**
- * Mock impact assessment (Phase 2 → AI SDK agent). Deterministic severity from the number
- * of affected NDCs so tests and the offline eval gate are reproducible.
- */
+/** Impact assessment via the Zod-validated AI SDK agent (Gemini/Ollama, health-routed). */
 export async function assessImpact(input: CaseInput): Promise<ImpactResult> {
-  const n = input.record.ndcs.length;
-  const severity: Severity = n === 0 ? "low" : n >= 4 ? "critical" : n >= 2 ? "high" : "moderate";
-  return {
-    severity,
-    affectedFormularyItems: n,
-    rationale: `Deterministic Phase-1 assessment: ${n} affected NDC(s) → ${severity}.`,
-  };
+  return agents.assessImpact(input.record);
 }
 
-/**
- * Mock alternatives research (Phase 2 → AI SDK agent + RxNorm). Returns a canned substitute
- * unless the drug is flagged no-equivalent, which drives the exception path.
- */
+/** Alternatives research via the Zod-validated AI SDK agent (Gemini/Ollama, health-routed). */
 export async function researchAlternatives(input: CaseInput): Promise<ResearchResult> {
-  const name = input.record.genericName;
-  // A couple of well-known no-equivalent drugs route to the human exception queue.
-  const noEquivalent = /(immune globulin|compounded|iron sucrose)/i.test(name);
-  if (noEquivalent) return { alternatives: [], draft: "" };
-  return {
-    alternatives: [`${name} (alternate manufacturer)`, "therapeutic-class substitute (see protocol)"],
-    draft: `Substitution protocol for ${name}: prefer alternate-manufacturer supply; if unavailable, use a same-class agent with pharmacist dose verification. [Phase-1 draft]`,
-  };
+  return agents.researchAlternatives(input.record);
 }
 
 /** Mock outbound comms (Phase 4 → Resend + EHR webhook). Records the intent in the audit log. */

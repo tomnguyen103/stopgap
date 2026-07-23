@@ -1,0 +1,21 @@
+{
+  "name": "@stopgap/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stopgap/core": "workspace:*",
+    "@stopgap/providers": "workspace:*",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

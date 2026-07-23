@@ -1,4 +1,9 @@
 import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
+// Deliberately imported from the isolated `/schemas` subpath, not the package root: the
+// root barrel also exports the agent functions (network calls, provider SDKs), which must
+// never enter Temporal's deterministic workflow sandbox. This subpath is pure Zod + a
+// constant, safe to bundle here.
+import { CONFIDENCE_THRESHOLD } from "@stopgap/agents/schemas";
 import type * as activities from "./activities.js";
 import {
   MAX_MONITORING_MS,
@@ -52,6 +57,19 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   const impact = await acts.assessImpact(input);
   state.severity = impact.severity;
 
+  // A shaky severity call is as dangerous as a shaky substitution — don't spend a research
+  // call building on an assessment the agent itself isn't confident in (§8 under-escalation
+  // target ≈ 0).
+  if (impact.confidence < CONFIDENCE_THRESHOLD) {
+    state.status = "exception";
+    await acts.persistStatus(key, "exception", {
+      reason: "low-confidence-impact",
+      confidence: impact.confidence,
+      severity: impact.severity,
+    });
+    return state;
+  }
+
   // Research alternatives.
   state.status = "researching";
   await acts.persistStatus(key, "researching", { severity: impact.severity });
@@ -59,10 +77,22 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   state.alternatives = research.alternatives;
   state.draft = research.draft;
 
-  // No therapeutic equivalent → exception queue (always human; PROJECT_PLAN §2 exception matrix).
-  if (research.alternatives.length === 0) {
+  // No therapeutic equivalent, no draft text, or the agent isn't confident enough to
+  // auto-draft → exception queue (always human; PROJECT_PLAN §2 exception matrix, §8
+  // under-escalation target ≈ 0). A missing draft with alternatives present would otherwise
+  // reach the HITL review with nothing for the pharmacist to approve/edit/reject.
+  const missingDraft = research.draft.trim().length === 0;
+  if (research.alternatives.length === 0 || missingDraft || research.confidence < CONFIDENCE_THRESHOLD) {
     state.status = "exception";
-    await acts.persistStatus(key, "exception", { reason: "no-therapeutic-equivalent" });
+    await acts.persistStatus(key, "exception", {
+      reason:
+        research.alternatives.length === 0
+          ? "no-therapeutic-equivalent"
+          : missingDraft
+            ? "missing-protocol-draft"
+            : "low-confidence-alternatives",
+      confidence: research.confidence,
+    });
     return state;
   }
 
