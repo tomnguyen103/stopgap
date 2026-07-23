@@ -1,7 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
   bigserial,
+  boolean,
   index,
+  integer,
+  numeric,
   jsonb,
   pgTable,
   text,
@@ -12,7 +15,8 @@ import {
 
 /**
  * Phase 1 schema: durable case mirror, hash-chained audit log, and feed-record store for
- * dedup/provenance. Protocols, shadow ledger, and exception queue arrive in Phase 3.
+ * dedup/provenance. Phase 3 adds the versioned protocol store (organizational memory) and
+ * the shadow ledger.
  */
 
 /** One row per shortage case; mirrors the Temporal workflow's durable state to Postgres. */
@@ -85,7 +89,100 @@ export const feedRecords = pgTable(
   (t) => [uniqueIndex("feed_records_source_uq").on(t.source, t.sourceId)],
 );
 
+/**
+ * Versioned protocol store — the organizational memory (PROJECT_PLAN §3B). One row per
+ * substitution protocol, keyed by the shortage key it covers; the current text lives in
+ * `protocolVersions`, so history is never overwritten.
+ */
+export const protocols = pgTable(
+  "protocols",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Same normalized generic-name key the cases table uses, so a case finds its protocol. */
+    key: text("key").notNull(),
+    title: text("title").notNull(),
+    /** Therapeutic class, when RxNorm resolved one — promotion gates are per drug class. */
+    drugClass: text("drug_class"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("protocols_key_uq").on(t.key), index("protocols_class_idx").on(t.drugClass)],
+);
+
+/**
+ * An immutable version of a protocol. `state` moves draft -> approved -> superseded; the
+ * approved version with the highest `version` is what a new case reuses. Provenance is
+ * mandatory: `sourceCaseId` records which case produced this text and `approvedBy` who
+ * shipped it, so "why does this rule exist" is answerable from the row itself.
+ */
+export const protocolVersions = pgTable(
+  "protocol_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    protocolId: uuid("protocol_id")
+      .notNull()
+      .references(() => protocols.id),
+    /** Per-protocol version number (1, 2, 3...), assigned by the store, not a global sequence. */
+    version: integer("version").notNull(),
+    state: text("state").notNull().default("draft"),
+    body: text("body").notNull(),
+    /** Alternatives the protocol authorizes, in the order a pharmacist should consider them. */
+    alternatives: jsonb("alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** The case whose resolution produced this version — the provenance link. */
+    sourceCaseId: uuid("source_case_id").references(() => cases.id),
+    /** "agent" for an agent-drafted version, a pharmacist id once a human edits/approves. */
+    authoredBy: text("authored_by").notNull(),
+    approvedBy: text("approved_by"),
+    /** Why this version exists (exception resolution rationale, edit reason). */
+    rationale: text("rationale"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("protocol_versions_uq").on(t.protocolId, t.version),
+    index("protocol_versions_state_idx").on(t.state),
+  ],
+);
+
+/**
+ * Shadow ledger (PROJECT_PLAN §3A): one row per shadow run — what the agent proposed, what
+ * the human baseline was, and whether they agreed. Promotion gates read aggregates of this
+ * table; nothing here ever affects a live case.
+ */
+export const shadowRuns = pgTable(
+  "shadow_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Replay-corpus entry id, so a run is traceable to the exact input it scored. */
+    corpusId: text("corpus_id").notNull(),
+    key: text("key").notNull(),
+    drugClass: text("drug_class"),
+    proposedSeverity: text("proposed_severity").notNull(),
+    proposedAlternatives: jsonb("proposed_alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    baselineSeverity: text("baseline_severity").notNull(),
+    baselineAlternatives: jsonb("baseline_alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** 0-1 agreement against the human baseline (see @stopgap/shadow scoring). */
+    agreement: numeric("agreement", { precision: 4, scale: 3 }).notNull(),
+    severityAgreed: boolean("severity_agreed").notNull(),
+    latencyMs: integer("latency_ms").notNull(),
+    usdCost: numeric("usd_cost", { precision: 12, scale: 8 }).notNull(),
+    provider: text("provider").notNull(),
+    modelId: text("model_id").notNull(),
+    ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("shadow_runs_key_idx").on(t.key),
+    index("shadow_runs_class_idx").on(t.drugClass),
+    index("shadow_runs_ran_at_idx").on(t.ranAt),
+  ],
+);
+
 export type CaseRow = typeof cases.$inferSelect;
 export type NewCaseRow = typeof cases.$inferInsert;
 export type AuditRow = typeof auditLog.$inferSelect;
 export type FeedRecordRow = typeof feedRecords.$inferSelect;
+export type ProtocolRow = typeof protocols.$inferSelect;
+export type ProtocolVersionRow = typeof protocolVersions.$inferSelect;
+export type NewProtocolVersionRow = typeof protocolVersions.$inferInsert;
+export type ShadowRunRow = typeof shadowRuns.$inferSelect;
+export type NewShadowRunRow = typeof shadowRuns.$inferInsert;

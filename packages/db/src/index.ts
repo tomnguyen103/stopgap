@@ -8,4 +8,28 @@ export {
   listCases,
   workflowIdForKey,
 } from "./cases.js";
-export type { CaseRow, NewCaseRow, AuditRow, FeedRecordRow } from "./schema.js";
+export {
+  approveProtocolVersion,
+  draftProtocolVersion,
+  getApprovedProtocol,
+  listProtocolVersions,
+  type DraftProtocolInput,
+} from "./protocols.js";
+export {
+  listShadowRuns,
+  listShadowRunsForClass,
+  recordShadowRun,
+  shadowStatsByClass,
+  type ShadowClassStats,
+} from "./shadow.js";
+export type {
+  CaseRow,
+  NewCaseRow,
+  AuditRow,
+  FeedRecordRow,
+  ProtocolRow,
+  ProtocolVersionRow,
+  NewProtocolVersionRow,
+  ShadowRunRow,
+  NewShadowRunRow,
+} from "./schema.js";
