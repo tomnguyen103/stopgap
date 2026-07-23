@@ -24,6 +24,10 @@ deferred to Phase 5.
   export to a local/console OTel exporter. Provision Langfuse + keys for real tracing.
 - **openFDA API key absent (optional).** Polling works unauthenticated at a lower rate
   limit; add `OPENFDA_API_KEY` for higher throughput.
+- **`ASHP_AUTH_KEY` absent.** `pollAshp()` returns `[]` (see `ashpStubbed()`) so the ASHP
+  feed contributes nothing to `pollFeedsWorkflow`/`pollAndOpenCases` in this run — only
+  openFDA opens cases live. ASHP mappers are unit-tested against a recorded fixture.
+  Set `ASHP_AUTH_KEY` for ASHP to actually poll and merge into the dedup/auto-open path.
 
 ## Notes
 
