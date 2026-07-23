@@ -1,0 +1,48 @@
+:root {
+  --bg: #0b0e14;
+  --panel: #141a24;
+  --line: #232c3a;
+  --text: #e6edf3;
+  --muted: #8b98a9;
+  --accent: #4da3ff;
+  --crit: #ff6b6b;
+  --high: #ffa94d;
+  --mod: #ffd43b;
+  --low: #74c0fc;
+  --ok: #51cf66;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+a { color: inherit; text-decoration: none; }
+.topbar {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.brand { font-weight: 700; letter-spacing: 0.3px; }
+.tag { color: var(--muted); font-size: 12px; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+tr:hover td { background: #10151d; }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+.sev-critical { color: var(--crit); border-color: var(--crit); }
+.sev-high { color: var(--high); border-color: var(--high); }
+.sev-moderate { color: var(--mod); border-color: var(--mod); }
+.sev-low { color: var(--low); border-color: var(--low); }
+.status { color: var(--accent); }
+.empty { padding: 40px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+.kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; }
+.kv dt { color: var(--muted); }
+.back { color: var(--muted); font-size: 13px; }
+.audit { font-family: ui-monospace, monospace; font-size: 12px; }
+.audit li { margin-bottom: 4px; color: var(--muted); }
+.audit b { color: var(--text); }
