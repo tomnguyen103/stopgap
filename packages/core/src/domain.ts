@@ -23,7 +23,7 @@ export const ShortageRecord = z.object({
   /** Stable id within the source feed (e.g. openFDA record id or ASHP slug). */
   sourceId: z.string().min(1),
   /** Cross-feed dedup key: lowercased, trimmed generic drug name. */
-  key: z.string().min(1),
+  key: z.string().trim().toLowerCase().min(1),
   genericName: z.string().min(1),
   status: ShortageStatus,
   /** NDC package codes affected, when the feed provides them. */

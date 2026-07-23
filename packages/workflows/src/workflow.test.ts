@@ -92,7 +92,9 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
 
       // Six weeks pass with no resolution (fast-forwarded), then the feed resolves it.
       await env.sleep("42 days");
-      expect((await handle.query(stateQuery)).status).toBe("monitoring");
+      const midMonitoring = await handle.query(stateQuery);
+      expect(midMonitoring.status).toBe("monitoring");
+      expect(midMonitoring.monitoringWeeks).toBe(6);
       await handle.signal(resolvedSignal);
 
       const final = await handle.result();

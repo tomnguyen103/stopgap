@@ -29,6 +29,21 @@ deferred to Phase 5.
   openFDA opens cases live. ASHP mappers are unit-tested against a recorded fixture.
   Set `ASHP_AUTH_KEY` for ASHP to actually poll and merge into the dedup/auto-open path.
 
+## Deferred CodeRabbit findings (PR #1)
+
+- **Audit chain is tamper-evident, not tamper-proof (CWE-345).** `packages/db/src/audit.ts`'s
+  SHA-256 hash chain detects accidental corruption/bugs (verified: manually deleting a row
+  makes `verifyAuditChain` correctly report the break) but anyone with DB write access can
+  recompute the whole chain after editing rows — there's no secret key or external anchor.
+  Phase 1's threat model is internal correctness (concurrent writers, retries), not a
+  compromised DB. Before this is a real compliance control, add either a keyed HMAC (secret
+  outside the DB) or anchor the chain head to an external append-only store.
+- **Build gate doesn't build library packages.** `pnpm gate`'s build step only produces
+  output for `apps/console` (the only package with a `build` script) — `packages/*` are
+  consumed as workspace TS source directly (via `tsx`/Temporal's bundler/Next's transpiler),
+  not compiled artifacts, so there's nothing for them to build in this run. Revisit if any
+  package needs standalone publishing or a compiled entrypoint.
+
 ## Notes
 
 - `.env.example` documents every variable. Copy to `.env` and fill before deploy.

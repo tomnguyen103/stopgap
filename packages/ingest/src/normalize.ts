@@ -26,8 +26,16 @@ export function parseUsDate(value: string | undefined): string | undefined {
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
   if (!m) return undefined;
   const [, mm, dd, yyyy] = m;
-  const date = new Date(Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd)));
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  const month = Number(mm);
+  const day = Number(dd);
+  const year = Number(yyyy);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  // Date.UTC normalizes rollover values (e.g. 02/31 -> March 3); reject anything that
+  // didn't round-trip instead of silently fabricating a different calendar date.
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return undefined;
+  }
+  return date.toISOString();
 }
 
 /** Stable content hash of a normalized payload, for skip-if-unchanged dedup. */

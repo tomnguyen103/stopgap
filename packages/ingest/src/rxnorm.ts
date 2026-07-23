@@ -16,7 +16,7 @@ export async function getRxcuiByName(
   const env = getEnv();
   const fetchImpl = opts.fetchImpl ?? fetch;
   const url = `${env.RXNORM_BASE_URL}/REST/rxcui.json?name=${encodeURIComponent(name)}`;
-  const res = await fetchImpl(url);
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`RxNorm rxcui lookup failed: ${res.status}`);
   const body = (await res.json()) as { idGroup?: { rxnormId?: string[] } };
   return body.idGroup?.rxnormId ?? [];
@@ -31,7 +31,7 @@ export async function getTherapeuticClasses(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const relaSource = opts.relaSource ?? "ATC";
   const url = `${env.RXNORM_BASE_URL}/REST/rxclass/class/byRxcui.json?rxcui=${encodeURIComponent(rxcui)}&relaSource=${relaSource}`;
-  const res = await fetchImpl(url);
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`RxNorm class lookup failed: ${res.status}`);
   const body = (await res.json()) as {
     rxclassDrugInfoList?: { rxclassDrugInfo?: Array<{ rxclassMinConceptItem?: TherapeuticClass }> };

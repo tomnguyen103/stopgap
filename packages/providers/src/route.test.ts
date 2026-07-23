@@ -4,8 +4,16 @@ import { geminiInfo, ollamaInfo } from "./registry.js";
 import { routeModel } from "./route.js";
 
 describe("provider info", () => {
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
+
   beforeEach(() => {
     delete process.env.GEMINI_API_KEY;
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    if (originalGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalGeminiKey;
     resetEnvCache();
   });
 
@@ -20,10 +28,12 @@ describe("provider info", () => {
 
 describe("routeModel failover", () => {
   const realFetch = globalThis.fetch;
+  const originalGeminiKey = process.env.GEMINI_API_KEY;
 
   afterEach(() => {
     globalThis.fetch = realFetch;
-    delete process.env.GEMINI_API_KEY;
+    if (originalGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = originalGeminiKey;
     resetEnvCache();
   });
 

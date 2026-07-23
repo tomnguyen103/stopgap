@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { auditLog } from "./schema.js";
 
@@ -33,38 +33,36 @@ function hashEntry(prevHash: string, e: Required<Omit<AuditEntry, "caseId">> & {
  * Append a hash-chained audit entry. Links to the previous row's hash so any later
  * tampering is detectable (see `verifyAuditChain`).
  *
+ * The whole read-then-insert sequence runs inside a transaction serialized by a Postgres
+ * advisory lock: `audit_log` is a single global chain, so with many case workflows appending
+ * concurrently (the whole point of this system), two unlocked callers could read the same
+ * "last hash" and both insert chained to it, making `verifyAuditChain` report a break that
+ * isn't tampering. The lock makes every append see a consistent tail.
+ *
  * Idempotent on `(caseId, action)`: the case state machine fires each action at most once,
  * so a Temporal activity retry that lands here after its insert already committed (e.g. the
- * worker crashed before acking) finds the unique-index conflict and no-ops instead of
- * double-appending and desyncing the hash chain.
+ * worker crashed before acking) finds the existing row and no-ops instead of double-appending.
  */
 export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: string }> {
-  if (entry.caseId) {
-    const [existing] = await db
-      .select({ hash: auditLog.hash })
-      .from(auditLog)
-      .where(and(eq(auditLog.caseId, entry.caseId), eq(auditLog.action, entry.action)))
-      .limit(1);
-    if (existing) return { hash: existing.hash };
-  }
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('audit_log_chain'))`);
 
-  const [last] = await db.select({ hash: auditLog.hash }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
-  const prevHash = last?.hash ?? GENESIS_HASH;
-  const detail = entry.detail ?? {};
-  const hash = hashEntry(prevHash, { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId });
-  const [inserted] = await db
-    .insert(auditLog)
-    .values({ caseId: entry.caseId, actor: entry.actor, action: entry.action, detail, prevHash, hash })
-    .onConflictDoNothing({ target: [auditLog.caseId, auditLog.action] })
-    .returning({ hash: auditLog.hash });
-  // Lost the race to a concurrent retry between the pre-check and this insert.
-  if (inserted) return { hash: inserted.hash };
-  const [raced] = await db
-    .select({ hash: auditLog.hash })
-    .from(auditLog)
-    .where(and(eq(auditLog.caseId, entry.caseId!), eq(auditLog.action, entry.action)))
-    .limit(1);
-  return { hash: raced!.hash };
+    if (entry.caseId) {
+      const [existing] = await tx
+        .select({ hash: auditLog.hash })
+        .from(auditLog)
+        .where(and(eq(auditLog.caseId, entry.caseId), eq(auditLog.action, entry.action)))
+        .limit(1);
+      if (existing) return { hash: existing.hash };
+    }
+
+    const [last] = await tx.select({ hash: auditLog.hash }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
+    const prevHash = last?.hash ?? GENESIS_HASH;
+    const detail = entry.detail ?? {};
+    const hash = hashEntry(prevHash, { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId });
+    await tx.insert(auditLog).values({ caseId: entry.caseId, actor: entry.actor, action: entry.action, detail, prevHash, hash });
+    return { hash };
+  });
 }
 
 /** Recompute the chain from genesis and report the first broken link, if any. */

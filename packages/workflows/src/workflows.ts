@@ -1,8 +1,8 @@
 import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
 import type * as activities from "./activities.js";
 import {
-  MAX_MONITORING,
-  MONITOR_POLL,
+  MAX_MONITORING_MS,
+  MONITOR_POLL_MS,
   type CaseInput,
   type CaseState,
   type ReviewDecision,
@@ -91,10 +91,20 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   await acts.persistStatus(key, "comms_sent");
 
   // Monitor until the feed resolves the shortage — the long-horizon leg (weeks–months).
-  // Polls weekly; auto-escalates to exception if unresolved past MAX_MONITORING.
+  // Ticks weekly (durable across worker restarts/deploys) so monitoringWeeks reflects real
+  // elapsed time; auto-escalates to exception if unresolved past MAX_MONITORING_MS total.
   state.status = "monitoring";
   await acts.persistStatus(key, "monitoring");
-  const deadlineHit = !(await condition(() => state.resolved, MAX_MONITORING));
+  const monitorStart = Date.now();
+  while (!state.resolved) {
+    const remaining = MAX_MONITORING_MS - (Date.now() - monitorStart);
+    if (remaining <= 0) break;
+    const resolvedInTime = await condition(() => state.resolved, Math.min(MONITOR_POLL_MS, remaining));
+    if (resolvedInTime) break;
+    state.monitoringWeeks += 1;
+    await acts.persistStatus(key, "monitoring", { monitoringWeeks: state.monitoringWeeks });
+  }
+  const deadlineHit = !state.resolved;
   if (deadlineHit) {
     state.status = "exception";
     await acts.persistStatus(key, "exception", { reason: "monitoring-timeout" });
@@ -108,9 +118,6 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   await acts.persistStatus(key, "closed");
   return state;
 }
-
-/** Exported for the worker; keeps the poll cadence discoverable in one place. */
-export const MONITORING = { MAX_MONITORING, MONITOR_POLL };
 
 /**
  * The feed-poll workflow (PROJECT_PLAN §4: "poll → new shortage auto-opens a case"). One

@@ -20,8 +20,10 @@ async function main() {
     process.exit(1);
   }
   const { client, connection } = await makeClient();
-  const workflowId = await startCase(client, record);
-  console.log(`[start-case] opened case ${workflowId} for "${record.genericName}" (${record.key})`);
+  const { workflowId, started } = await startCase(client, record);
+  console.log(
+    `[start-case] ${started ? "opened" : "already open"}: case ${workflowId} for "${record.genericName}" (${record.key})`,
+  );
   await connection.close();
 }
 

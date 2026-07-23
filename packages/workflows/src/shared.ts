@@ -43,5 +43,7 @@ export interface CaseState {
 
 /** Max time a case may sit unresolved before it auto-escalates to the exception queue. */
 export const MAX_MONITORING = "90 days";
+export const MAX_MONITORING_MS = 90 * 24 * 60 * 60 * 1000;
 /** Cadence at which a monitoring case re-checks the feed for resolution. */
 export const MONITOR_POLL = "7 days";
+export const MONITOR_POLL_MS = 7 * 24 * 60 * 60 * 1000;

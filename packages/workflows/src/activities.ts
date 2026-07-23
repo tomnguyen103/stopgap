@@ -8,7 +8,6 @@ import {
   workflowIdForKey,
 } from "@stopgap/db";
 import { mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
-import { WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
 import { makeClient, startCase } from "./client.js";
 import type { CaseInput, ImpactResult, ResearchResult, ReviewDecision } from "./shared.js";
 
@@ -123,12 +122,8 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
   try {
     let opened = 0;
     for (const record of current) {
-      try {
-        await startCase(client, record, record.sources);
-        opened += 1;
-      } catch (err) {
-        if (!(err instanceof WorkflowExecutionAlreadyStartedError)) throw err;
-      }
+      const { started } = await startCase(client, record, record.sources);
+      if (started) opened += 1;
     }
     return { polled: current.length, opened };
   } finally {

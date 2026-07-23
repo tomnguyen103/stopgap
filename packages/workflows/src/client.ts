@@ -1,7 +1,7 @@
 import { getEnv } from "@stopgap/core/env";
 import type { ShortageRecord } from "@stopgap/core";
 import { workflowIdForKey } from "@stopgap/db";
-import { Client, Connection } from "@temporalio/client";
+import { Client, Connection, WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
 import type { CaseState, ReviewDecision } from "./shared.js";
 import { resolvedSignal, reviewSignal, shortageCaseWorkflow, stateQuery } from "./workflows.js";
 
@@ -22,15 +22,20 @@ export async function startCase(
   client: Client,
   record: ShortageRecord,
   sources: ShortageRecord["source"][] = [record.source],
-): Promise<string> {
+): Promise<{ workflowId: string; started: boolean }> {
   const workflowId = workflowIdForKey(record.key);
-  await client.workflow.start(shortageCaseWorkflow, {
-    args: [{ record, sources }],
-    taskQueue: getEnv().TEMPORAL_TASK_QUEUE,
-    workflowId,
-    workflowIdReusePolicy: "REJECT_DUPLICATE",
-  });
-  return workflowId;
+  try {
+    await client.workflow.start(shortageCaseWorkflow, {
+      args: [{ record, sources }],
+      taskQueue: getEnv().TEMPORAL_TASK_QUEUE,
+      workflowId,
+      workflowIdReusePolicy: "REJECT_DUPLICATE",
+    });
+    return { workflowId, started: true };
+  } catch (err) {
+    if (err instanceof WorkflowExecutionAlreadyStartedError) return { workflowId, started: false };
+    throw err;
+  }
 }
 
 export async function submitReview(client: Client, key: string, decision: ReviewDecision): Promise<void> {

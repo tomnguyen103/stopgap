@@ -30,6 +30,11 @@ export function mapAshpShortage(key: string, s: AshpShortage): ShortageRecord {
   const products = [...(s.affectedProduct ?? []), ...(s.availableProduct ?? [])];
   const ndcs = products.map((p) => p.ndc).filter((x): x is string => Boolean(x));
   const rxcuis = [...new Set(products.map((p) => p.rxcui).filter((x): x is string => Boolean(x)))];
+  // A malformed/out-of-range epoch would make toISOString() throw and abort the whole poll;
+  // fall back to undefined instead of failing every record over one bad timestamp.
+  const updatedAtDate = typeof s.updatedAt === "number" ? new Date(s.updatedAt) : undefined;
+  const updatedAt =
+    updatedAtDate && !Number.isNaN(updatedAtDate.getTime()) ? updatedAtDate.toISOString() : undefined;
   return ShortageRecord.parse({
     source: "ashp",
     sourceId: key,
@@ -39,7 +44,7 @@ export function mapAshpShortage(key: string, s: AshpShortage): ShortageRecord {
     ndcs,
     rxcuis,
     note: s.lastRevisedDate ? `ASHP revised ${s.lastRevisedDate}` : undefined,
-    updatedAt: s.updatedAt ? new Date(s.updatedAt).toISOString() : undefined,
+    updatedAt,
     raw: s,
   });
 }
@@ -69,7 +74,7 @@ export async function pollAshp(opts: { fetchImpl?: Fetcher } = {}): Promise<Shor
   if (!env.ASHP_AUTH_KEY) return [];
   const fetchImpl = opts.fetchImpl ?? fetch;
   const url = `${env.ASHP_BASE_URL}/drugShortages.json?auth=${encodeURIComponent(env.ASHP_AUTH_KEY)}`;
-  const res = await fetchImpl(url);
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`ASHP poll failed: ${res.status} ${res.statusText}`);
   const body = (await res.json()) as AshpFeed | null;
   return body ? mapAshpFeed(body) : [];

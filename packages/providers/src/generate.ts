@@ -54,19 +54,30 @@ export async function generateStructured<T extends z.ZodTypeAny>(
       schema: opts.schema,
       prompt: opts.prompt,
       system: opts.system,
-      temperature: opts.temperature ?? 0,
+      // Gemini Flash-Lite deprecates temperature/top_p/top_k (ignored today, will error on
+      // future models) — only pass it to providers that still honor it.
+      ...(routed.info.name === "gemini" ? {} : { temperature: opts.temperature ?? 0 }),
       maxRetries: opts.maxRetries ?? 2,
     });
     inputTokens = result.usage?.inputTokens ?? 0;
     outputTokens = result.usage?.outputTokens ?? 0;
     ok = true;
     const meta = buildMeta(routed, opts.operation, start, inputTokens, outputTokens, true);
-    sink(meta);
+    safeSink(meta);
     return { object: result.object, meta };
   } catch (err) {
     const meta = buildMeta(routed, opts.operation, start, inputTokens, outputTokens, ok);
-    sink(meta);
+    safeSink(meta);
     throw err;
+  }
+}
+
+/** A telemetry-sink failure must never fail case processing (observability is best-effort). */
+function safeSink(meta: LlmCallRecord): void {
+  try {
+    void Promise.resolve(sink(meta)).catch((err) => console.error("[providers] telemetry sink failed:", err));
+  } catch (err) {
+    console.error("[providers] telemetry sink failed:", err);
   }
 }
 
