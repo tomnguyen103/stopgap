@@ -5,7 +5,13 @@ import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type * as activities from "./activities.js";
 import type { CaseInput } from "./shared.js";
-import { resolvedSignal, reviewSignal, shortageCaseWorkflow, stateQuery } from "./workflows.js";
+import {
+  pollFeedsWorkflow,
+  resolvedSignal,
+  reviewSignal,
+  shortageCaseWorkflow,
+  stateQuery,
+} from "./workflows.js";
 
 /**
  * Time-skipped durability test (PROJECT_PLAN §3C): proves a case blocks for weeks on a
@@ -42,6 +48,7 @@ const mockActivities: typeof activities = {
       : { alternatives: ["alt-a", "alt-b"], draft: "draft protocol" },
   sendComms: async () => {},
   recordDecision: async () => {},
+  pollAndOpenCases: async () => ({ polled: 0, opened: 0 }),
 };
 
 let env: TestWorkflowEnvironment;
@@ -119,6 +126,19 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
       // Let 91 days elapse with no resolution signal → monitoring timeout.
       const final = await handle.result();
       expect(final.status).toBe("exception");
+    });
+  }, 60_000);
+});
+
+describe("pollFeedsWorkflow (time-skipped)", () => {
+  it("delegates to the pollAndOpenCases activity and returns its result", async () => {
+    await withWorker(async () => {
+      const handle = await env.client.workflow.start(pollFeedsWorkflow, {
+        args: [],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-poll-${Date.now()}`,
+      });
+      expect(await handle.result()).toEqual({ polled: 0, opened: 0 });
     });
   }, 60_000);
 });

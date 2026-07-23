@@ -111,3 +111,12 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
 
 /** Exported for the worker; keeps the poll cadence discoverable in one place. */
 export const MONITORING = { MAX_MONITORING, MONITOR_POLL };
+
+/**
+ * The feed-poll workflow (PROJECT_PLAN §4: "poll → new shortage auto-opens a case"). One
+ * run = one poll of openFDA + ASHP; a Temporal Schedule (`scripts/start-schedule.ts`) fires
+ * it on a cadence so new shortages open cases without a human running `start-case` by hand.
+ */
+export async function pollFeedsWorkflow(): Promise<{ polled: number; opened: number }> {
+  return acts.pollAndOpenCases();
+}

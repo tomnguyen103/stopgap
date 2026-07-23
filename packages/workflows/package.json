@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "worker": "tsx src/worker.ts",
-    "start-case": "tsx src/scripts/start-case.ts"
+    "start-case": "tsx src/scripts/start-case.ts",
+    "start-schedule": "tsx src/scripts/start-schedule.ts"
   },
   "dependencies": {
     "@stopgap/core": "workspace:*",

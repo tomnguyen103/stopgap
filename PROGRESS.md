@@ -29,9 +29,13 @@ case, console renders it, time-skipped Temporal test proves a multi-week case re
 - [x] `@stopgap/db` — Drizzle schema (cases, audit, feed_records) + migrations applied
 - [x] `@stopgap/providers` — Gemini+Ollama registry + health-check failover + telemetry sink
 - [x] `@stopgap/ingest` — real openFDA/RxNorm clients + fixtures; ASHP client (stubbed w/o key); cross-feed dedupe
-- [x] `@stopgap/workflows` — case workflow + mocked activities + time-skip test (3 pass)
+- [x] `@stopgap/workflows` — case workflow + mocked activities + time-skip test (4 pass)
 - [x] `apps/console` — Next.js 15: case list + hash-chained audit detail page
+- [x] `pollFeedsWorkflow` + Temporal Schedule (`start-schedule`, every 15m) — closes the
+  "poll → auto-opens case" architecture gap (§4); idempotent via `REJECT_DUPLICATE`
 - [x] End-to-end (backend): live openFDA → durable case → Postgres `awaiting_review`, severity `critical`, audit chain intact
+- [x] End-to-end (auto-poll): manual `pollFeedsWorkflow` run against live openFDA+ASHP opened
+  57 new cases with zero duplicates (pre-existing heparin case correctly skipped)
 - [x] End-to-end (UI): heparin case visible in console (list row + detail page), verified in browser against local docker stack
 
 ## Phase 2 — Intelligence (weeks 2–4)

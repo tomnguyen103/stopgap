@@ -7,6 +7,9 @@ import {
   upsertCaseForRecord,
   workflowIdForKey,
 } from "@stopgap/db";
+import { mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
+import { WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
+import { makeClient, startCase } from "./client.js";
 import type { CaseInput, ImpactResult, ResearchResult, ReviewDecision } from "./shared.js";
 
 /**
@@ -103,4 +106,32 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
     action: `review.${decision.kind}`,
     detail: { ...decision },
   });
+}
+
+/**
+ * Poll openFDA + ASHP, merge duplicates across feeds, and open a durable case for every
+ * current shortage not already tracked (PROJECT_PLAN §4: "poll → new shortage auto-opens a
+ * case"). Idempotent: `startCase`'s `REJECT_DUPLICATE` policy makes an already-open case a
+ * no-op here. Runs on a Temporal Schedule (see `scripts/start-schedule.ts`), so this activity
+ * itself opens a client connection per invocation rather than holding one across the worker.
+ */
+export async function pollAndOpenCases(): Promise<{ polled: number; opened: number }> {
+  const [openFda, ashp] = await Promise.all([pollOpenFda(), pollAshp()]);
+  const current = mergeRecords([...openFda, ...ashp]).filter((r) => r.status === "current");
+
+  const { client, connection } = await makeClient();
+  try {
+    let opened = 0;
+    for (const record of current) {
+      try {
+        await startCase(client, record, record.sources);
+        opened += 1;
+      } catch (err) {
+        if (!(err instanceof WorkflowExecutionAlreadyStartedError)) throw err;
+      }
+    }
+    return { polled: current.length, opened };
+  } finally {
+    await connection.close();
+  }
 }

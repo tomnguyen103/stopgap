@@ -18,10 +18,14 @@ export async function makeClient(): Promise<{ client: Client; connection: Connec
  * derived from the dedup key, so re-detecting the same shortage is idempotent — Temporal's
  * `WorkflowIdReusePolicy` rejects a duplicate start and we treat that as "already open".
  */
-export async function startCase(client: Client, record: ShortageRecord): Promise<string> {
+export async function startCase(
+  client: Client,
+  record: ShortageRecord,
+  sources: ShortageRecord["source"][] = [record.source],
+): Promise<string> {
   const workflowId = workflowIdForKey(record.key);
   await client.workflow.start(shortageCaseWorkflow, {
-    args: [{ record, sources: [record.source] }],
+    args: [{ record, sources }],
     taskQueue: getEnv().TEMPORAL_TASK_QUEUE,
     workflowId,
     workflowIdReusePolicy: "REJECT_DUPLICATE",

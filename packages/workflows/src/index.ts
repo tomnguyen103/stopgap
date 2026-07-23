@@ -7,6 +7,7 @@ export {
 } from "./client.js";
 export {
   shortageCaseWorkflow,
+  pollFeedsWorkflow,
   reviewSignal,
   resolvedSignal,
   stateQuery,
