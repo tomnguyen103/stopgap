@@ -1,0 +1,278 @@
+{
+  "meta": {
+    "disclaimer": "Do not rely on openFDA to make decisions regarding medical care. While we make every effort to ensure that data is accurate, you should assume all results are unvalidated. We may limit or otherwise restrict your access to the API in line with our Terms of Service.",
+    "terms": "https://open.fda.gov/terms/",
+    "license": "https://open.fda.gov/license/",
+    "last_updated": "2026-07-23",
+    "results": {
+      "skip": 0,
+      "limit": 5,
+      "total": 8
+    }
+  },
+  "results": [
+    {
+      "update_type": "Reverified",
+      "initial_posting_date": "11/14/2017",
+      "package_ndc": "0338-0431-03",
+      "generic_name": "Heparin Sodium Injection",
+      "contact_info": "888-229-0001",
+      "availability": "Available",
+      "openfda": {
+        "application_number": [
+          "NDA018609"
+        ],
+        "brand_name": [
+          "HEPARIN SODIUM IN SODIUM CHLORIDE"
+        ],
+        "generic_name": [
+          "HEPARIN SODIUM"
+        ],
+        "manufacturer_name": [
+          "Baxter Healthcare Corporation"
+        ],
+        "product_ndc": [
+          "0338-0431",
+          "0338-0433",
+          "0338-0424",
+          "0338-0428"
+        ],
+        "product_type": [
+          "HUMAN PRESCRIPTION DRUG"
+        ],
+        "route": [
+          "INTRAVENOUS"
+        ],
+        "substance_name": [
+          "HEPARIN SODIUM"
+        ],
+        "rxcui": [
+          "1658690",
+          "1658692"
+        ],
+        "spl_id": [
+          "d28ff87a-c535-49db-ba0c-48080149936b"
+        ],
+        "spl_set_id": [
+          "0d929726-76c3-48fc-b4e7-fd06409f9fb3"
+        ],
+        "package_ndc": [
+          "0338-0431-03",
+          "0338-0433-04",
+          "0338-0424-18",
+          "0338-0428-12"
+        ],
+        "unii": [
+          "ZZ45AB24CA"
+        ]
+      },
+      "update_date": "07/19/2026",
+      "therapeutic_category": [
+        "Hematology"
+      ],
+      "dosage_form": "Injection",
+      "presentation": "Heparin Sodium In Sodium Chloride, Injection, 200 [USP'U]/100 mL (NDC 0338-0431-03)",
+      "company_name": "Baxter Healthcare",
+      "status": "Current"
+    },
+    {
+      "update_type": "Reverified",
+      "initial_posting_date": "11/14/2017",
+      "package_ndc": "0264-9872-10",
+      "generic_name": "Heparin Sodium Injection",
+      "contact_info": "800-227-2862",
+      "availability": "Available",
+      "openfda": {
+        "application_number": [
+          "NDA019953"
+        ],
+        "brand_name": [
+          "HEPARIN SODIUM IN SODIUM CHLORIDE"
+        ],
+        "generic_name": [
+          "HEPARIN SODIUM IN SODIUM CHLORIDE"
+        ],
+        "manufacturer_name": [
+          "B. Braun Medical Inc."
+        ],
+        "product_ndc": [
+          "0264-9872"
+        ],
+        "product_type": [
+          "HUMAN PRESCRIPTION DRUG"
+        ],
+        "route": [
+          "INTRAVENOUS"
+        ],
+        "substance_name": [
+          "HEPARIN SODIUM"
+        ],
+        "rxcui": [
+          "1658690",
+          "1658692"
+        ],
+        "spl_id": [
+          "48e17807-e73d-4ea2-81bc-901355903aa7"
+        ],
+        "spl_set_id": [
+          "a3041c04-0ea8-4d36-81ce-c5091c906316"
+        ],
+        "package_ndc": [
+          "0264-9872-10",
+          "0264-9872-00"
+        ],
+        "unii": [
+          "ZZ45AB24CA"
+        ]
+      },
+      "update_date": "07/21/2026",
+      "therapeutic_category": [
+        "Hematology"
+      ],
+      "dosage_form": "Injection",
+      "presentation": "Heparin Sodium 1,000 Units In Sodium Chloride 0.9% In Plastic Container, Injection, 200 [USP'U]/100 mL (NDC 0264-9872-10)",
+      "company_name": "B. Braun Medical Inc.",
+      "status": "Current"
+    },
+    {
+      "update_type": "Reverified",
+      "initial_posting_date": "11/14/2017",
+      "package_ndc": "63323-519-10",
+      "generic_name": "Heparin Sodium Injection",
+      "contact_info": "888-386-1300",
+      "availability": "Unavailable",
+      "related_info": "Next release July 2026. Check wholesalers for inventory.",
+      "openfda": {
+        "application_number": [
+          "ANDA212441"
+        ],
+        "brand_name": [
+          "HEPARIN SODIUM"
+        ],
+        "generic_name": [
+          "HEPARIN SODIUM"
+        ],
+        "manufacturer_name": [
+          "Fresenius Kabi USA, LLC"
+        ],
+        "product_ndc": [
+          "63323-519"
+        ],
+        "product_type": [
+          "HUMAN PRESCRIPTION DRUG"
+        ],
+        "route": [
+          "INTRAVENOUS"
+        ],
+        "substance_name": [
+          "HEPARIN SODIUM"
+        ],
+        "rxcui": [
+          "1658690",
+          "1658692"
+        ],
+        "spl_id": [
+          "3bbbe74a-1246-41a6-9fc3-ca0230529b40"
+        ],
+        "spl_set_id": [
+          "25b0ba06-3274-4a3f-8c39-42d13764ecdf"
+        ],
+        "package_ndc": [
+          "63323-519-02",
+          "63323-519-77",
+          "63323-519-01",
+          "63323-519-10"
+        ],
+        "unii": [
+          "ZZ45AB24CA"
+        ]
+      },
+      "update_date": "07/21/2026",
+      "therapeutic_category": [
+        "Hematology"
+      ],
+      "dosage_form": "Injection",
+      "presentation": "Heparin Sodium, Injection, 200 [USP'U]/100 mL (NDC 63323-519-10)",
+      "company_name": "Fresenius Kabi USA, LLC",
+      "shortage_reason": "Demand increase for the drug",
+      "status": "Current"
+    },
+    {
+      "update_type": "Reverified",
+      "initial_posting_date": "11/14/2017",
+      "package_ndc": "0264-9872-00",
+      "generic_name": "Heparin Sodium Injection",
+      "contact_info": "800-227-2862",
+      "availability": "Limited Availability",
+      "related_info": "Estimated recovery: TBD",
+      "openfda": {
+        "application_number": [
+          "NDA019953"
+        ],
+        "brand_name": [
+          "HEPARIN SODIUM IN SODIUM CHLORIDE"
+        ],
+        "generic_name": [
+          "HEPARIN SODIUM IN SODIUM CHLORIDE"
+        ],
+        "manufacturer_name": [
+          "B. Braun Medical Inc."
+        ],
+        "product_ndc": [
+          "0264-9872"
+        ],
+        "product_type": [
+          "HUMAN PRESCRIPTION DRUG"
+        ],
+        "route": [
+          "INTRAVENOUS"
+        ],
+        "substance_name": [
+          "HEPARIN SODIUM"
+        ],
+        "rxcui": [
+          "1658690",
+          "1658692"
+        ],
+        "spl_id": [
+          "48e17807-e73d-4ea2-81bc-901355903aa7"
+        ],
+        "spl_set_id": [
+          "a3041c04-0ea8-4d36-81ce-c5091c906316"
+        ],
+        "package_ndc": [
+          "0264-9872-10",
+          "0264-9872-00"
+        ],
+        "unii": [
+          "ZZ45AB24CA"
+        ]
+      },
+      "update_date": "07/21/2026",
+      "therapeutic_category": [
+        "Hematology"
+      ],
+      "dosage_form": "Injection",
+      "presentation": "Heparin Sodium 2,000 Units in Sodium Chloride 0.9% in Plastic Container, Injection, 200 [USP'U]/100 mL (NDC 0264-9872-00)",
+      "company_name": "B. Braun Medical Inc.",
+      "shortage_reason": "Requirements related to complying with good manufacturing practices",
+      "status": "Current"
+    },
+    {
+      "presentation": "Heparin Sodium, Injection, 1,000 Units/500 mL (2 Units/mL) (NDC 0409-7620-03)",
+      "update_type": "Reverified",
+      "initial_posting_date": "11/14/2017",
+      "package_ndc": "0409-7620-03",
+      "generic_name": "Heparin Sodium Injection",
+      "company_name": "Hospira, Inc., a Pfizer Company",
+      "contact_info": "844-646-4398",
+      "availability": "Available",
+      "update_date": "07/10/2026",
+      "therapeutic_category": [
+        "Hematology"
+      ],
+      "status": "Current",
+      "dosage_form": "Injection"
+    }
+  ]
+}

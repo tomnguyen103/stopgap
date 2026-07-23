@@ -1,0 +1,42 @@
+{
+  "-Nheparin01": {
+    "latest": {
+      "shortageTitle": "Heparin Sodium Injection",
+      "shortageStatus": "Active",
+      "lastRevisedDate": "July 10, 2026",
+      "updatedAt": 1752148800000,
+      "affectedProduct": [
+        { "ndc": "0409-2720-02", "rxcui": "5224", "description": "Heparin Sodium 1,000 units/500 mL" }
+      ],
+      "availableProduct": [
+        { "ndc": "63323-0540-31", "rxcui": "5224", "description": "Heparin Sodium 5,000 units/mL" }
+      ]
+    }
+  },
+  "-Nketorolac02": {
+    "latest": {
+      "shortageTitle": "Ketorolac Tromethamine Injection",
+      "shortageStatus": "Active",
+      "lastRevisedDate": "June 28, 2026",
+      "updatedAt": 1750982400000,
+      "affectedProduct": [
+        { "ndc": "0409-3795-01", "rxcui": "6130", "description": "Ketorolac 30 mg/mL" }
+      ],
+      "availableProduct": []
+    }
+  },
+  "-Ncefazolin03": {
+    "latest": {
+      "shortageTitle": "Cefazolin Injection",
+      "shortageStatus": "Resolved",
+      "lastRevisedDate": "May 15, 2026",
+      "updatedAt": 1747267200000,
+      "affectedProduct": [
+        { "ndc": "0143-9924-10", "rxcui": "2180", "description": "Cefazolin 1 g" }
+      ],
+      "availableProduct": [
+        { "ndc": "0143-9924-10", "rxcui": "2180", "description": "Cefazolin 1 g" }
+      ]
+    }
+  }
+}

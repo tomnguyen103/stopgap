@@ -28,6 +28,8 @@ export const ShortageRecord = z.object({
   status: ShortageStatus,
   /** NDC package codes affected, when the feed provides them. */
   ndcs: z.array(z.string()).default([]),
+  /** RxNorm concept ids, when the feed provides them (openFDA does via `openfda.rxcui`). */
+  rxcuis: z.array(z.string()).default([]),
   /** Free-text availability / reason as reported by the feed. */
   note: z.string().optional(),
   /** When the feed last updated this record (ISO 8601), if known. */

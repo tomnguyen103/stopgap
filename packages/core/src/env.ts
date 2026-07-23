@@ -21,9 +21,10 @@ const EnvSchema = z.object({
   OPENFDA_BASE_URL: z.string().default("https://api.fda.gov"),
   OPENFDA_API_KEY: z.string().optional(),
   RXNORM_BASE_URL: z.string().default("https://rxnav.nlm.nih.gov"),
-  ASHP_FEED_URL: z
-    .string()
-    .default("https://raw.githubusercontent.com/ASHP-Software/drugShortagesDoc/master"),
+  // ASHP AHFS drug-shortages feed (ASHP-Software/drugShortagesDoc). The live feed requires
+  // an auth key from softwaresupport@ashp.org; absent it, the ASHP poller is stubbed.
+  ASHP_BASE_URL: z.string().default("https://ahfs-staging.firebaseio.com"),
+  ASHP_AUTH_KEY: z.string().optional(),
 
   LANGFUSE_BASE_URL: z.string().default("http://localhost:3001"),
   LANGFUSE_PUBLIC_KEY: z.string().optional(),
