@@ -1,0 +1,34 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# codegraph / graphify indexes
+.codegraph/
+graphify-out/
+.ua/
+
+# temporal / postgres volumes
+.volumes/
+pgdata/
+
+# logs
+*.log
+npm-debug.log*
+logs/
+
+# os
+.DS_Store
+Thumbs.db
+
+# test artifacts
+playwright-report/
+test-results/

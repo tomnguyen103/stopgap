@@ -1,0 +1,34 @@
+{
+  "name": "stopgap",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --no-bail typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "pnpm -r --no-bail build",
+    "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "db:generate": "pnpm --filter @stopgap/db generate",
+    "db:migrate": "pnpm --filter @stopgap/db migrate",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "worker": "pnpm --filter @stopgap/workflows worker",
+    "console": "pnpm --filter @stopgap/console dev"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.18.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^3.0.0"
+  }
+}
