@@ -13,8 +13,8 @@ plan's build table (§13). Out of scope this run: Phase 5 (see `PHASE5-TODO.md`)
 
 ## Phase 1 — Spine (weeks 1–2)
 
-**Status:** in progress — draft PR [#1](https://github.com/tomnguyen103/stopgap/pull/1)
-(console + e2e screenshot remain before ready-for-CodeRabbit)
+**Status:** complete — local gate green, e2e verified. Draft PR
+[#1](https://github.com/tomnguyen103/stopgap/pull/1) going ready for CodeRabbit.
 
 **GitHub:** public repo `tomnguyen103/stopgap`; `main` pushed (scaffold baseline);
 Actions **disabled** (verified `enabled:false`) per zero-Actions-minutes policy.
@@ -30,9 +30,9 @@ case, console renders it, time-skipped Temporal test proves a multi-week case re
 - [x] `@stopgap/providers` — Gemini+Ollama registry + health-check failover + telemetry sink
 - [x] `@stopgap/ingest` — real openFDA/RxNorm clients + fixtures; ASHP client (stubbed w/o key); cross-feed dedupe
 - [x] `@stopgap/workflows` — case workflow + mocked activities + time-skip test (3 pass)
-- [ ] `apps/console` — Next.js 15 skeleton listing cases
+- [x] `apps/console` — Next.js 15: case list + hash-chained audit detail page
 - [x] End-to-end (backend): live openFDA → durable case → Postgres `awaiting_review`, severity `critical`, audit chain intact
-- [ ] End-to-end (UI): case visible in console; screenshot Temporal UI + console
+- [x] End-to-end (UI): heparin case visible in console (list row + detail page), verified in browser against local docker stack
 
 ## Phase 2 — Intelligence (weeks 2–4)
 
