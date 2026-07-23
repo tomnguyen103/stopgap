@@ -41,6 +41,9 @@ importers:
       '@stopgap/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@stopgap/shadow':
+        specifier: workspace:*
+        version: link:../../packages/shadow
       drizzle-orm:
         specifier: ^0.38.0
         version: 0.38.4(@opentelemetry/api@1.9.0)(@types/react@19.2.17)(postgres@3.4.9)(react@19.2.8)
@@ -171,6 +174,9 @@ importers:
       '@stopgap/db':
         specifier: workspace:*
         version: link:../db
+      '@stopgap/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@stopgap/providers':
         specifier: workspace:*
         version: link:../providers

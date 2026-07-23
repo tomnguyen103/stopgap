@@ -61,14 +61,17 @@ export const auditLog = pgTable(
     detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
     prevHash: text("prev_hash").notNull(),
     hash: text("hash").notNull(),
+    /** Temporal workflow run this entry belongs to; part of the idempotency key. */
+    runId: text("run_id"),
   },
   (t) => [
     index("audit_case_idx").on(t.caseId),
     index("audit_ts_idx").on(t.ts),
-    // Each case action fires at most once (case state machine has no repeating legs), so
-    // (case_id, action) is a natural idempotency key: a Temporal activity retry after a
-    // committed insert lands here as a no-op instead of double-appending (CodeRabbit finding).
-    uniqueIndex("audit_case_action_uq").on(t.caseId, t.action),
+    // Within one workflow run each case action fires at most once, so (case_id, action,
+    // run_id) is a natural idempotency key: a Temporal activity retry after a committed
+    // insert lands here as a no-op instead of double-appending. run_id is in the key because
+    // a recurring shortage opens a new run against the same case row (Phase 3).
+    uniqueIndex("audit_case_action_uq").on(t.caseId, t.action, t.runId),
   ],
 );
 

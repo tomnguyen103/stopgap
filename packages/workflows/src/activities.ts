@@ -1,3 +1,4 @@
+import { Context } from "@temporalio/activity";
 import type { CaseStatus, Severity } from "@stopgap/core";
 import {
   appendAudit,
@@ -30,6 +31,15 @@ import type {
  * idempotent so Temporal retries are safe.
  */
 
+/**
+ * The workflow run an activity is executing for. Audit entries are idempotent per run, so a
+ * recurring shortage (a new run against the same case row) appends its own trail instead of
+ * colliding with the previous run's.
+ */
+function currentRunId(): string | undefined {
+  return Context.current().info.workflowExecution?.runId;
+}
+
 /** Persist a newly detected case and open the audit chain. Idempotent (upsert). */
 export async function recordDetected(input: CaseInput): Promise<void> {
   const db = getDb();
@@ -39,6 +49,7 @@ export async function recordDetected(input: CaseInput): Promise<void> {
     actor: "system",
     action: "case.detected",
     detail: { key: input.record.key, sources: input.sources },
+    runId: currentRunId(),
   });
 }
 
@@ -61,6 +72,7 @@ export async function persistStatus(
     actor: (detail.actor as string) ?? "system",
     action: `case.${status}`,
     detail,
+    runId: currentRunId(),
   });
 }
 
@@ -84,6 +96,7 @@ export async function sendComms(key: string, draft: string): Promise<void> {
     actor: "system",
     action: "comms.sent",
     detail: { channel: "mock", chars: draft.length },
+    runId: currentRunId(),
   });
 }
 
@@ -97,6 +110,7 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
     actor: "pharmacist",
     action: `review.${decision.kind}`,
     detail: { ...decision },
+    runId: currentRunId(),
   });
 }
 
@@ -164,5 +178,6 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
     actor: input.approvedBy,
     action: "protocol.version_approved",
     detail: { key: input.key, version: drafted.version, authoredBy: input.authoredBy },
+    runId: currentRunId(),
   });
 }
