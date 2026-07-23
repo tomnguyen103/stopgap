@@ -1,6 +1,9 @@
 import type { CaseStatus, Severity } from "@stopgap/core";
 import {
   appendAudit,
+  approveProtocolVersion,
+  draftProtocolVersion,
+  getApprovedProtocol,
   getCaseByWorkflowId,
   getDb,
   updateCaseStatus,
@@ -10,7 +13,14 @@ import {
 import { mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, startCase } from "./client.js";
-import type { CaseInput, ImpactResult, ResearchResult, ReviewDecision } from "./shared.js";
+import type {
+  CaseInput,
+  ImpactResult,
+  ProtocolMemoryHit,
+  RecordProtocolInput,
+  ResearchResult,
+  ReviewDecision,
+} from "./shared.js";
 
 /**
  * Activities are the only place workflows touch the outside world (DB, feeds, LLMs). The
@@ -112,4 +122,47 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
   } finally {
     await connection.close();
   }
+}
+
+/**
+ * Look up the approved protocol for this shortage key — the organizational-memory read
+ * (PROJECT_PLAN §3B/§4). A hit means a pharmacist already approved substitution guidance for
+ * this drug, so the case reuses it instead of paying for a fresh research call and asking a
+ * human to re-approve text they already wrote.
+ */
+export async function lookupProtocol(key: string): Promise<ProtocolMemoryHit | undefined> {
+  const found = await getApprovedProtocol(key);
+  if (!found) return undefined;
+  return {
+    versionId: found.version.id,
+    version: found.version.version,
+    body: found.version.body,
+    alternatives: found.version.alternatives,
+  };
+}
+
+/**
+ * Write the approved outcome of this case back into the protocol store, then approve it —
+ * this is what turns a one-off resolution into organizational memory. Provenance (source
+ * case, author, approver, rationale) is recorded on the version row.
+ */
+export async function recordProtocolVersion(input: RecordProtocolInput): Promise<void> {
+  const db = getDb();
+  const row = await getCaseByWorkflowId(db, workflowIdForKey(input.key));
+  const drafted = await draftProtocolVersion({
+    key: input.key,
+    title: input.title,
+    body: input.body,
+    alternatives: input.alternatives,
+    sourceCaseId: row?.id ?? null,
+    authoredBy: input.authoredBy,
+    rationale: input.rationale ?? null,
+  });
+  await approveProtocolVersion(drafted.id, input.approvedBy);
+  await appendAudit(db, {
+    caseId: row?.id,
+    actor: input.approvedBy,
+    action: "protocol.version_approved",
+    detail: { key: input.key, version: drafted.version, authoredBy: input.authoredBy },
+  });
 }

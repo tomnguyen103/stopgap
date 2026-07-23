@@ -4,8 +4,9 @@ import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type * as activities from "./activities.js";
-import type { CaseInput } from "./shared.js";
+import type { CaseInput, RecordProtocolInput } from "./shared.js";
 import {
+  exceptionResolvedSignal,
   pollFeedsWorkflow,
   resolvedSignal,
   reviewSignal,
@@ -52,7 +53,19 @@ const mockActivities: typeof activities = {
   sendComms: async () => {},
   recordDecision: async () => {},
   pollAndOpenCases: async () => ({ polled: 0, opened: 0 }),
+  // Memory hit only for the drug whose name says so, so every other case exercises the
+  // agent-research path exactly as before.
+  lookupProtocol: async (key: string) =>
+    /remembered/i.test(key)
+      ? { versionId: "v-1", version: 3, body: "remembered protocol", alternatives: ["alt-remembered"] }
+      : undefined,
+  recordProtocolVersion: async (input) => {
+    recordedProtocols.push(input);
+  },
 };
+
+/** Protocol write-backs the workflow performed, asserted by the memory tests. */
+const recordedProtocols: RecordProtocolInput[] = [];
 
 let env: TestWorkflowEnvironment;
 
@@ -158,6 +171,89 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
       // Let 91 days elapse with no resolution signal → monitoring timeout.
       const final = await handle.result();
       expect(final.status).toBe("exception");
+    });
+  }, 60_000);
+});
+
+describe("organizational memory (time-skipped)", () => {
+  it("reuses an approved protocol instead of researching, and writes no duplicate version", async () => {
+    await withWorker(async () => {
+      const before = recordedProtocols.length;
+      const record = { ...heparin(), genericName: "Remembered Drug", key: "remembered drug" };
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record, sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-mem-${Date.now()}`,
+      });
+      await env.sleep("1 hour");
+      const parked = await handle.query(stateQuery);
+      expect(parked.status).toBe("awaiting_review");
+      expect(parked.protocolSource).toBe("memory");
+      expect(parked.protocolVersion).toBe(3);
+      expect(parked.draft).toBe("remembered protocol");
+
+      await handle.signal(reviewSignal, { kind: "approve" });
+      await env.sleep("1 hour");
+      await handle.signal(resolvedSignal);
+      expect((await handle.result()).status).toBe("closed");
+      // Approving remembered text unchanged adds nothing new to remember.
+      expect(recordedProtocols.length).toBe(before);
+    });
+  }, 60_000);
+
+  it("writes an approved agent draft back into the protocol store", async () => {
+    await withWorker(async () => {
+      const before = recordedProtocols.length;
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: heparin(), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-writeback-${Date.now()}`,
+      });
+      await env.sleep("1 hour");
+      await handle.signal(reviewSignal, { kind: "edit", editedDraft: "pharmacist text" });
+      await env.sleep("1 hour");
+      await handle.signal(resolvedSignal);
+      await handle.result();
+
+      const written = recordedProtocols.slice(before);
+      expect(written).toHaveLength(1);
+      expect(written[0]?.body).toBe("pharmacist text");
+      expect(written[0]?.authoredBy).toBe("pharmacist");
+    });
+  }, 60_000);
+
+  it("lets a pharmacist resolve an exception case: the resolution becomes a rule and the case continues", async () => {
+    await withWorker(async () => {
+      const before = recordedProtocols.length;
+      const record = { ...heparin(), genericName: "Immune Globulin", key: "immune globulin" };
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record, sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-excloop-${Date.now()}`,
+      });
+      await env.sleep("1 hour");
+      const parked = await handle.query(stateQuery);
+      expect(parked.status).toBe("exception");
+      expect(parked.exceptionReason).toBe("no-therapeutic-equivalent");
+
+      await handle.signal(exceptionResolvedSignal, {
+        protocolBody: "Allocate remaining stock to immunodeficiency patients; no substitution.",
+        alternatives: ["conserve-and-allocate"],
+        resolvedBy: "pharmacist-1",
+        rationale: "No therapeutic equivalent; allocation policy applies.",
+      });
+      await env.sleep("1 hour");
+      // The pharmacist's own text needs no second approval — the case goes straight on.
+      expect((await handle.query(stateQuery)).status).toBe("monitoring");
+      await handle.signal(resolvedSignal);
+      const final = await handle.result();
+      expect(final.status).toBe("closed");
+      expect(final.protocolSource).toBe("exception-resolution");
+
+      const written = recordedProtocols.slice(before);
+      expect(written).toHaveLength(1);
+      expect(written[0]?.approvedBy).toBe("pharmacist-1");
+      expect(written[0]?.rationale).toContain("No therapeutic equivalent");
     });
   }, 60_000);
 });
