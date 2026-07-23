@@ -32,8 +32,14 @@ export type ImpactAssessment = z.infer<typeof ImpactAssessment>;
 
 export const AlternativesResearch = z
   .object({
-    /** Candidate substitute drugs/protocols. Empty when no therapeutic equivalent exists. */
-    alternatives: z.array(z.string()),
+    /**
+     * Candidate substitute drugs/protocols. Empty when no therapeutic equivalent exists.
+     * Blank/whitespace entries are dropped: `[" "]` would otherwise read as "an alternative
+     * exists" and bypass the no-equivalent exception path with nothing to substitute.
+     */
+    alternatives: z
+      .array(z.string())
+      .transform((list) => list.map((item) => item.trim()).filter((item) => item.length > 0)),
     /** Draft substitution protocol text for pharmacist review. Empty if no alternatives. */
     draft: z.string(),
     /** Model's self-reported confidence in the alternatives/draft, 0 to 1. */
