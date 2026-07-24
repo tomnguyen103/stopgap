@@ -22,6 +22,14 @@ export type AuditScheme = "v1" | "v2";
 export interface AuditEntry {
   caseId?: string;
   actor: string;
+  /**
+   * The authenticated principal (PHASE6 §6.1), a real `users.id`. Persisted to the
+   * `actor_user_id` FK but DELIBERATELY NOT HASHED — the hashed identity stays `actor` (text),
+   * so adding this never changes any row's hash and the chain verifies unchanged across the
+   * migration. Optional: workflow-internal (`system`/`agent`) appends resolve it from the
+   * synthetic users; a legacy caller may omit it entirely.
+   */
+  actorUserId?: string;
   action: string;
   detail?: Record<string, unknown>;
   /**
@@ -160,6 +168,9 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
     await tx.insert(auditLog).values({
       caseId: entry.caseId,
       actor: entry.actor,
+      // Persisted but not part of `hash` above (computeAuditHash never sees it): the machine
+      // identity rides alongside the hashed text `actor`, leaving the chain bytes untouched.
+      actorUserId: entry.actorUserId,
       action: entry.action,
       detail,
       ts,

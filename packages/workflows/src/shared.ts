@@ -32,11 +32,15 @@ export type ResearchResult = AlternativesResearch;
  * signals are unauthenticated, so the audit trail records who the caller said they were, never
  * an asserted-verified principal (see PHASE5-TODO for the auth work).
  */
-export type ReviewDecision = { reviewer?: string } & (
-  | { kind: "approve" }
-  | { kind: "edit"; editedDraft: string }
-  | { kind: "reject"; reason: string }
-);
+export type ReviewDecision = {
+  reviewer?: string;
+  /**
+   * The authenticated reviewer's `users.id` (PHASE6 §6.1), threaded from the console session so
+   * the audit chain records a machine-checkable principal beside the `reviewer` label. Optional
+   * because the CLI/MCP callers still sign with only a claimed label.
+   */
+  reviewerUserId?: string;
+} & ({ kind: "approve" } | { kind: "edit"; editedDraft: string } | { kind: "reject"; reason: string });
 
 /** Queryable snapshot of a running case (drives the console). */
 export interface CaseState {
@@ -82,6 +86,9 @@ export interface RecordProtocolInput {
   /** "agent" when the draft came from the research agent, else the pharmacist id. */
   authoredBy: string;
   approvedBy: string;
+  /** Authenticated author/approver `users.id`s (PHASE6 §6.1), beside the free-text labels. */
+  authoredByUserId?: string;
+  approvedByUserId?: string;
   rationale?: string;
 }
 
@@ -95,6 +102,8 @@ export interface ExceptionResolution {
   protocolBody: string;
   alternatives: string[];
   resolvedBy: string;
+  /** Authenticated resolver's `users.id` (PHASE6 §6.1), beside the `resolvedBy` label. */
+  resolvedByUserId?: string;
   /** Why — becomes the version's rationale, so the rule carries its reason forever. */
   rationale: string;
 }

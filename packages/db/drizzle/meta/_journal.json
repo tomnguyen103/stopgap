@@ -71,6 +71,13 @@
       "when": 1784909345909,
       "tag": "0009_black_venom",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784910743219,
+      "tag": "0010_curly_invisible_woman",
+      "breakpoints": true
     }
   ]
 }

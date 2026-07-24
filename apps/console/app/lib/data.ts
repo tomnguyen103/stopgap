@@ -5,11 +5,14 @@ import {
   getDb,
   listCases,
   listShadowRuns,
+  listUsers,
   schema,
   shadowStatsByClass,
   verifyAnchors,
   verifyAuditChain,
 } from "@stopgap/db";
+import type { Role } from "@stopgap/core";
+import type { UserRow } from "@stopgap/db";
 import type {
   AnchorVerification,
   AuditRow,
@@ -78,6 +81,11 @@ export async function getAuditIntegrity(): Promise<{
   const db = getDb();
   const [chain, anchors] = await Promise.all([verifyAuditChain(db), verifyAnchors(db)]);
   return { chain, anchors };
+}
+
+/** Active users with their roles, for the admin management page (PHASE6 §6.1). */
+export async function getUsers(): Promise<(UserRow & { roles: Role[] })[]> {
+  return listUsers();
 }
 
 /** Shadow-mode aggregates per drug class, with the promotion stage each has earned. */

@@ -54,6 +54,34 @@ services:
     ports:
       - "8233:8080"
 
+  # OIDC identity provider (PHASE6 §6.1). Always-on (no profile) so `docker compose up` alone
+  # stands up a working IdP: `--import-realm` seeds the `stopgap` realm, the `stopgap-console`
+  # client, and one demo user per role (see deploy/keycloak/realm-stopgap.json). The console
+  # runs on the host in dev, so KEYCLOAK_ISSUER defaults to http://localhost:8080/realms/stopgap.
+  # ALL passwords here are DEV-ONLY throwaways — never reuse them anywhere real.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: "8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./deploy/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The image ships no curl; probe the management health port over bash's /dev/tcp.
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
   # ---------------------------------------------------------------------------------------
   # Langfuse (self-hosted, PROJECT_PLAN §9) — everything below is behind the `langfuse`
   # profile, so plain `docker compose up -d` still starts only the Phase 1 spine:

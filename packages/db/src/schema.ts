@@ -63,6 +63,52 @@ export const cases = pgTable(
 );
 
 /**
+ * Authenticated principals (PHASE6 §6.1). One row per human who signed in through the OIDC
+ * IdP, plus two synthetic rows — `system` and `agent` — that give the pre-auth actors of the
+ * audit chain a stable `users.id` to point at. `oidcSubject` is the IdP's `sub` claim and is
+ * UNIQUE where present; the synthetic users carry a sentinel subject (`system`/`agent`) rather
+ * than NULL so the backfill and `getSyntheticUser` can find them deterministically. `email`
+ * and `displayName` are best-effort from the token — nullable, because a synthetic user has no
+ * inbox. `disabledAt` soft-disables an account without deleting its audit provenance.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    oidcSubject: text("oidc_subject"),
+    email: text("email"),
+    displayName: text("display_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
+  },
+  (t) => [
+    // Partial unique index: two synthetic users legitimately have no subject, and Postgres
+    // treats NULLs as distinct anyway — but a real `sub` must never map to two accounts.
+    uniqueIndex("users_oidc_subject_uq").on(t.oidcSubject).where(sql`${t.oidcSubject} is not null`),
+  ],
+);
+
+/**
+ * Role grants (PHASE6 §6.1). Many-to-one against `users`; a user may hold several roles, so the
+ * authorization check is "does any of my roles satisfy the required rank". `role` is a text
+ * column carrying one of `@stopgap/core`'s `Role` literals rather than a PG enum — a new role
+ * is then a code change, not a migration, and the app already validates the value on write.
+ * `(userId, role)` is unique so re-granting an existing role is a no-op, not a duplicate row.
+ */
+export const userRoles = pgTable(
+  "user_roles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    role: text("role").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("user_roles_user_role_uq").on(t.userId, t.role)],
+);
+
+/**
  * Append-only, hash-chained audit log (triage-md pattern). Each row's `hash` = SHA-256 of
  * (prevHash + canonical(row-without-hash)); tampering with any row breaks the chain.
  */
@@ -73,6 +119,16 @@ export const auditLog = pgTable(
     caseId: uuid("case_id").references(() => cases.id),
     ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
     actor: text("actor").notNull(),
+    /**
+     * The authenticated principal behind this entry (PHASE6 §6.1) — a real `users.id`, never a
+     * client-supplied string. Deliberately NOT part of the hashed payload: `actor` (text) stays
+     * the hashed identity field so the HMAC/SHA-256 chain verifies BYTE-FOR-BYTE across this
+     * migration (existing rows are untouched by adding a column the hash ignores). This FK is
+     * the machine-checkable "who", `actor` the stable human label the chain commits to.
+     * Nullable: legacy rows whose text actor was neither `system` nor `agent`, and synthetic
+     * system/agent activity, keep a NULL here with the text label intact.
+     */
+    actorUserId: uuid("actor_user_id").references(() => users.id),
     action: text("action").notNull(),
     detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
     prevHash: text("prev_hash").notNull(),
@@ -195,6 +251,16 @@ export const protocolVersions = pgTable(
     /** "agent" for an agent-drafted version, a pharmacist id once a human edits/approves. */
     authoredBy: text("authored_by").notNull(),
     approvedBy: text("approved_by"),
+    /**
+     * Authenticated author/approver (PHASE6 §6.1) — real `users.id`s beside the free-text
+     * `authoredBy`/`approvedBy`. Same rationale as `auditLog.actorUserId`: the text columns are
+     * kept exactly as-is (they are what the provenance-audit entries hash), and these FKs add
+     * the machine-checkable identity without rewriting history. `authoredByUserId` backfills to
+     * the synthetic `agent` user for legacy agent drafts; both are nullable for human ids that
+     * predate the users table.
+     */
+    authoredByUserId: uuid("authored_by_user_id").references(() => users.id),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
     /** Why this version exists (exception resolution rationale, edit reason). */
     rationale: text("rationale"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -280,6 +346,9 @@ export const demoRuns = pgTable(
   (t) => [index("demo_runs_started_at_idx").on(t.startedAt)],
 );
 
+export type UserRow = typeof users.$inferSelect;
+export type NewUserRow = typeof users.$inferInsert;
+export type UserRoleRow = typeof userRoles.$inferSelect;
 export type CaseRow = typeof cases.$inferSelect;
 export type NewCaseRow = typeof cases.$inferInsert;
 export type AuditRow = typeof auditLog.$inferSelect;

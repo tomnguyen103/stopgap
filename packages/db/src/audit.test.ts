@@ -202,6 +202,44 @@ describe("verifyChainRows", () => {
   });
 });
 
+describe("hashed payload is stable (PHASE6 §6.1 audit-chain-unchanged guarantee)", () => {
+  // The RBAC migration adds `actor_user_id` (and the protocol author/approver FKs) but must NOT
+  // change what the chain hashes — `actor` (text) stays the hashed identity, `actorUserId` is
+  // persisted separately and never enters `computeAuditHash`. This golden hash pins the v1
+  // payload bytes: if anyone widens the v1 hashed fields, this fails loudly. (The value is the
+  // SHA-256 of the canonical {action,actor,caseId,detail} over the genesis prev-hash.)
+  it("v1 hash of a known entry is byte-stable", () => {
+    const hash = computeAuditHash("v1", GENESIS_HASH, {
+      caseId: "c1",
+      actor: "system",
+      action: "case.detected",
+      detail: { key: "heparin" },
+    });
+    expect(hash).toBe("60965ae0cf4816456840a1e06bad15b7e59d0375e0816bd72d0e4e6f5180eec4");
+  });
+
+  it("computeAuditHash has no actor-user-id input — the FK cannot affect the hash", () => {
+    // The verifier's row shape (`VerifiableRow`) carries the hashed fields only; there is no
+    // `actorUserId` on it, so a chain verifies identically whether or not the FK is populated.
+    const base: VerifiableRow[] = [
+      {
+        id: 1,
+        caseId: "c1",
+        actor: "system",
+        action: "case.detected",
+        detail: {},
+        prevHash: GENESIS_HASH,
+        hash: computeAuditHash("v1", GENESIS_HASH, { caseId: "c1", actor: "system", action: "case.detected", detail: {} }),
+        scheme: "v1",
+        ts: TS,
+        runId: "run-1",
+        eventKey: "case.detected",
+      },
+    ];
+    expect(verifyChainRows(base)).toEqual({ ok: true });
+  });
+});
+
 describe("buildTimestampRequest", () => {
   const digestHex = "01".repeat(32);
 

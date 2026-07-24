@@ -91,6 +91,22 @@ const EnvSchema = z.object({
    * bypasses this and resolves immediately — the threshold only governs silent absence.
    */
   FEED_RESOLVE_MISS_THRESHOLD: z.coerce.number().int().positive().default(3),
+
+  /**
+   * OIDC SSO / RBAC (PHASE6 §6.1). Every field defaults so the local gate and the public demo
+   * run zero-config — but the stance mirrors comms: an UNSET secret is honest non-configuration,
+   * never faked auth. `authConfigured()` below reports whether a real IdP session can be
+   * established; when it cannot, the middleware still refuses console mutations (a request with
+   * no session resolves to the anonymous `viewer`, which fails every `requireRole`), so a
+   * deployment without an IdP is locked-down, not wide open.
+   */
+  AUTH_SECRET: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
+  /** Keycloak (or any OIDC IdP) realm issuer URL. Points at the compose Keycloak by default. */
+  KEYCLOAK_ISSUER: z.string().default("http://localhost:8080/realms/stopgap"),
+  /** OIDC client id registered in the realm. */
+  KEYCLOAK_CLIENT_ID: z.string().default("stopgap-console"),
+  /** OIDC client secret. Optional: a public client, or a deployment that has not wired auth. */
+  KEYCLOAK_CLIENT_SECRET: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -103,6 +119,16 @@ export function getEnv(): Env {
     cached = EnvSchema.parse(process.env);
   }
   return cached;
+}
+
+/**
+ * Whether a real OIDC session can be established (PHASE6 §6.1). Needs both an `AUTH_SECRET`
+ * (to sign the session JWT) and a Keycloak client secret. When false, the console runs in its
+ * honest non-configured state: no one can sign in, so every request is the anonymous `viewer`
+ * and all mutations are refused — locked-down, never a faked "authenticated" success.
+ */
+export function authConfigured(env: Env = getEnv()): boolean {
+  return Boolean(env.AUTH_SECRET && env.KEYCLOAK_CLIENT_SECRET);
 }
 
 /** Test helper: reset the cache so a mutated process.env is re-read. */

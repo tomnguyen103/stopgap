@@ -2,9 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { getCaseByWorkflowId, getDb } from "@stopgap/db";
+import { isRole } from "@stopgap/core";
+import {
+  appendAudit,
+  approveProtocolVersion,
+  assignRole,
+  getCaseByWorkflowId,
+  getDb,
+  revokeRole,
+  setUserDisabled,
+} from "@stopgap/db";
 import { assertMutationAllowed, isDemoMode, prepareDemoRun, type DemoRunResult } from "@stopgap/demo";
 import { resolveException, startCase, submitReview, withTemporalClient } from "@stopgap/workflows";
+import { requireRole } from "./auth-guards";
 
 /**
  * HITL actions (PROJECT_PLAN §2, §13 Phase 4). Every one of these signals the durable
@@ -12,14 +22,12 @@ import { resolveException, startCase, submitReview, withTemporalClient } from "@
  * a decision recorded straight into Postgres would be a lie the moment the workflow moved on.
  *
  * A server action is a public endpoint: anything reachable here is reachable by anyone who
- * can POST to this app. Inputs are therefore schema-validated rather than trusted, and the
- * reviewer identity is recorded as an unverified claim (`identitySource`) — the console has
- * no authentication layer, so asserting "a pharmacist approved this" would be a lie the audit
- * trail then preserves forever. Verified principals are tracked in PHASE5-TODO.
+ * can POST to this app. Two gates therefore run at the TOP of every mutation (PHASE6 §6.1):
+ * `assertMutationAllowed` (the demo read-only gate) and `requireRole` (the RBAC matrix). The
+ * reviewer/approver identity now comes from the authenticated session (`principal.userId`, a
+ * real `users.id`), NEVER a client-supplied string, and is threaded through the workflow signal
+ * into the tamper-evident audit chain.
  */
-
-/** Claimed reviewer identity until the auth layer exists. */
-const REVIEWER = "pharmacist-console";
 
 const reviewDecisionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("approve") }),
@@ -43,25 +51,117 @@ async function keyForWorkflow(workflowId: string): Promise<string> {
 }
 
 export async function reviewCase(workflowId: string, decision: unknown): Promise<void> {
-  // A public demo must not let a visitor approve clinical guidance, and there is no auth
-  // layer to distinguish one visitor from a pharmacist — so in demo mode the answer is no.
+  // A public demo must not let a visitor approve clinical guidance; and only a pharmacist+
+  // may review at all. Both gates fail the anonymous demo viewer — the same locked-down result.
   assertMutationAllowed("Approving or rejecting a case");
+  const principal = await requireRole("review_case");
   const parsed = reviewDecisionSchema.parse(decision);
   const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
-  await withTemporalClient((client) => submitReview(client, key, parsed, REVIEWER));
+  await withTemporalClient((client) =>
+    submitReview(client, key, parsed, principal.label, principal.userId ?? undefined),
+  );
   revalidatePath(`/cases/${encodeURIComponent(workflowId)}`);
   revalidatePath("/");
 }
 
 export async function resolveExceptionCase(workflowId: string, resolution: unknown): Promise<void> {
   assertMutationAllowed("Resolving an exception");
+  const principal = await requireRole("resolve_exception");
   const parsed = resolutionSchema.parse(resolution);
   const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
   await withTemporalClient((client) =>
-    resolveException(client, key, { ...parsed, resolvedBy: REVIEWER }),
+    resolveException(client, key, {
+      ...parsed,
+      resolvedBy: principal.label,
+      resolvedByUserId: principal.userId ?? undefined,
+    }),
   );
   revalidatePath(`/cases/${encodeURIComponent(workflowId)}`);
   revalidatePath("/protocols");
+}
+
+/**
+ * Record a privileged (non-case) action in the audit chain with the authenticated principal.
+ * Shared by the protocol-approval and admin user actions, which otherwise repeat the same
+ * actor/actorUserId/identitySource shape. These entries have no `caseId`, so `appendAudit` does
+ * not dedupe on `eventKey` — the key is a stable, descriptive label (never a timestamp), and the
+ * NULL `caseId` keeps rows distinct in the unique index so repeated grants/toggles each append.
+ */
+async function recordPrivilegedAudit(
+  principal: { label: string; userId: string | null },
+  action: string,
+  detail: Record<string, unknown>,
+  eventKey: string,
+): Promise<void> {
+  await appendAudit(getDb(), {
+    actor: principal.label,
+    actorUserId: principal.userId ?? undefined,
+    action,
+    detail: { ...detail, identitySource: "authenticated-session" },
+    eventKey,
+  });
+}
+
+/**
+ * Approve a drafted protocol version directly (PHASE6 §6.1 matrix). Distinct from `reviewCase`:
+ * this is the pharmacy-director capability to approve/supersede a version outside a case's HITL
+ * gate, so it is gated one rank higher (`approve_protocol_version` → `pharmacy_director`). A
+ * pharmacist calling it fails server-side with `AuthorizationError`. The approval lands in the
+ * audit chain with the authenticated approver's `users.id`.
+ */
+export async function approveProtocolVersionAction(versionId: unknown): Promise<void> {
+  assertMutationAllowed("Approving a protocol version");
+  const principal = await requireRole("approve_protocol_version");
+  const id = z.string().uuid().parse(versionId);
+  const approved = await approveProtocolVersion(id, principal.label, principal.userId ?? undefined);
+  await recordPrivilegedAudit(
+    principal,
+    "protocol.version_approved",
+    { versionId: id, version: approved.version, via: "director-approval" },
+    // Keyed by version id so it never collides with the workflow's own
+    // `protocol.version_approved.v<n>` entries (which are keyed by case run + version).
+    `protocol.version_approved.direct.${id}`,
+  );
+  revalidatePath("/protocols");
+}
+
+const roleSchema = z.string().refine(isRole, "unknown role");
+const userIdSchema = z.string().uuid();
+
+/** Grant a role (admin only, PHASE6 §6.1). */
+export async function assignRoleAction(userId: unknown, role: unknown): Promise<void> {
+  assertMutationAllowed("Managing users");
+  const principal = await requireRole("manage_users");
+  const uid = userIdSchema.parse(userId);
+  const r = roleSchema.parse(role);
+  await assignRole(uid, r);
+  await recordPrivilegedAudit(principal, "user.role_granted", { targetUserId: uid, role: r }, `user.role_granted.${uid}.${r}`);
+  revalidatePath("/admin/users");
+}
+
+/** Revoke a role (admin only). */
+export async function revokeRoleAction(userId: unknown, role: unknown): Promise<void> {
+  assertMutationAllowed("Managing users");
+  const principal = await requireRole("manage_users");
+  const uid = userIdSchema.parse(userId);
+  const r = roleSchema.parse(role);
+  await revokeRole(uid, r);
+  await recordPrivilegedAudit(principal, "user.role_revoked", { targetUserId: uid, role: r }, `user.role_revoked.${uid}.${r}`);
+  revalidatePath("/admin/users");
+}
+
+/** Soft-disable / re-enable a user account (admin only). */
+export async function setUserDisabledAction(userId: unknown, disabled: unknown): Promise<void> {
+  assertMutationAllowed("Managing users");
+  const principal = await requireRole("manage_users");
+  const uid = userIdSchema.parse(userId);
+  const flag = z.boolean().parse(disabled);
+  await setUserDisabled(uid, flag);
+  // eventKey matches the action label — "user.disabled" when disabling, "user.enabled" when
+  // re-enabling — instead of the previous contradictory "user.disabled…" label on the enable path.
+  const action = flag ? "user.disabled" : "user.enabled";
+  await recordPrivilegedAudit(principal, action, { targetUserId: uid }, `${action}.${uid}`);
+  revalidatePath("/admin/users");
 }
 
 /**

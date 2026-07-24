@@ -19,6 +19,8 @@ export interface DraftProtocolInput {
   sourceCaseId?: string | null;
   /** "agent" for an agent draft, a pharmacist id for a human-authored one. */
   authoredBy: string;
+  /** Authenticated author (PHASE6 §6.1), a real `users.id`, beside the free-text `authoredBy`. */
+  authoredByUserId?: string | null;
   rationale?: string | null;
 }
 
@@ -93,6 +95,7 @@ export async function draftProtocolVersion(input: DraftProtocolInput): Promise<P
         alternatives: input.alternatives,
         sourceCaseId: input.sourceCaseId ?? null,
         authoredBy: input.authoredBy,
+        authoredByUserId: input.authoredByUserId ?? null,
         rationale: input.rationale ?? null,
       })
       .returning();
@@ -108,6 +111,7 @@ export async function draftProtocolVersion(input: DraftProtocolInput): Promise<P
 export async function approveProtocolVersion(
   versionId: string,
   approvedBy: string,
+  approvedByUserId?: string | null,
 ): Promise<ProtocolVersionRow> {
   const db = getDb();
   return db.transaction(async (tx) => {
@@ -134,7 +138,7 @@ export async function approveProtocolVersion(
 
     const [approved] = await tx
       .update(protocolVersions)
-      .set({ state: "approved", approvedBy, approvedAt: new Date() })
+      .set({ state: "approved", approvedBy, approvedByUserId: approvedByUserId ?? null, approvedAt: new Date() })
       .where(eq(protocolVersions.id, versionId))
       .returning();
 
