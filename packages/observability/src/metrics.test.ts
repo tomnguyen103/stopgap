@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   counterFamilies,
   incrementCounter,
@@ -85,5 +85,55 @@ describe("counter registry", () => {
     expect(counterFamilies()).toHaveLength(1);
     resetCounters();
     expect(counterFamilies()).toHaveLength(0);
+  });
+});
+
+/**
+ * `collectGaugeFamilies` is the only impure step in the scrape: it turns the DB reads into the
+ * gauge families the pure renderer formats. Mocking the two data sources pins the mapping —
+ * including the two cases that are easy to get wrong: an unset spend cap must surface as an
+ * explicit 0 (so a dashboard can tell "no cap" from "cap not reached"), and an absent ack latency
+ * must emit NO sample rather than a fabricated 0.
+ */
+vi.mock("@stopgap/db", () => ({
+  getDb: () => ({}),
+  getLlmSpend: async () => ({ usd: 1.25 }),
+  getOpsMetrics: async () => ({
+    casesOpenedToday: 4,
+    exceptionQueueDepth: 2,
+    feedStaleness: [{ source: "openfda", secondsStale: 90 }],
+    ackLatencySeconds: undefined,
+    criticalUnacked: { count: 3, maxAgeSeconds: 7200 },
+  }),
+}));
+vi.mock("@stopgap/core/env", () => ({ getEnv: () => ({ LLM_DAILY_USD_CAP: undefined }) }));
+
+describe("collectGaugeFamilies", () => {
+  function sampleValue(families: MetricFamily[], name: string): number | undefined {
+    return families.find((f) => f.name === name)?.samples[0]?.value;
+  }
+
+  it("maps the DB reads onto the gauge families a scraper reads", async () => {
+    const { collectGaugeFamilies, collectMetricsText } = await import("./metrics.js");
+    const families = await collectGaugeFamilies();
+
+    expect(sampleValue(families, "stopgap_cases_opened_today")).toBe(4);
+    expect(sampleValue(families, "stopgap_exception_queue_depth")).toBe(2);
+    expect(sampleValue(families, "stopgap_llm_daily_spend_usd")).toBe(1.25);
+    expect(sampleValue(families, "stopgap_critical_case_unacked_count")).toBe(3);
+    expect(sampleValue(families, "stopgap_critical_case_unacked_seconds")).toBe(7200);
+    // An unset cap is an explicit 0, not an absent gauge.
+    expect(sampleValue(families, "stopgap_llm_daily_cap_usd")).toBe(0);
+    // Nothing acked yet: no sample at all rather than a made-up zero latency.
+    expect(families.find((f) => f.name === "stopgap_ack_latency_seconds")?.samples).toEqual([]);
+    // Feed staleness is per-source labelled.
+    expect(families.find((f) => f.name === "stopgap_feed_staleness_seconds")?.samples).toEqual([
+      { value: 90, labels: { source: "openfda" } },
+    ]);
+
+    // The console scrape (gauges only) renders those same families as exposition text.
+    const text = await collectMetricsText(false);
+    expect(text).toContain("# TYPE stopgap_cases_opened_today gauge");
+    expect(text).toContain("stopgap_cases_opened_today 4");
   });
 });

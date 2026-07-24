@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isDemoMode } from "@stopgap/demo";
+import { isActionAllowed } from "../../lib/authz";
 import { getCaseDetail, getWorkflowState } from "../../lib/data";
+import { resolvePrincipal } from "../../lib/principal";
 import { EscalationPanel } from "./escalation-panel";
 import { ReviewPanel } from "./review-panel";
 
@@ -13,6 +15,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   if (!detail) notFound();
   const { case: c, audit, acks } = detail;
   const live = await getWorkflowState(c.key);
+  // Server component, so the caller's roles are available here. `isActionAllowed` is the pure,
+  // non-throwing half of the same matrix `requireRole` enforces in the action.
+  const principal = await resolvePrincipal();
   return (
     <>
       <p className="back">
@@ -110,9 +115,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           ackAt: a.ackAt.toISOString(),
           ackedByLabel: a.ackedByLabel,
         }))}
-        // Hide the button in demo mode (the action refuses a viewer anyway); a real deployment
-        // shows it and the server action enforces pharmacist+.
-        canAck={!isDemoMode()}
+        // Same stance as the review gate above: a button that always fails is a worse lie than
+        // its absence. Demo mode refuses every ack, and a signed-in viewer without `review_case`
+        // would fail server-side — so neither is offered the button. The action still enforces
+        // this itself; hiding it is a courtesy, never the control.
+        canAck={!isDemoMode() && isActionAllowed(principal.roles, "review_case")}
       />
 
       <div className="card">

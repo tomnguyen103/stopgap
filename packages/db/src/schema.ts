@@ -116,12 +116,14 @@ export const userRoles = pgTable(
  * as data (editable by an admin) rather than hard-coded so the on-call ladder is a config change,
  * not a deploy.
  */
+export type EscalationStep = { afterMinutes: number; notify: string };
+
 export const escalationPolicies = pgTable(
   "escalation_policies",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     severity: text("severity").notNull(),
-    steps: jsonb("steps").$type<{ afterMinutes: number; notify: string }[]>().notNull().default(sql`'[]'::jsonb`),
+    steps: jsonb("steps").$type<EscalationStep[]>().notNull().default(sql`'[]'::jsonb`),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("escalation_policies_severity_uq").on(t.severity)],
@@ -392,7 +394,6 @@ export const demoRuns = pgTable(
 );
 
 export type EscalationPolicyRow = typeof escalationPolicies.$inferSelect;
-export type EscalationStep = { afterMinutes: number; notify: string };
 export type AcknowledgmentRow = typeof acknowledgments.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;

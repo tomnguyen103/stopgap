@@ -137,8 +137,8 @@ export function resetCounters(): void {
  * cached counter. Used by BOTH the console `/api/metrics` route and the worker sidecar.
  */
 export async function collectGaugeFamilies(): Promise<MetricFamily[]> {
-  const ops = await getOpsMetrics();
-  const spend = await getLlmSpend(getDb());
+  // Independent queries, so one scrape costs one round trip's latency rather than two.
+  const [ops, spend] = await Promise.all([getOpsMetrics(), getLlmSpend(getDb())]);
   // Unset cap → 0, so a dashboard/alert can distinguish "no cap configured" from "cap not yet
   // reached" (the SpendOver80PctCap alert guards on cap > 0 for exactly this reason).
   const capUsd = getEnv().LLM_DAILY_USD_CAP ?? 0;

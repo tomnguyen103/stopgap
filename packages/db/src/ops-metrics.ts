@@ -28,10 +28,11 @@ export interface OpsMetrics {
 export async function getOpsMetrics(): Promise<OpsMetrics> {
   const db = getDb();
 
+  // Three independent queries, issued concurrently: a scrape costs the slowest one, not their sum.
   // One round trip for the case-derived scalars. `date_trunc('day', now() at time zone 'utc')`
   // matches the UTC-day convention the spend ledger already uses, so "opened today" means the
   // same calendar day everywhere regardless of the database's timezone setting.
-  const [caseAgg] = await db.execute<{
+  const caseAggQuery = db.execute<{
     opened_today: string;
     exception_depth: string;
     critical_unacked_count: string;
@@ -58,7 +59,7 @@ export async function getOpsMetrics(): Promise<OpsMetrics> {
     from cases
   `);
 
-  const feed = await db.execute<{ source: string; seconds_stale: string }>(sql`
+  const feedQuery = db.execute<{ source: string; seconds_stale: string }>(sql`
     select source, extract(epoch from (now() - max(fetched_at))) as seconds_stale
     from feed_records
     group by source
@@ -67,7 +68,7 @@ export async function getOpsMetrics(): Promise<OpsMetrics> {
   // Ack latency from acknowledgments joined to the case they acked. `min(ack_at)` per case so a
   // case escalated and acked at several tiers counts one latency (the first human response), not
   // one per tier.
-  const [ackAgg] = await db.execute<{ avg_seconds: string | null }>(sql`
+  const ackAggQuery = db.execute<{ avg_seconds: string | null }>(sql`
     with first_ack as (
       select case_id, min(ack_at) as ack_at from acknowledgments group by case_id
     )
@@ -76,6 +77,8 @@ export async function getOpsMetrics(): Promise<OpsMetrics> {
     join cases on cases.id = first_ack.case_id
     where first_ack.ack_at >= cases.opened_at
   `);
+
+  const [[caseAgg], feed, [ackAgg]] = await Promise.all([caseAggQuery, feedQuery, ackAggQuery]);
 
   return {
     casesOpenedToday: Number(caseAgg?.opened_today ?? 0),

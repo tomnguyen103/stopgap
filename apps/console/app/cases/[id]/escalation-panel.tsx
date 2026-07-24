@@ -50,7 +50,9 @@ export function EscalationPanel({
       <h2>Escalation</h2>
       <p className="sub">
         {acked
-          ? "Acknowledged — the ladder stopped."
+          ? // Not "the ladder stopped": a late ack is valid after every tier has already fired,
+            // when there was no ladder left to stop.
+            "Acknowledged."
           : notified.length > 0
             ? `Notified through tier ${String(notified[notified.length - 1]?.step ?? 0)} — awaiting acknowledgment.`
             : "Escalation pending."}
