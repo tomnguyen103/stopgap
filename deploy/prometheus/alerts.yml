@@ -1,0 +1,74 @@
+# Prometheus alerting rules (Phase 6.4 observability). Each rule's runbook — the concrete
+# first-response steps — lives in docs/observability.md under the matching alert name; the
+# `annotations.description` here points there rather than duplicating the steps inline.
+#
+# Metric names are emitted verbatim by the console (/api/metrics) and worker (/metrics);
+# do not rename them here without changing the emitters.
+groups:
+  - name: stopgap
+    rules:
+      # A feed source has gone stale — its newest stored record is older than 45 minutes.
+      # `stopgap_feed_staleness_seconds` is per-source; `> 2700` on ANY source fires, and the
+      # `source` label rides through to the notification so the runbook knows which poller to check.
+      - alert: FeedStale
+        expr: stopgap_feed_staleness_seconds > 2700
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Feed source {{ $labels.source }} is stale (>45m)'
+          description: >-
+            {{ $labels.source }} has not stored a fresh record in {{ $value | humanizeDuration }}.
+            First response: docs/observability.md#feedstale (check the feed poller/schedule).
+
+      # Worker scrape target is down — no /metrics on :9464 for 2 minutes. Workflows are not
+      # advancing while this fires: comms, escalation, and feed polling all run in the worker.
+      - alert: WorkerDown
+        expr: up{job="stopgap-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Worker is down (no /metrics scrape)'
+          description: >-
+            The worker sidecar has been unreachable for 2m. First response:
+            docs/observability.md#workerdown (restart the worker; confirm /readyz recovers).
+
+      # Console scrape target is down — no /api/metrics for 2 minutes. The operator UI and the
+      # HITL review surface are unavailable.
+      - alert: ConsoleDown
+        expr: up{job="stopgap-console"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Console is down (no /api/metrics scrape)'
+          description: >-
+            The console has been unreachable for 2m. First response:
+            docs/observability.md#consoledown (check the console process and /api/readyz).
+
+      # Daily LLM spend has crossed 80% of the configured cap. Guarded by `cap > 0` so a
+      # deployment with no cap (cap gauge reports 0) never divides by zero or fires spuriously.
+      - alert: SpendOver80PctCap
+        expr: stopgap_llm_daily_cap_usd > 0 and stopgap_llm_daily_spend_usd / stopgap_llm_daily_cap_usd > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'LLM daily spend over 80% of cap'
+          description: >-
+            Spend is {{ $value | humanizePercentage }} of the daily cap. First response:
+            docs/observability.md#spendover80pctcap (inspect spend; the cap hard-stops LLM calls at 100%).
+
+      # A critical case has been unacknowledged past the 60-minute policy limit. The gauge is the
+      # MAX unacked age across critical cases, so one lagging case fires it.
+      - alert: CriticalCaseUnacked
+        expr: stopgap_critical_case_unacked_seconds > 3600
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Critical case unacknowledged past 60m policy limit'
+          description: >-
+            A critical case has been unacked for {{ $value | humanizeDuration }} (policy limit 60m).
+            First response: docs/observability.md#criticalcaseunacked (page a pharmacist to acknowledge).

@@ -1,0 +1,15 @@
+# Grafana dashboard provider (Phase 6.4 observability).
+#
+# Loads dashboard JSON from this same directory at startup into a "Stopgap" folder. The
+# JSON files (ops.json, business-kpi.json) live next to this provider file and are mounted
+# read-only into the container at /etc/grafana/provisioning/dashboards. `allowUiUpdates:
+# false` makes the files authoritative — dashboards can't be silently edited away in the UI.
+apiVersion: 1
+
+providers:
+  - name: Stopgap
+    type: file
+    folder: Stopgap
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards

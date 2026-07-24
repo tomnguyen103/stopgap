@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isDemoMode } from "@stopgap/demo";
 import { getCaseDetail, getWorkflowState } from "../../lib/data";
+import { EscalationPanel } from "./escalation-panel";
 import { ReviewPanel } from "./review-panel";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const detail = await getCaseDetail(decodeURIComponent(id));
   if (!detail) notFound();
-  const { case: c, audit } = detail;
+  const { case: c, audit, acks } = detail;
   const live = await getWorkflowState(c.key);
   return (
     <>
@@ -97,6 +98,21 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           {live.draft ? <pre className="draft">{live.draft}</pre> : null}
         </div>
       ) : null}
+
+      <EscalationPanel
+        workflowId={c.workflowId}
+        escalationStep={live?.escalationStep}
+        escalatedAt={live?.escalatedAt ?? []}
+        acked={live?.acked ?? acks.length > 0}
+        acks={acks.map((a) => ({
+          step: a.step,
+          ackAt: a.ackAt.toISOString(),
+          ackedByLabel: a.ackedByLabel,
+        }))}
+        // Hide the button in demo mode (the action refuses a viewer anyway); a real deployment
+        // shows it and the server action enforces pharmacist+.
+        canAck={!isDemoMode()}
+      />
 
       <div className="card">
         <h1 style={{ fontSize: 15 }}>Audit trail (hash-chained)</h1>

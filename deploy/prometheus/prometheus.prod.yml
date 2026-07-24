@@ -1,0 +1,41 @@
+# Prometheus — PROD scrape config (PROJECT_PLAN §14 / Phase 6.4 observability).
+#
+# In prod everything runs inside docker-compose.prod.yml, so Prometheus reaches the
+# console and worker by their COMPOSE SERVICE NAMES on the shared network — not
+# `host.docker.internal` (that alias is a dev/Docker-Desktop convenience and does not
+# exist on a single-VPS Linux host). The `console` service serves /api/metrics on :3000
+# and the `worker` service serves /metrics on :9464. See prometheus.yml for the dev
+# variant that scrapes the host-run processes.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # Prometheus scraping itself — cheap liveness of the monitoring stack.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # Console app: compose service `console`, Next.js route handler at /api/metrics.
+  - job_name: stopgap-console
+    metrics_path: /api/metrics
+    static_configs:
+      - targets:
+          - console:3000
+
+  # Worker sidecar: compose service `worker`, /metrics on :9464.
+  - job_name: stopgap-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - worker:9464

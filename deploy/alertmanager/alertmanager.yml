@@ -1,0 +1,26 @@
+# Alertmanager — minimal, dependency-free config (Phase 6.4 observability).
+#
+# This ships a working-but-silent setup on purpose: alerts route to a `default` receiver
+# that has NO notifier wired, so the stack runs with zero external credentials (no Slack
+# webhook, no PagerDuty routing key, no SMTP server) and the demo/local-check gate never
+# needs secrets. Fired alerts are still visible in the Alertmanager UI (:9093) and in
+# Prometheus — they just aren't pushed anywhere.
+#
+# A real deployment replaces the empty `default` receiver below with a concrete integration,
+# e.g.:
+#   receivers:
+#     - name: default
+#       slack_configs:
+#         - api_url: <webhook>
+#           channel: '#pharmacy-oncall'
+#   # or pagerduty_configs / email_configs — see the Alertmanager docs.
+route:
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: default
+
+receivers:
+  # Null receiver: no notifier configured. Wire Slack/PagerDuty/email here for a real deploy.
+  - name: default

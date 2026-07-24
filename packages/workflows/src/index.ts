@@ -5,6 +5,8 @@ export {
   submitReview,
   resolveException,
   markResolved,
+  acknowledgeCase,
+  checkTemporal,
   getCaseState,
 } from "./client.js";
 export {
@@ -14,6 +16,7 @@ export {
   reviewSignal,
   resolvedSignal,
   exceptionResolvedSignal,
+  acknowledgeSignal,
   stateQuery,
 } from "./workflows.js";
 export { diffResolutions, type FeedResolutionDiff, type ResolutionEvidence } from "./feed-resolution.js";
@@ -21,8 +24,10 @@ export {
   ANCHOR_AUDIT_WORKFLOW,
   POLL_FEEDS_WORKFLOW,
   SHORTAGE_CASE_WORKFLOW,
+  type CaseAcknowledgment,
   type CaseInput,
   type CaseState,
+  type EscalationStep,
   type ReviewDecision,
   type ExceptionResolution,
   type ImpactResult,

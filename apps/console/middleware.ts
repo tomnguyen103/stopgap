@@ -51,6 +51,9 @@ const middleware: NextMiddleware = (request, event) => {
 export default middleware;
 
 export const config = {
-  // Everything except the Auth.js endpoints and Next's static assets.
-  matcher: ["/((?!api/auth|_next/static|_next/image|favicon.ico).*)"],
+  // Everything except the Auth.js endpoints, the unauthenticated health/metrics endpoints
+  // (Prometheus and orchestrators scrape them with no session, PHASE6 §6.4), and Next's static
+  // assets. Exempting healthz/readyz/metrics here is what lets a scrape reach them even when auth
+  // is configured and every other route demands a Keycloak session.
+  matcher: ["/((?!api/auth|api/healthz|api/readyz|api/metrics|_next/static|_next/image|favicon.ico).*)"],
 };

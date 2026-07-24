@@ -1,4 +1,5 @@
 import { getEnv } from "@stopgap/core/env";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema.js";
@@ -16,6 +17,19 @@ export function getDb() {
     dbInstance = drizzle(sqlClient, { schema });
   }
   return dbInstance;
+}
+
+/**
+ * Is the database reachable (PHASE6 §6.4 readiness)? Runs `select 1` and returns a boolean rather
+ * than throwing, so `/readyz` can report the database as down without 500-ing — honest "not ready".
+ */
+export async function pingDb(): Promise<boolean> {
+  try {
+    await getDb().execute(sql`select 1`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Close the pool (tests, graceful shutdown). */

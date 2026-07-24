@@ -1,5 +1,5 @@
 export * as schema from "./schema.js";
-export { getDb, closeDb, type Db } from "./client.js";
+export { getDb, closeDb, pingDb, type Db } from "./client.js";
 export {
   appendAudit,
   verifyAuditChain,
@@ -53,6 +53,14 @@ export {
   type UpsertUserInput,
 } from "./users.js";
 export { getKpis, type Kpis } from "./metrics.js";
+export { getOpsMetrics, type OpsMetrics } from "./ops-metrics.js";
+export {
+  getEscalationPolicy,
+  listEscalationPolicies,
+  upsertEscalationPolicy,
+  recordAcknowledgment,
+  listAcknowledgments,
+} from "./escalation.js";
 export {
   listShadowRuns,
   listShadowRunsForClass,
@@ -66,6 +74,9 @@ export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js
 export type {
   DemoRunRow,
   LlmSpendRow,
+  EscalationPolicyRow,
+  EscalationStep,
+  AcknowledgmentRow,
   UserRow,
   NewUserRow,
   UserRoleRow,

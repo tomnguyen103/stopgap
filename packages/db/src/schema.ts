@@ -109,6 +109,51 @@ export const userRoles = pgTable(
 );
 
 /**
+ * Escalation ladders (PHASE6 §6.3). One row per severity — a `unique` on `severity` enforces a
+ * single ladder per severity, so "the critical ladder" is unambiguous. `steps` is an ordered
+ * jsonb array `[{afterMinutes, notify}]`: `afterMinutes` is the delay from escalation start
+ * before that tier is notified (0 = immediate), `notify` is the role or channel to page. Stored
+ * as data (editable by an admin) rather than hard-coded so the on-call ladder is a config change,
+ * not a deploy.
+ */
+export const escalationPolicies = pgTable(
+  "escalation_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    severity: text("severity").notNull(),
+    steps: jsonb("steps").$type<{ afterMinutes: number; notify: string }[]>().notNull().default(sql`'[]'::jsonb`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("escalation_policies_severity_uq").on(t.severity)],
+);
+
+/**
+ * Human acknowledgments of an escalating case (PHASE6 §6.3) — the "did someone see it" record
+ * ops systems live on. One row per acknowledged step: `unique(caseId, step)` so a retried signal
+ * or a double-click cannot write two acks for the same tier, and `ackAt`/`userId` answer "who,
+ * when" for the escalation timeline. `userId` is a real `users.id` (never a claimed string), so
+ * the acknowledgment is attributable in the same way the audit chain's `actorUserId` is.
+ */
+export const acknowledgments = pgTable(
+  "acknowledgments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    caseId: uuid("case_id")
+      .notNull()
+      .references(() => cases.id),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    step: integer("step").notNull(),
+    ackAt: timestamp("ack_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("acknowledgments_case_step_uq").on(t.caseId, t.step),
+    index("acknowledgments_case_idx").on(t.caseId),
+  ],
+);
+
+/**
  * Append-only, hash-chained audit log (triage-md pattern). Each row's `hash` = SHA-256 of
  * (prevHash + canonical(row-without-hash)); tampering with any row breaks the chain.
  */
@@ -346,6 +391,9 @@ export const demoRuns = pgTable(
   (t) => [index("demo_runs_started_at_idx").on(t.startedAt)],
 );
 
+export type EscalationPolicyRow = typeof escalationPolicies.$inferSelect;
+export type EscalationStep = { afterMinutes: number; notify: string };
+export type AcknowledgmentRow = typeof acknowledgments.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
 export type UserRoleRow = typeof userRoles.$inferSelect;

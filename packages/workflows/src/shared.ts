@@ -60,6 +60,36 @@ export interface CaseState {
   exceptionReason?: string;
   /** Whether any comms channel actually delivered — `comms_sent` only means "we tried". */
   commsDelivered?: boolean;
+  /**
+   * Escalation ladder state (PHASE6 §6.3), driving the console's per-case timeline. `escalationStep`
+   * is the highest ladder tier notified so far (0-based); `escalatedAt` is one ISO timestamp per
+   * tier fired, so the timeline reads "notified → escalated → …". `acked`/`ackedBy` flip when a
+   * human acknowledges via the `acknowledgeCase` signal. Absent `escalationStep` means the ladder
+   * never ran (severity below high, or no policy configured).
+   */
+  escalationStep?: number;
+  escalatedAt: string[];
+  acked: boolean;
+  /** The acknowledging user's `users.id` (never a claimed string). */
+  ackedBy?: string;
+}
+
+/**
+ * A human acknowledgment of an escalating case (PHASE6 §6.3), carried by the `acknowledgeCase`
+ * signal from the console server action. `userId` is the authenticated `users.id`; `label` is the
+ * human-readable actor for the audit chain's text field; `step` optionally pins the tier the ack
+ * answers (defaults to the tier currently reached).
+ */
+export interface CaseAcknowledgment {
+  userId: string;
+  label: string;
+  step?: number;
+}
+
+/** One escalation ladder tier: page `notify` `afterMinutes` after escalation started. */
+export interface EscalationStep {
+  afterMinutes: number;
+  notify: string;
 }
 
 /** Max time a case may sit unresolved before it auto-escalates to the exception queue. */
