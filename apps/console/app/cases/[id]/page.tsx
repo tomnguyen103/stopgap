@@ -49,7 +49,10 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
 
       {live ? (
         <ReviewPanel
-          key={live.draft ?? ""}
+          // Keyed on case + view + draft: two cases sharing a draft (including two empty ones
+          // in the exception view) would otherwise reuse one panel instance and carry a
+          // half-typed rejection reason or resolution into the next case.
+          key={`${c.workflowId}:${live.status}:${live.draft ?? ""}`}
           workflowId={c.workflowId}
           status={live.status}
           draft={live.draft ?? ""}
