@@ -20,7 +20,8 @@
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "worker": "pnpm --filter @stopgap/workflows worker",
-    "console": "pnpm --filter @stopgap/console dev"
+    "console": "pnpm --filter @stopgap/console dev",
+    "eval:full": "vitest run --config vitest.eval-full.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

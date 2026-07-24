@@ -15,8 +15,14 @@ export async function makeClient(): Promise<{ client: Client; connection: Connec
 
 /**
  * Start (or return the existing) durable case workflow for a shortage. The workflow id is
- * derived from the dedup key, so re-detecting the same shortage is idempotent — Temporal's
- * `WorkflowIdReusePolicy` rejects a duplicate start and we treat that as "already open".
+ * derived from the dedup key, so re-detecting the same shortage is idempotent: the conflict
+ * policy rejects a start while a case for that drug is still running, and we treat that as
+ * "already open".
+ *
+ * Reuse is allowed once the previous case reached a terminal state. Shortages recur — the
+ * same drug goes short again months later — and that recurrence is exactly when the protocol
+ * store pays off (the new case reuses the guidance the last one produced). Rejecting reuse
+ * outright, as this did before Phase 3, made a drug's first case its only case forever.
  */
 export async function startCase(
   client: Client,
@@ -29,7 +35,8 @@ export async function startCase(
       args: [{ record, sources }],
       taskQueue: getEnv().TEMPORAL_TASK_QUEUE,
       workflowId,
-      workflowIdReusePolicy: "REJECT_DUPLICATE",
+      workflowIdReusePolicy: "ALLOW_DUPLICATE",
+      workflowIdConflictPolicy: "FAIL",
     });
     return { workflowId, started: true };
   } catch (err) {

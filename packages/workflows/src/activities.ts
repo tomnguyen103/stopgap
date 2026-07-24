@@ -1,6 +1,10 @@
+import { Context } from "@temporalio/activity";
 import type { CaseStatus, Severity } from "@stopgap/core";
 import {
   appendAudit,
+  approveProtocolVersion,
+  draftProtocolVersion,
+  getApprovedProtocol,
   getCaseByWorkflowId,
   getDb,
   updateCaseStatus,
@@ -10,7 +14,14 @@ import {
 import { mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, startCase } from "./client.js";
-import type { CaseInput, ImpactResult, ResearchResult, ReviewDecision } from "./shared.js";
+import type {
+  CaseInput,
+  ImpactResult,
+  ProtocolMemoryHit,
+  RecordProtocolInput,
+  ResearchResult,
+  ReviewDecision,
+} from "./shared.js";
 
 /**
  * Activities are the only place workflows touch the outside world (DB, feeds, LLMs). The
@@ -19,6 +30,15 @@ import type { CaseInput, ImpactResult, ResearchResult, ReviewDecision } from "./
  * temperature 0 for eval reproducibility). The DB-side effects are real. Every activity is
  * idempotent so Temporal retries are safe.
  */
+
+/**
+ * The workflow run an activity is executing for. Audit entries are idempotent per run, so a
+ * recurring shortage (a new run against the same case row) appends its own trail instead of
+ * colliding with the previous run's.
+ */
+function currentRunId(): string | undefined {
+  return Context.current().info.workflowExecution?.runId;
+}
 
 /** Persist a newly detected case and open the audit chain. Idempotent (upsert). */
 export async function recordDetected(input: CaseInput): Promise<void> {
@@ -29,6 +49,7 @@ export async function recordDetected(input: CaseInput): Promise<void> {
     actor: "system",
     action: "case.detected",
     detail: { key: input.record.key, sources: input.sources },
+    runId: currentRunId(),
   });
 }
 
@@ -51,6 +72,14 @@ export async function persistStatus(
     actor: (detail.actor as string) ?? "system",
     action: `case.${status}`,
     detail,
+    runId: currentRunId(),
+    // The monitoring loop persists `case.monitoring` every completed week, so the week
+    // number has to be part of the idempotency key — otherwise week 2 onwards look like
+    // retries of week 1 and never reach the audit trail.
+    eventKey:
+      detail.monitoringWeeks === undefined
+        ? `case.${status}`
+        : `case.${status}.week-${String(detail.monitoringWeeks)}`,
   });
 }
 
@@ -74,6 +103,7 @@ export async function sendComms(key: string, draft: string): Promise<void> {
     actor: "system",
     action: "comms.sent",
     detail: { channel: "mock", chars: draft.length },
+    runId: currentRunId(),
   });
 }
 
@@ -87,6 +117,7 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
     actor: "pharmacist",
     action: `review.${decision.kind}`,
     detail: { ...decision },
+    runId: currentRunId(),
   });
 }
 
@@ -112,4 +143,80 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
   } finally {
     await connection.close();
   }
+}
+
+/**
+ * Look up the approved protocol for this shortage key — the organizational-memory read
+ * (PROJECT_PLAN §3B/§4). A hit means a pharmacist already approved substitution guidance for
+ * this drug, so the case reuses it instead of paying for a fresh research call and asking a
+ * human to re-approve text they already wrote.
+ */
+export async function lookupProtocol(key: string): Promise<ProtocolMemoryHit | undefined> {
+  const found = await getApprovedProtocol(key);
+  if (!found) return undefined;
+  return {
+    versionId: found.version.id,
+    version: found.version.version,
+    body: found.version.body,
+    alternatives: found.version.alternatives,
+  };
+}
+
+/**
+ * Write the approved outcome of this case back into the protocol store, then approve it —
+ * this is what turns a one-off resolution into organizational memory. Provenance (source
+ * case, author, approver, rationale) is recorded on the version row.
+ */
+export async function recordProtocolVersion(input: RecordProtocolInput): Promise<void> {
+  const db = getDb();
+  const row = await getCaseByWorkflowId(db, workflowIdForKey(input.key));
+  // Idempotent under retry: an activity whose insert committed before the worker crashed
+  // would otherwise write a second identical version and supersede the one it just approved.
+  // The retry still re-appends the audit entry (itself idempotent) — a crash between the
+  // approval commit and the audit append would otherwise leave an approved protocol version
+  // with no record of who approved it.
+  const current = await getApprovedProtocol(input.key);
+  if (current && current.version.body === input.body) {
+    await appendAudit(db, {
+      caseId: row?.id,
+      actor: input.approvedBy,
+      action: "protocol.version_approved",
+      detail: {
+        key: input.key,
+        version: current.version.version,
+        authoredBy: input.authoredBy,
+        identitySource: "workflow-signal-claim",
+      },
+      runId: currentRunId(),
+      eventKey: `protocol.version_approved.v${String(current.version.version)}`,
+    });
+    return;
+  }
+  const drafted = await draftProtocolVersion({
+    key: input.key,
+    title: input.title,
+    body: input.body,
+    alternatives: input.alternatives,
+    sourceCaseId: row?.id ?? null,
+    authoredBy: input.authoredBy,
+    rationale: input.rationale ?? null,
+  });
+  await approveProtocolVersion(drafted.id, input.approvedBy);
+  await appendAudit(db, {
+    caseId: row?.id,
+    actor: input.approvedBy,
+    action: "protocol.version_approved",
+    detail: {
+      key: input.key,
+      version: drafted.version,
+      authoredBy: input.authoredBy,
+      // `approvedBy` arrives on a workflow signal and is not an authenticated principal —
+      // anyone able to signal the workflow picks the string. Recording that provenance
+      // honestly is the Phase 3 answer; verifying identity needs the auth layer the Phase 4
+      // review UI introduces (see PHASE5-TODO).
+      identitySource: "workflow-signal-claim",
+    },
+    runId: currentRunId(),
+    eventKey: `protocol.version_approved.v${String(drafted.version)}`,
+  });
 }

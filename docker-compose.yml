@@ -54,5 +54,139 @@ services:
     ports:
       - "8233:8080"
 
+  # ---------------------------------------------------------------------------------------
+  # Langfuse (self-hosted, PROJECT_PLAN §9) — everything below is behind the `langfuse`
+  # profile, so plain `docker compose up -d` still starts only the Phase 1 spine:
+  #   docker compose --profile langfuse up -d
+  # Langfuse v3 needs ClickHouse (analytics store), Redis (queue) and S3-compatible blob
+  # storage in addition to Postgres; that's why this is opt-in rather than always-on.
+  # LANGFUSE_INIT_* seeds a deterministic local org/project/API-key pair so tracing works
+  # headlessly — these are throwaway local-dev credentials, never production secrets.
+  # ---------------------------------------------------------------------------------------
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  langfuse-redis:
+    image: redis:7-alpine
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    command: --requirepass langfuse
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "langfuse", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server /data --console-address ":9001"'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # `|| exit 0` here would make the check unfailable, and dependents would start against
+      # a dead MinIO. Hit MinIO's own liveness endpoint instead.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Langfuse needs its own database in the shared Postgres. The image's own init scripts only
+  # run on a first-boot empty volume, and the Phase 1 volume already exists — so create it
+  # here. `|| true` would also swallow connection and auth failures and let langfuse-worker
+  # start against a database that does not exist, so check for existence first and let any
+  # real psql error fail the service.
+  langfuse-db-init:
+    image: postgres:16-alpine
+    profiles: ["langfuse"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: stopgap
+    command: >-
+      sh -c "psql -h postgres -U stopgap -d stopgap -tAc \"SELECT 1 FROM pg_database WHERE datname='langfuse'\" | grep -q 1 || psql -h postgres -U stopgap -d stopgap -c 'CREATE DATABASE langfuse'"
+    restart: "no"
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      langfuse-db-init:
+        condition: service_completed_successfully
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+    environment: &langfuse-env
+      DATABASE_URL: postgres://stopgap:stopgap@postgres:5432/langfuse
+      SALT: local-dev-salt
+      # Quoted: an unquoted all-digit value is parsed as a number and reaches Langfuse as
+      # "0", failing its 64-hex-char validation. Local-dev throwaway key.
+      ENCRYPTION_KEY: "1a2b3c4d5e6f70819a2b3c4d5e6f70819a2b3c4d5e6f70819a2b3c4d5e6f7081"
+      NEXTAUTH_SECRET: local-dev-secret
+      NEXTAUTH_URL: http://localhost:3001
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    profiles: ["langfuse"]
+    restart: unless-stopped
+    depends_on:
+      langfuse-worker:
+        condition: service_started
+    environment:
+      <<: *langfuse-env
+      LANGFUSE_INIT_ORG_ID: stopgap
+      LANGFUSE_INIT_ORG_NAME: Stopgap
+      LANGFUSE_INIT_PROJECT_ID: stopgap-local
+      LANGFUSE_INIT_PROJECT_NAME: Stopgap (local)
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-stopgap-local
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-stopgap-local
+      LANGFUSE_INIT_USER_EMAIL: local@stopgap.test
+      LANGFUSE_INIT_USER_NAME: Local Dev
+      LANGFUSE_INIT_USER_PASSWORD: stopgaplocal
+    ports:
+      - "3001:3000"
+
 volumes:
   pgdata:
+  clickhouse-data:
+  minio-data:

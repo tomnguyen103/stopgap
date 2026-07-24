@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { getEnv } from "@stopgap/core/env";
+import { flushTracing, initObservability } from "@stopgap/observability";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import * as activities from "./activities.js";
 
@@ -9,6 +10,8 @@ import * as activities from "./activities.js";
  */
 async function main() {
   const env = getEnv();
+  // Activities (not workflows) make the LLM calls, so tracing lives on the worker process.
+  console.log(`[worker] Langfuse tracing ${initObservability("stopgap-worker") ? "enabled" : "disabled (no Langfuse keys)"}`);
   const connection = await NativeConnection.connect({ address: env.TEMPORAL_ADDRESS });
   const worker = await Worker.create({
     connection,
@@ -19,9 +22,13 @@ async function main() {
   });
   console.log(`[worker] listening on task queue "${env.TEMPORAL_TASK_QUEUE}" @ ${env.TEMPORAL_ADDRESS}`);
   await worker.run();
+  // Reached on a normal shutdown (SIGTERM/SIGINT, which Worker.run handles): whatever is
+  // still in the batch span buffer would otherwise be dropped on exit.
+  await flushTracing().catch(() => {});
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error("[worker] fatal:", err);
+  await flushTracing().catch(() => {});
   process.exit(1);
 });

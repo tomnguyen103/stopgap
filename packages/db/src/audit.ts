@@ -20,9 +20,31 @@ export interface AuditEntry {
   actor: string;
   action: string;
   detail?: Record<string, unknown>;
+  /**
+   * The workflow run this entry belongs to. Part of the idempotency key, because a drug that
+   * goes short again opens a NEW case run against the SAME case row — without this, the
+   * second run's `case.researching` would collide with the first run's and the activity
+   * would retry forever against a constraint it can never satisfy.
+   */
+  runId?: string;
+  /**
+   * Distinguishes repeats of the same `action` within one run. The monitoring loop appends
+   * `case.monitoring` once a week; keyed on `action` alone, every tick after the first would
+   * be swallowed by the idempotency check below and the case would look frozen at week 1.
+   * Defaults to `action`.
+   */
+  eventKey?: string;
 }
 
-function hashEntry(prevHash: string, e: Required<Omit<AuditEntry, "caseId">> & { caseId?: string }): string {
+/**
+ * `runId` is deliberately NOT hashed. It is idempotency metadata, not a claim about what
+ * happened, and leaving it out keeps the chain formula stable — entries written before the
+ * column existed still verify against entries written after it.
+ */
+function hashEntry(
+  prevHash: string,
+  e: { caseId?: string; actor: string; action: string; detail: Record<string, unknown> },
+): string {
   return createHash("sha256")
     .update(prevHash)
     .update(canonical({ caseId: e.caseId ?? null, actor: e.actor, action: e.action, detail: e.detail }))
@@ -39,9 +61,11 @@ function hashEntry(prevHash: string, e: Required<Omit<AuditEntry, "caseId">> & {
  * "last hash" and both insert chained to it, making `verifyAuditChain` report a break that
  * isn't tampering. The lock makes every append see a consistent tail.
  *
- * Idempotent on `(caseId, action)`: the case state machine fires each action at most once,
- * so a Temporal activity retry that lands here after its insert already committed (e.g. the
- * worker crashed before acking) finds the existing row and no-ops instead of double-appending.
+ * Idempotent on `(caseId, action, runId)`: within one workflow run the case state machine
+ * fires each action at most once, so a Temporal activity retry that lands here after its
+ * insert already committed (e.g. the worker crashed before acking) finds the existing row and
+ * no-ops instead of double-appending. A later run for the same drug is a different runId and
+ * appends its own entries.
  */
 export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: string }> {
   return db.transaction(async (tx) => {
@@ -54,7 +78,13 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
       const [existing] = await tx
         .select({ hash: auditLog.hash })
         .from(auditLog)
-        .where(and(eq(auditLog.caseId, entry.caseId), eq(auditLog.action, entry.action)))
+        .where(
+          and(
+            eq(auditLog.caseId, entry.caseId),
+            eq(auditLog.eventKey, entry.eventKey ?? entry.action),
+            eq(auditLog.runId, entry.runId ?? ""),
+          ),
+        )
         .limit(1);
       if (existing) return { hash: existing.hash };
     }
@@ -62,8 +92,22 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
     const [last] = await tx.select({ hash: auditLog.hash }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
     const prevHash = last?.hash ?? GENESIS_HASH;
     const detail = entry.detail ?? {};
-    const hash = hashEntry(prevHash, { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId });
-    await tx.insert(auditLog).values({ caseId: entry.caseId, actor: entry.actor, action: entry.action, detail, prevHash, hash });
+    const hash = hashEntry(prevHash, {
+      actor: entry.actor,
+      action: entry.action,
+      detail,
+      caseId: entry.caseId,
+    });
+    await tx.insert(auditLog).values({
+      caseId: entry.caseId,
+      actor: entry.actor,
+      action: entry.action,
+      detail,
+      prevHash,
+      hash,
+      runId: entry.runId ?? "",
+      eventKey: entry.eventKey ?? entry.action,
+    });
     return { hash };
   });
 }

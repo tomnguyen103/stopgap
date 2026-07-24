@@ -10,6 +10,7 @@ import {
   MONITOR_POLL_MS,
   type CaseInput,
   type CaseState,
+  type ExceptionResolution,
   type ReviewDecision,
 } from "./shared.js";
 
@@ -28,6 +29,12 @@ const acts = proxyActivities<typeof activities>({
 export const reviewSignal = defineSignal<[ReviewDecision]>("review");
 /** Feed marked the shortage resolved → begin reversion. */
 export const resolvedSignal = defineSignal("resolved");
+/**
+ * A pharmacist resolved an exception-queue case. The resolution becomes an approved protocol
+ * version (organizational memory) and the case continues from where it parked, rather than
+ * dying in the queue — this is the "exceptions write the SOP" loop (PROJECT_PLAN §3B).
+ */
+export const exceptionResolvedSignal = defineSignal<[ExceptionResolution]>("exceptionResolved");
 /** Queryable case snapshot (drives the console + tests). */
 export const stateQuery = defineQuery<CaseState>("state");
 
@@ -48,6 +55,37 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   setHandler(resolvedSignal, () => {
     state.resolved = true;
   });
+  let exceptionResolution: ExceptionResolution | undefined;
+  setHandler(exceptionResolvedSignal, (resolution) => {
+    exceptionResolution = resolution;
+  });
+
+  /**
+   * Park the case in the exception queue and wait for a pharmacist. A resolution becomes an
+   * approved protocol version (memory) and lets the case continue; no resolution within the
+   * monitoring horizon leaves the case in `exception`, exactly as before this loop existed.
+   */
+  async function parkInException(reason: string, detail: Record<string, unknown>): Promise<boolean> {
+    state.status = "exception";
+    state.exceptionReason = reason;
+    await acts.persistStatus(key, "exception", { reason, ...detail });
+    const resolved = await condition(() => exceptionResolution !== undefined, MAX_MONITORING_MS);
+    if (!resolved) return false;
+    const resolution = exceptionResolution!;
+    state.draft = resolution.protocolBody;
+    state.alternatives = resolution.alternatives;
+    state.protocolSource = "exception-resolution";
+    await acts.recordProtocolVersion({
+      key,
+      title: input.record.genericName,
+      body: resolution.protocolBody,
+      alternatives: resolution.alternatives,
+      authoredBy: resolution.resolvedBy,
+      approvedBy: resolution.resolvedBy,
+      rationale: resolution.rationale,
+    });
+    return true;
+  }
 
   await acts.recordDetected(input);
 
@@ -61,57 +99,91 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // call building on an assessment the agent itself isn't confident in (§8 under-escalation
   // target ≈ 0).
   if (impact.confidence < CONFIDENCE_THRESHOLD) {
-    state.status = "exception";
-    await acts.persistStatus(key, "exception", {
-      reason: "low-confidence-impact",
+    const resolved = await parkInException("low-confidence-impact", {
       confidence: impact.confidence,
       severity: impact.severity,
     });
-    return state;
+    if (!resolved) return state;
+  } else {
+    // Organizational memory first (PROJECT_PLAN §3B/§4): if a pharmacist already approved
+    // substitution guidance for this drug, reuse it instead of paying for a research call
+    // and asking a human to re-approve text they wrote themselves. The HITL gate still runs
+    // — memory changes how much work happens before the pharmacist looks, never whether.
+    state.status = "researching";
+    await acts.persistStatus(key, "researching", { severity: impact.severity });
+    const remembered = await acts.lookupProtocol(key);
+    if (remembered) {
+      state.alternatives = remembered.alternatives;
+      state.draft = remembered.body;
+      state.protocolSource = "memory";
+      state.protocolVersion = remembered.version;
+    } else {
+      const research = await acts.researchAlternatives(input);
+      state.alternatives = research.alternatives;
+      state.draft = research.draft;
+      state.protocolSource = "agent";
+
+      // No therapeutic equivalent, no draft text, or the agent isn't confident enough to
+      // auto-draft → exception queue (always human; PROJECT_PLAN §2 exception matrix, §8
+      // under-escalation target ≈ 0). A missing draft with alternatives present would
+      // otherwise reach the HITL review with nothing to approve/edit/reject.
+      const missingDraft = research.draft.trim().length === 0;
+      if (
+        research.alternatives.length === 0 ||
+        missingDraft ||
+        research.confidence < CONFIDENCE_THRESHOLD
+      ) {
+        const resolved = await parkInException(
+          research.alternatives.length === 0
+            ? "no-therapeutic-equivalent"
+            : missingDraft
+              ? "missing-protocol-draft"
+              : "low-confidence-alternatives",
+          { confidence: research.confidence },
+        );
+        if (!resolved) return state;
+      }
+    }
   }
 
-  // Research alternatives.
-  state.status = "researching";
-  await acts.persistStatus(key, "researching", { severity: impact.severity });
-  const research = await acts.researchAlternatives(input);
-  state.alternatives = research.alternatives;
-  state.draft = research.draft;
+  // Draft ready → HITL gate. Skipped only when a pharmacist personally resolved the
+  // exception: the draft IS their text, already approved, so re-asking them to approve it
+  // would be ceremony, not review.
+  if (state.protocolSource !== "exception-resolution") {
+    state.status = "protocol_draft";
+    await acts.persistStatus(key, "protocol_draft");
+    state.status = "awaiting_review";
+    await acts.persistStatus(key, "awaiting_review");
 
-  // No therapeutic equivalent, no draft text, or the agent isn't confident enough to
-  // auto-draft → exception queue (always human; PROJECT_PLAN §2 exception matrix, §8
-  // under-escalation target ≈ 0). A missing draft with alternatives present would otherwise
-  // reach the HITL review with nothing for the pharmacist to approve/edit/reject.
-  const missingDraft = research.draft.trim().length === 0;
-  if (research.alternatives.length === 0 || missingDraft || research.confidence < CONFIDENCE_THRESHOLD) {
-    state.status = "exception";
-    await acts.persistStatus(key, "exception", {
-      reason:
-        research.alternatives.length === 0
-          ? "no-therapeutic-equivalent"
-          : missingDraft
-            ? "missing-protocol-draft"
-            : "low-confidence-alternatives",
-      confidence: research.confidence,
-    });
-    return state;
+    // Block (possibly for days) until the pharmacist decides.
+    await condition(() => decision !== undefined);
+    state.decision = decision;
+    await acts.recordDecision(key, decision!);
+    if (decision!.kind === "reject") {
+      state.status = "rejected";
+      await acts.persistStatus(key, "rejected", { reason: decision!.reason });
+      return state;
+    }
+    if (decision!.kind === "edit") state.draft = decision!.editedDraft;
+
+    // Approved text the memory doesn't already hold becomes a new protocol version — an
+    // agent draft a human signed off on, or a human's edit of one. Reusing a remembered
+    // protocol unchanged writes nothing: it would be a duplicate version with no new content.
+    if (state.protocolSource === "agent" || decision!.kind === "edit") {
+      await acts.recordProtocolVersion({
+        key,
+        title: input.record.genericName,
+        body: state.draft ?? "",
+        alternatives: state.alternatives,
+        authoredBy: decision!.kind === "edit" ? "pharmacist" : "agent",
+        approvedBy: "pharmacist",
+        rationale:
+          decision!.kind === "edit"
+            ? "Pharmacist edit of the agent draft at review."
+            : "Agent draft approved unchanged at review.",
+      });
+    }
   }
-
-  // Draft ready → HITL gate.
-  state.status = "protocol_draft";
-  await acts.persistStatus(key, "protocol_draft");
-  state.status = "awaiting_review";
-  await acts.persistStatus(key, "awaiting_review");
-
-  // Block (possibly for days) until the pharmacist decides.
-  await condition(() => decision !== undefined);
-  state.decision = decision;
-  await acts.recordDecision(key, decision!);
-  if (decision!.kind === "reject") {
-    state.status = "rejected";
-    await acts.persistStatus(key, "rejected", { reason: decision!.reason });
-    return state;
-  }
-  if (decision!.kind === "edit") state.draft = decision!.editedDraft;
 
   // Approved → comms out.
   state.status = "approved";

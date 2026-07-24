@@ -42,12 +42,9 @@ case, console renders it, time-skipped Temporal test proves a multi-week case re
 
 ## Phase 2 — Intelligence (weeks 2–4)
 
-**Status:** in progress — [PR #2](https://github.com/tomnguyen103/stopgap/pull/2) open,
-local gate green, all CodeRabbit round-1/round-2 findings fixed. **Parked**: CodeRabbit
-rate-limited on the latest commit (9a14e82) — not merging until the review completes per
-the CodeRabbit-mandatory workflow rule. Resume: trigger `@coderabbitai review` on PR #2,
-run the wait protocol, merge once clean. Langfuse tracing and golden dataset expansion
-(v1 has 4 cases, plan targets 60-100) still open regardless of the park.
+**Status:** ✅ MERGED — [PR #2](https://github.com/tomnguyen103/stopgap/pull/2) (agents,
+confidence routing, eval gate), CodeRabbit clean after 3 rounds. Langfuse tracing and the
+golden-dataset expansion shipped after the merge (see PR #3).
 
 Target deliverable: impact + alternatives agents, structured outputs, confidence routing;
 golden dataset v1; Langfuse; eval CI gate on Ollama.
@@ -71,13 +68,63 @@ golden dataset v1; Langfuse; eval CI gate on Ollama.
   workflow-side import is an isolated `@stopgap/agents/schemas` subpath so provider/network
   code never enters the deterministic workflow sandbox) opened a fresh insulin-lispro case
   through the real agents: severity `critical`, full audit trail to `awaiting_review`
-- [ ] Langfuse self-hosted + OTel GenAI tracing (currently: local console/no-op sink)
-- [ ] Golden dataset expansion toward 60-100 cases
+- [x] Langfuse self-hosted (compose `langfuse` profile) + OTel GenAI tracing via
+  `@stopgap/observability` ([ADR-0003](docs/adr/0003-otel-genai-tracing-to-self-hosted-langfuse.md)).
+  Verified live: a real `assessImpact` span landed in Langfuse with provider, model, token
+  counts and 3.17 s latency, read back through Langfuse's public API.
+- [x] Golden dataset 4 → 87 cases across 10 clinical categories, with the labeling rubric and
+  the synthetic-NDC caveat documented in the file. `pnpm eval` runs a deterministic 12-case
+  stride; `pnpm eval:full` runs all 87 (~12 min, ~500 local model calls).
+- [x] **Measured eval results (mistral 7B local, temperature 0, best-of-3 per case):**
+  75/89 and 71/89 checks passed on two full runs — i.e. **80-84%, and the same corpus varies
+  by ~4 points between identical runs**, which is exactly why the eval suite is not a hard
+  gate. Failures cluster in three honest weaknesses, not random noise:
+  1. **No-equivalent drugs** (methotrexate PF, vincristine, Rho(D), asparaginase, isoniazid,
+     phytonadione, thiamine, sterile water) — the model invents a substitute where a
+     pharmacist would say there is none. This is the under-escalation direction and the most
+     important open weakness.
+  2. **Resolved shortages** (saline, withdrawn ranitidine) — over-escalates something already
+     resolved.
+  3. **Severity floors** on a few critical-care items (epinephrine, succinylcholine).
+  A Gemini-class model is expected to do better on all three; that comparison is the blocked
+  item below.
 - [ ] Gemini-vs-Ollama comparison table (blocked on `GEMINI_API_KEY`, see `PHASE5-TODO.md`)
 
 ## Phase 3 — Memory + shadow (weeks 4–6)
 
-**Status:** not started
+**Status:** in progress — PR #3 open.
+
+Target deliverable: versioned protocol store + provenance; exception loop; shadow ledger +
+replay corpus + agreement dashboard; promotion gates.
+
+- [x] Versioned protocol store (`protocols` / `protocol_versions`): immutable versions
+  numbered per protocol, approval supersedes the previous approved version in one
+  transaction, provenance (source case, author, approver, rationale) on every row
+- [x] Protocol memory in the case workflow: an approved protocol is reused instead of paying
+  for a research call; approved agent drafts and pharmacist edits are written back
+- [x] Exception loop: exception cases park and wait for a pharmacist; the resolution becomes
+  an approved protocol version and the case continues from where it parked
+- [x] Recurring shortages can reopen a case (dedupe now targets *running* cases), plus the
+  audit idempotency key gains `run_id` so a second run doesn't collide with the first
+- [x] Shadow ledger + replay corpus (derived from the golden dataset) + agreement scoring +
+  per-drug-class promotion gates (shadow → suggest → auto-draft, stricter severity bar)
+- [x] Console: `/protocols` (version history + provenance) and `/shadow` (per-class
+  agreement, promotion stage, blockers, recent-run triage)
+- [x] Verified live against real Temporal + Postgres + Ollama: agent draft approved → v1
+  approved → case closed → recurrence reused v1 from memory with no duplicate version; an
+  immune-globulin case parked as `no-therapeutic-equivalent` → pharmacist resolution → v1
+  authored by the pharmacist → case continued to monitoring
+- [x] Shadow replay of 24 corpus entries: injectable 74% mean agreement / 63% severity match
+  (19 runs), oncology 80% / 100% (5 runs) — both correctly held at the `shadow` stage by the
+  promotion gates
+- [x] Audit-chain check during Phase 3 verification: `verifyAuditChain` reports a break at row
+  7 in the local dev database. Investigated — 58 forked links, all inside one 4-second window
+  on 2026-07-23 20:14 (the 57-case bulk poll), i.e. a stale pre-PR-#1 worker process that was
+  still running without the advisory-lock fix. Current code is correct: 12 concurrent
+  `appendAudit` calls against the same database produced zero forks. The dev database keeps
+  the historical break; a fresh database does not reproduce it.
+- [ ] Extract `shadow-ledger` as a standalone npm library (PROJECT_PLAN §12 artifact 5 —
+  Phase 5 packaging work)
 
 ## Phase 4 — Product (weeks 6–8)
 
@@ -88,4 +135,5 @@ golden dataset v1; Langfuse; eval CI gate on Ollama.
 ## Merged-PR log
 
 <!-- append one line per merged PR: ✅ <PR title> — <what it proved> -->
+✅ Phase 2 — Intelligence: agents, confidence routing, eval gate ([#2](https://github.com/tomnguyen103/stopgap/pull/2)) — Zod-validated impact/alternatives agents replacing Phase 1 mocks, confidence routing to the exception queue, prompt-injection defense, golden dataset + `pnpm eval` running live on Ollama. CodeRabbit clean after 3 rounds (escaped record delimiter, blank-alternative normalization, stricter injection assertions in the last round).
 ✅ Phase 1 — Spine: durable case engine, provider routing, live feeds ([#1](https://github.com/tomnguyen103/stopgap/pull/1)) — Temporal + Postgres + live openFDA/ASHP polling, Gemini/Ollama provider registry with failover, Next.js 15 console, `pollFeedsWorkflow` auto-opening cases (57 real cases opened live in verification), weekly-tick monitoring loop, retry-safe hash-chained audit log. 23/23 tests green, `pnpm gate` clean, CodeRabbit clean after 4 rounds.

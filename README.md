@@ -62,3 +62,28 @@ Run the worker and console:
 pnpm worker                   # Temporal worker
 pnpm console                  # Next.js console at http://localhost:3000
 ```
+
+### LLM tracing (optional)
+
+Self-hosted Langfuse is behind a compose profile, so it never starts with the default spine:
+
+```bash
+docker compose --profile langfuse up -d    # Langfuse UI on http://localhost:3001
+```
+
+The profile seeds a local project (`LANGFUSE_INIT_*` in `docker-compose.yml`). Put its key
+pair in `.env` and every LLM call emits an OTel GenAI span with provider, model, tokens,
+cost, latency and whether the call failed over — see
+[ADR 0003](docs/adr/0003-otel-genai-tracing-to-self-hosted-langfuse.md). Without both keys,
+tracing is off entirely.
+
+### Evals
+
+```bash
+pnpm eval                     # golden-dataset subset + injection cases, live on Ollama
+pnpm eval:full                # all golden cases (slow: hundreds of local model calls)
+```
+
+Evals run **outside** `pnpm gate` on purpose — small local models aren't fully deterministic
+even at temperature 0, so a hard build gate on live-model output would train everyone to
+ignore red. `pnpm gate` stays deterministic; `pnpm eval` reports the real signal.

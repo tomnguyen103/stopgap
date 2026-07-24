@@ -15,6 +15,34 @@
       "when": 1784838300917,
       "tag": "0001_steep_riptide",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784846775215,
+      "tag": "0002_tense_sir_ram",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784849114426,
+      "tag": "0003_flimsy_mindworm",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784850394027,
+      "tag": "0004_material_karen_page",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784851449511,
+      "tag": "0005_remarkable_pete_wisdom",
+      "breakpoints": true
     }
   ]
 }

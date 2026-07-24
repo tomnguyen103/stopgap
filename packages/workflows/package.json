@@ -10,13 +10,15 @@
     "typecheck": "tsc --noEmit",
     "worker": "tsx src/worker.ts",
     "start-case": "tsx src/scripts/start-case.ts",
-    "start-schedule": "tsx src/scripts/start-schedule.ts"
+    "start-schedule": "tsx src/scripts/start-schedule.ts",
+    "resolve-exception": "tsx src/scripts/resolve-exception.ts"
   },
   "dependencies": {
     "@stopgap/agents": "workspace:*",
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
     "@stopgap/ingest": "workspace:*",
+    "@stopgap/observability": "workspace:*",
     "@temporalio/activity": "^1.11.0",
     "@temporalio/client": "^1.11.0",
     "@temporalio/worker": "^1.11.0",
