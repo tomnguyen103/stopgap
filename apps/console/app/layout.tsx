@@ -23,6 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/metrics">KPIs</Link>
             <Link href="/audit">Audit</Link>
             <Link href="/admin/users">Admin</Link>
+            <Link href="/admin/api-keys">API keys</Link>
           </nav>
         </header>
         <DemoBanner />

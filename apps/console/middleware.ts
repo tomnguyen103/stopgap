@@ -52,8 +52,25 @@ export default middleware;
 
 export const config = {
   // Everything except the Auth.js endpoints, the unauthenticated health/metrics endpoints
-  // (Prometheus and orchestrators scrape them with no session, PHASE6 §6.4), and Next's static
-  // assets. Exempting healthz/readyz/metrics here is what lets a scrape reach them even when auth
-  // is configured and every other route demands a Keycloak session.
-  matcher: ["/((?!api/auth|api/healthz|api/readyz|api/metrics|_next/static|_next/image|favicon.ico).*)"],
+  // (Prometheus and orchestrators scrape them with no session, PHASE6 §6.4), the public API
+  // (PHASE6 §6.7), and Next's static assets. Exempting healthz/readyz/metrics here is what lets a
+  // scrape reach them even when auth is configured and every other route demands a Keycloak session.
+  //
+  // `api/v1` is exempt because it authenticates itself and must answer an unauthenticated caller
+  // with `401 {"error":"unauthorized"}` — never a 302 to a Keycloak login page. An API client
+  // cannot follow an HTML sign-in redirect; it would parse the login page as its response body and
+  // report a nonsense error.
+  //
+  // Exempting it removes no protection, but the two surfaces under it gate DIFFERENTLY, and the
+  // distinction is the whole reason this exemption is safe:
+  //  - Every DATA route (`/api/v1/cases…`, `/api/v1/protocols…`, `/api/v1/shadow/stats`) calls
+  //    `authenticateApiRequest` first and is closed by default — with no keys issued they all 401,
+  //    in every deployment, demo included.
+  //  - The two DOCUMENTATION routes (`/api/v1/docs`, `/api/v1/openapi.json`) hold no data and
+  //    carry no API key. They gate on a console SESSION instead, via `docsAudienceAllowed()`
+  //    (`app/lib/api-docs-gate.ts`), which mirrors this file's own stance: an authenticated
+  //    principal passes, and so does anyone when demo mode is on or no IdP is configured, because
+  //    there is no session to demand in those deployments. An auth-configured deployment refuses
+  //    an unauthenticated reader with 401 — HTML from `/docs`, JSON from `/openapi.json`.
+  matcher: ["/((?!api/auth|api/healthz|api/readyz|api/metrics|api/v1|_next/static|_next/image|favicon.ico).*)"],
 };

@@ -1,1 +1,16 @@
-export { listCasesTool, getCaseTool, getProtocolTool, reviewCaseTool, listCasesInput, caseInput, reviewInput } from "./tools.js";
+export {
+  apiConfigured,
+  listCasesTool,
+  getCaseTool,
+  getProtocolTool,
+  getShadowStatsTool,
+  resolveExceptionTool,
+  reviewCaseTool,
+  listCasesInput,
+  caseInput,
+  shadowStatsInput,
+  resolveExceptionInput,
+  reviewCaseInput,
+  type ApiFailure,
+  type NotConfigured,
+} from "./tools.js";

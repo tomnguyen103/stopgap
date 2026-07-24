@@ -4,6 +4,7 @@ import {
   getCaseByWorkflowId,
   getDb,
   listAcknowledgments,
+  listApiKeys,
   listCases,
   listShadowRuns,
   listUsers,
@@ -13,7 +14,7 @@ import {
   verifyAuditChain,
 } from "@stopgap/db";
 import type { Role } from "@stopgap/core";
-import type { UserRow } from "@stopgap/db";
+import type { ApiKeyRow, UserRow } from "@stopgap/db";
 import type {
   AnchorVerification,
   AuditRow,
@@ -115,6 +116,14 @@ export async function getAuditIntegrity(): Promise<{
 /** Active users with their roles, for the admin management page (PHASE6 §6.1). */
 export async function getUsers(): Promise<(UserRow & { roles: Role[] })[]> {
   return listUsers();
+}
+
+/**
+ * Every API key — including revoked ones — for the admin page (PHASE6 §6.7). Rows carry only the
+ * hash and prefix, never a usable secret, so rendering them leaks nothing.
+ */
+export async function getApiKeys(): Promise<ApiKeyRow[]> {
+  return listApiKeys();
 }
 
 /** Shadow-mode aggregates per drug class, with the promotion stage each has earned. */

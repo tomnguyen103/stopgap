@@ -152,9 +152,11 @@ doc; injection test suite; provider comparison table.
 - [x] Comms out (`@stopgap/comms`) — Resend email + EHR formulary webhook, keyed on case+run
   so a retry cannot double-send; missing credentials or an unreachable endpoint produce a
   recorded non-delivery with a reason instead of a silent success. 8 unit tests.
-- [x] MCP server (`@stopgap/mcp`) — stdio server with `list_cases`, `get_case`,
-  `get_protocol`, `review_case`. Verified against the live database through a real MCP client
-  handshake. Mutation surface is deliberately limited to the review decision.
+- [x] MCP server (`@stopgap/mcp`) — stdio server with `list_cases`, `get_case`, `get_protocol`,
+  `get_shadow_stats`, `resolve_exception`, `review_case`. Since Phase 6 §6.7 it holds no database
+  or Temporal connection: every tool is an HTTP call to the public REST API carrying a scoped API
+  key, so what it may write is decided by the key's scopes (`protocols:write`) rather than by its
+  own gate. With no key set it reports honest non-configuration instead of reading the database.
 - [x] Exception matrix — [docs/exception-matrix.md](docs/exception-matrix.md): every
   escalation path, why it stops there, and how the case resumes.
 - [x] Injection test suite — 5 new attack classes (delimiter escape, role reassignment inside

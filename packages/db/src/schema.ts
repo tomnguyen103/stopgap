@@ -393,6 +393,69 @@ export const demoRuns = pgTable(
   (t) => [index("demo_runs_started_at_idx").on(t.startedAt)],
 );
 
+/**
+ * Programmatic-access credentials (PHASE6 §6.7). One row per issued API key. The DB stores the
+ * SHA-256 `keyHash` and NEVER the plaintext: the plaintext is shown to the issuing admin exactly
+ * once, so a database read (backup, replica, dump, compromised analyst account) cannot mint a
+ * usable credential. `keyPrefix` is the leading few plaintext characters, kept solely so a human
+ * can tell two keys apart in the admin list — it is not enough material to authenticate with.
+ *
+ * `scopes` is a jsonb array of the `API_SCOPES` literals rather than a PG enum or a join table:
+ * a new scope is then a code change, not a migration, and the issuing path already validates
+ * every value on write. `rateLimitPerHour` lives per key so one noisy integration cannot starve
+ * the others. `createdByUserId` is the human who issued the key — the attribution the audit chain
+ * records for anything the key later does — and is nullable because a key issued before an IdP
+ * was wired has no human `users.id` to point at. `revokedAt` soft-revokes: deleting the row would
+ * destroy the provenance of every audit entry that names the key.
+ */
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    /** SHA-256 hex of the plaintext key. Unique: two keys must never collide onto one identity. */
+    keyHash: text("key_hash").notNull(),
+    /**
+     * The `sk_live_` namespace plus the first few characters of the key's RANDOM segment — enough
+     * to tell two issued keys apart in the admin table, useless for authentication. The random
+     * characters are the point: the namespace alone is identical on every row.
+     */
+    keyPrefix: text("key_prefix").notNull(),
+    scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    rateLimitPerHour: integer("rate_limit_per_hour").notNull().default(1000),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("api_keys_key_hash_uq").on(t.keyHash)],
+);
+
+/**
+ * One row per API request a key was ALLOWED to make — the sliding-window counter behind the
+ * per-key rate limit (PHASE6 §6.7), mirroring `demo_runs`.
+ *
+ * A table rather than a process-local counter for the same two reasons the demo limiter uses one:
+ * the limit must survive a console restart (an in-memory map resets to zero and hands an attacker
+ * a fresh budget by crashing the process), and it must hold ACROSS REPLICAS (two console
+ * containers behind a load balancer would otherwise each grant the full hourly quota). Rows are
+ * written when a request is admitted, so the count is of attempts allowed through, not of requests
+ * that happened to succeed — a limit bounds attempts, not successes.
+ */
+export const apiKeyRequests = pgTable(
+  "api_key_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    apiKeyId: uuid("api_key_id")
+      .notNull()
+      .references(() => apiKeys.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Composite (key, at): every read is "how many rows for THIS key since THIS instant", so a
+  // per-key index over the timestamp answers the window count without scanning other keys' rows.
+  (t) => [index("api_key_requests_key_at_idx").on(t.apiKeyId, t.at)],
+);
+
 export type EscalationPolicyRow = typeof escalationPolicies.$inferSelect;
 export type AcknowledgmentRow = typeof acknowledgments.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
@@ -410,3 +473,6 @@ export type ShadowRunRow = typeof shadowRuns.$inferSelect;
 export type NewShadowRunRow = typeof shadowRuns.$inferInsert;
 export type LlmSpendRow = typeof llmSpend.$inferSelect;
 export type DemoRunRow = typeof demoRuns.$inferSelect;
+export type ApiKeyRow = typeof apiKeys.$inferSelect;
+export type NewApiKeyRow = typeof apiKeys.$inferInsert;
+export type ApiKeyRequestRow = typeof apiKeyRequests.$inferSelect;

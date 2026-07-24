@@ -26,6 +26,13 @@ vi.mock("@stopgap/db", () => ({
   setUserDisabled: vi.fn(),
   getCaseByWorkflowId: vi.fn(),
   getDb: () => ({}),
+  // PHASE6 §6.7: `actions.ts` now also imports the API-key surface. Stubbed here because this
+  // suite is about the RBAC gate, not key issuance — `isApiScope` must be real enough for the
+  // module's Zod schema to build at import time.
+  isApiScope: (v: unknown) =>
+    ["cases:read", "protocols:read", "protocols:write", "shadow:read"].includes(v as string),
+  issueApiKey: vi.fn(),
+  revokeApiKey: vi.fn(),
 }));
 
 // Workflow client — spy so we can assert it is NEVER called when authorization fails.

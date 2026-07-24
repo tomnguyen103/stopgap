@@ -116,6 +116,22 @@ const EnvSchema = z.object({
   KEYCLOAK_CLIENT_ID: z.string().default("stopgap-console"),
   /** OIDC client secret. Optional: a public client, or a deployment that has not wired auth. */
   KEYCLOAK_CLIENT_SECRET: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
+
+  /**
+   * Base URL of the public REST API (PHASE6 §6.7) — where the MCP server sends its requests.
+   * Defaults to the console's local dev port, so `pnpm --filter @stopgap/mcp serve` on a developer
+   * machine needs no configuration beyond a key. In compose this points at the console service.
+   */
+  STOPGAP_API_BASE_URL: z.string().default("http://localhost:3000"),
+  /**
+   * API key the MCP server authenticates with (PHASE6 §6.7). OPTIONAL, and its absence is the
+   * honest non-configured state: with no key, every MCP tool returns a structured "not configured"
+   * result explaining how to issue one. It does NOT fall back to reading the database directly —
+   * that fallback is exactly what §6.7 removes, because it left a second, unauthorized path to the
+   * same data. The empty-string preprocess matches the other optional secrets: `STOPGAP_API_KEY=`
+   * in an env file is how "unset" is written.
+   */
+  STOPGAP_API_KEY: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
