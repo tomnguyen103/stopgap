@@ -131,6 +131,19 @@ services:
       temporal:
         condition: service_healthy
     environment: *app-env
+    # Liveness via the always-200 health route (PHASE6 §6.4). `node -e` rather than curl/wget so it
+    # works on the minimal Next runtime image regardless of what shell tools it ships.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3000/api/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   worker:
     build:
@@ -148,6 +161,18 @@ services:
       ollama-pull:
         condition: service_completed_successfully
     environment: *app-env
+    # Liveness via the worker's HTTP sidecar (PHASE6 §6.4) — the same port Prometheus scrapes.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:9464/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   # Nightly demo re-seed (PROJECT_PLAN §11). A sleep loop rather than a cron image: one
   # dependency fewer, and the seeder is idempotent so a missed or doubled run is harmless.
@@ -344,12 +369,53 @@ services:
       TEMPORAL_DOMAIN: ${TEMPORAL_DOMAIN}
       TRACES_DOMAIN: ${TRACES_DOMAIN}
       AUTH_DOMAIN: ${AUTH_DOMAIN}
+      OPS_DOMAIN: ${OPS_DOMAIN}
       BASIC_AUTH_USER: ${BASIC_AUTH_USER}
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+
+  # ---- Observability (PHASE6 §6.4) ---------------------------------------------------------
+  # Prometheus scrapes the compose-internal console (:3000/api/metrics) and worker (:9464/metrics)
+  # via prometheus.prod.yml; Grafana auto-provisions the datasource + Ops/Business dashboards;
+  # Alertmanager holds the alert routes. No published ports — like the console/Temporal-UI/Langfuse
+  # they sit on the internal network; Grafana is reached through Caddy at ${OPS_DOMAIN} behind the
+  # same basic-auth layer as the Temporal UI, never by publishing its port.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml"]
+    volumes:
+      - ./prometheus/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
+    volumes:
+      # The PROD config, not the silent dev one, and the on-call webhook as a mounted secret.
+      # `:?` on the path: a deploy that never configured a receiver fails to start rather than
+      # running with alerting that pages nobody.
+      - ./alertmanager/alertmanager.prod.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ${ALERTMANAGER_SLACK_WEBHOOK_FILE:?set ALERTMANAGER_SLACK_WEBHOOK_FILE to a file holding the on-call Slack webhook}:/run/secrets/alertmanager_slack_webhook:ro
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      # `:?` — an unset OR EMPTY value fails the deploy. Without it Grafana silently falls back to
+      # its built-in `admin` password, leaving Caddy basic auth as the only thing in front.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD to a generated secret}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
 
 volumes:
   pgdata:
@@ -358,3 +424,5 @@ volumes:
   ollama:
   caddy-data:
   caddy-config:
+  prometheus-data:
+  grafana-data:

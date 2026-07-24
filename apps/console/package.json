@@ -13,6 +13,7 @@
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
     "@stopgap/demo": "workspace:*",
+    "@stopgap/observability": "workspace:*",
     "@stopgap/shadow": "workspace:*",
     "@stopgap/workflows": "workspace:*",
     "drizzle-orm": "^0.38.0",

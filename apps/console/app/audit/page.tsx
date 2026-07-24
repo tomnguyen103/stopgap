@@ -1,4 +1,5 @@
 import { getAuditIntegrity } from "../lib/data";
+import { formatUtc } from "../lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export default async function AuditPage() {
           <tbody>
             {anchors.map((a) => (
               <tr key={a.id}>
-                <td className="sub">{new Date(a.ts).toISOString().replace("T", " ").slice(0, 19)}</td>
+                <td className="sub">{formatUtc(a.ts)}</td>
                 <td>#{String(a.maxAuditId)}</td>
                 <td className="mono" title={a.headHash}>
                   {a.headHash.slice(0, 12)}…

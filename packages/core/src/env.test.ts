@@ -36,3 +36,26 @@ describe("LLM_DAILY_USD_CAP parsing", () => {
     expect(getEnv().LLM_DAILY_USD_CAP).toBe(0);
   });
 });
+
+describe("WORKER_HTTP_PORT bounds", () => {
+  const original = process.env.WORKER_HTTP_PORT;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.WORKER_HTTP_PORT;
+    else process.env.WORKER_HTTP_PORT = original;
+    resetEnvCache();
+  });
+
+  it("accepts the highest bindable port", () => {
+    process.env.WORKER_HTTP_PORT = "65535";
+    resetEnvCache();
+    expect(getEnv().WORKER_HTTP_PORT).toBe(65535);
+  });
+
+  it("rejects a port above the TCP range", () => {
+    // Without .max(65535) this parses fine and the worker only dies later, at bind time.
+    process.env.WORKER_HTTP_PORT = "65536";
+    resetEnvCache();
+    expect(() => getEnv()).toThrow();
+  });
+});

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type * as activities from "./activities.js";
 import type { CaseInput, RecordProtocolInput } from "./shared.js";
 import {
+  acknowledgeSignal,
   anchorAuditWorkflow,
   exceptionResolvedSignal,
   pollFeedsWorkflow,
@@ -37,6 +38,18 @@ function heparin(): ShortageRecord {
   };
 }
 
+/** Escalation notifications the workflow fired, asserted by the escalation tests. */
+const escalationNotifications: {
+  key: string;
+  severity: string;
+  stepIndex: number;
+  notify: string;
+  afterMinutes: number;
+  delivered: boolean;
+}[] = [];
+/** Acknowledgments the workflow recorded, asserted by the escalation tests. */
+const recordedAcks: { key: string; userId: string; label: string; step: number }[] = [];
+
 /** Deterministic in-memory activity stubs — mirror the real signatures, no side effects. */
 const mockActivities: typeof activities = {
   recordDetected: async () => {},
@@ -47,7 +60,12 @@ const mockActivities: typeof activities = {
       throw new Error("no usable LLM provider (requested ollama); checked ollama, gemini");
     }
     return {
-      severity: input.record.ndcs.length >= 2 ? ("high" as const) : ("moderate" as const),
+      // A name saying "critical" forces the critical ladder; otherwise 2+ NDCs → high (heparin).
+      severity: /critical/i.test(input.record.genericName)
+        ? ("critical" as const)
+        : input.record.ndcs.length >= 2
+          ? ("high" as const)
+          : ("moderate" as const),
       affectedFormularyItems: input.record.ndcs.length,
       rationale: "test",
       confidence: /low impact confidence/i.test(input.record.genericName) ? 0.2 : 0.9,
@@ -71,6 +89,43 @@ const mockActivities: typeof activities = {
       : undefined,
   recordProtocolVersion: async (input) => {
     recordedProtocols.push(input);
+  },
+  getEscalationPolicy: async (severity: string) =>
+    severity === "critical"
+      ? {
+          severity,
+          steps: [
+            { afterMinutes: 0, notify: "pharmacist" },
+            { afterMinutes: 30, notify: "pharmacy_director" },
+            { afterMinutes: 60, notify: "admin" },
+          ],
+        }
+      : severity === "high"
+        ? {
+            severity,
+            steps: [
+              { afterMinutes: 0, notify: "pharmacist" },
+              { afterMinutes: 120, notify: "pharmacy_director" },
+            ],
+          }
+        : null,
+  sendEscalationNotification: async (input) => {
+    // A key saying "tier0rejects" models the activity itself failing on tier 0 (its own
+    // non-delivery write died), as opposed to resolving with `delivered: false`.
+    if (/tier0rejects/i.test(input.key) && input.stepIndex === 0) {
+      throw new Error("audit write failed");
+    }
+    // A key saying "nondeliver" models a channel that is down: non-delivery is recorded and the
+    // ladder STILL advances (the workflow never branches on `delivered`).
+    const delivered = !/nondeliver/i.test(input.key);
+    escalationNotifications.push({ ...input, delivered });
+    return { delivered };
+  },
+  recordAck: async (input) => {
+    // A key saying "ackfails" models durable ack persistence that never succeeds — the activity
+    // rejects on every attempt, so the workflow sees a terminal failure after its retries.
+    if (/ackfails/i.test(input.key)) throw new Error("acknowledgments table unreachable");
+    recordedAcks.push(input);
   },
 };
 
@@ -312,6 +367,225 @@ describe("anchorAuditWorkflow (time-skipped)", () => {
         workflowId: `wf-anchor-${Date.now()}`,
       });
       expect(await handle.result()).toEqual({ maxAuditId: 7, headHash: "deadbeef", sink: "file" });
+    });
+  }, 60_000);
+});
+
+describe("escalation ladder (time-skipped)", () => {
+  /** A critical case reaches the HITL gate and blocks there, with the ladder running concurrently. */
+  function criticalRecord(key: string): ShortageRecord {
+    return { ...heparin(), genericName: `Critical ${key}`, key };
+  }
+
+  it("ignores an acknowledgment for a case whose ladder never started", async () => {
+    await withWorker(async () => {
+      // Moderate severity (single NDC, no "critical" in the name): no ladder, so nobody has been
+      // paged. An ack accepted here would mark the case acknowledged for a page that never
+      // happened — and on a case that later escalates, would let it skip the ladder entirely.
+      const key = "moderate-preack";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: { ...heparin(), genericName: `Moderate ${key}`, key, ndcs: ["1"] }, sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-preack-${Date.now()}`,
+      });
+      await env.sleep("5 minutes");
+      await handle.signal(acknowledgeSignal, { userId: "user-9", label: "pharmacist-9" });
+      await env.sleep("5 minutes");
+      const st = await handle.query(stateQuery);
+      expect(st.acked).toBe(false);
+      expect(st.ackedBy).toBeUndefined();
+      expect(recordedAcks.filter((a) => a.key === key)).toHaveLength(0);
+    });
+  }, 60_000);
+
+  it("records a tier whose send rejected, and keeps every event tied to its own tier", async () => {
+    await withWorker(async () => {
+      // Tier 0's activity rejects outright, so nothing recorded that page. The ladder must climb
+      // past it, and the timeline must not present tier 1's timestamp as tier 0's page — which is
+      // exactly what a positional timestamp array would do.
+      const key = "critical-tier0rejects";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-tier0rejects-${Date.now()}`,
+      });
+      await env.sleep("90 minutes");
+
+      const st = await handle.query(stateQuery);
+      expect(st.escalationEvents.map((e) => [e.step, e.sendFailed])).toEqual([
+        [0, true],
+        [1, false],
+        [2, false],
+      ]);
+      expect(st.escalationStep).toBe(2);
+      // Tiers 1 and 2 were still paged: a dead tier does not bury the director and admin.
+      expect(escalationNotifications.filter((n) => n.key === key).map((n) => n.stepIndex)).toEqual([1, 2]);
+    });
+  }, 60_000);
+
+  it("resumes the ladder when an acknowledgment cannot be persisted", async () => {
+    await withWorker(async () => {
+      // An ack the DB never accepts must not quietly bury the remaining tiers: the case is not
+      // acknowledged (no row, no audit entry), so the director and admin still have to be paged.
+      const key = "critical-ackfails";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-ackfails-${Date.now()}`,
+      });
+      await env.sleep("1 minute");
+      expect((await handle.query(stateQuery)).escalationStep).toBe(0);
+      await handle.signal(acknowledgeSignal, { userId: "user-7", label: "pharmacist-7" });
+      await env.sleep("90 minutes");
+
+      const st = await handle.query(stateQuery);
+      expect(st.acked).toBe(false);
+      expect(st.ackedBy).toBeUndefined();
+      expect(st.ackError).toBeDefined();
+      // The ladder resumed rather than dying on the rolled-back flag.
+      expect(st.escalationStep).toBe(2);
+      expect(escalationNotifications.filter((n) => n.key === key).map((f) => f.stepIndex)).toEqual([0, 1, 2]);
+      expect(recordedAcks.filter((a) => a.key === key)).toHaveLength(0);
+    });
+  }, 60_000);
+
+  it("escalates through every tier when no one acknowledges", async () => {
+    await withWorker(async () => {
+      const key = "critical-noack";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-noack-${Date.now()}`,
+      });
+      // Past the 60-minute final tier with no ack: the ladder climbs all three tiers while the case
+      // sits blocked on pharmacist review.
+      await env.sleep("90 minutes");
+      const st = await handle.query(stateQuery);
+      expect(st.status).toBe("awaiting_review");
+      expect(st.escalationStep).toBe(2);
+      expect(st.escalationEvents.map((e) => e.step)).toEqual([0, 1, 2]);
+      expect(st.escalationEvents.every((e) => !e.sendFailed)).toBe(true);
+      expect(st.acked).toBe(false);
+
+      const fired = escalationNotifications.filter((n) => n.key === key);
+      expect(fired.map((f) => f.stepIndex)).toEqual([0, 1, 2]);
+      expect(fired.map((f) => f.notify)).toEqual(["pharmacist", "pharmacy_director", "admin"]);
+      expect(fired.every((f) => f.severity === "critical")).toBe(true);
+    });
+  }, 60_000);
+
+  it("stops the ladder the moment a human acknowledges", async () => {
+    await withWorker(async () => {
+      const key = "critical-ack";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-ack-${Date.now()}`,
+      });
+      // Tier 0 fires immediately; ack before tier 1 (30 min) would fire.
+      await env.sleep("1 minute");
+      expect((await handle.query(stateQuery)).escalationStep).toBe(0);
+      await handle.signal(acknowledgeSignal, { userId: "user-1", label: "pharmacist-1" });
+      // Long past every remaining tier: none of them may fire now.
+      await env.sleep("90 minutes");
+      const st = await handle.query(stateQuery);
+      expect(st.acked).toBe(true);
+      expect(st.ackedBy).toBe("user-1");
+      expect(st.escalationStep).toBe(0);
+
+      expect(escalationNotifications.filter((n) => n.key === key)).toHaveLength(1);
+      // The ack landed with the authenticated user id (the real code appends it to the audit chain).
+      const acks = recordedAcks.filter((a) => a.key === key);
+      expect(acks).toHaveLength(1);
+      expect(acks[0]).toMatchObject({ userId: "user-1", label: "pharmacist-1", step: 0 });
+    });
+  }, 60_000);
+
+  it("keeps the escalating case and its pending tier timer durable after the worker stops", async () => {
+    // The durability guarantee the ladder rests on: the escalation timer is a Temporal SERVER-SIDE
+    // timer, so the case and its pending next-tier fire survive the death of the worker that armed
+    // them — an in-process `setTimeout` would be lost the moment the worker exits.
+    //
+    // This is asserted WITHOUT a literal worker recreate: on the current @temporalio/core (1.21) a
+    // second Worker on the same task queue cannot resume a mid-execution workflow under the
+    // time-skipping test server — verified to hang even for a plain non-escalating case — so a true
+    // "start a fresh worker and watch it resume" cannot be exercised here. Instead we prove the two
+    // halves the harness DOES support: (a) below, the execution + its pending tier-1 timer persist
+    // after the worker stops; and (b) the "escalates through every tier" test above, where the
+    // ladder climbs across a 90-minute skip — which only a durable Temporal timer (never an
+    // in-process one) responds to. Together they are the survive-a-restart guarantee.
+    const key = "critical-durable";
+    const workflowId = `wf-esc-durable-${Date.now()}`;
+    await withWorker(async () => {
+      await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId,
+      });
+      // Tier 0 has fired; tier 1's durable timer (30 min out) is armed and pending.
+      await env.sleep("2 minutes");
+      expect((await env.client.workflow.getHandle(workflowId).query(stateQuery)).escalationStep).toBe(0);
+    });
+    // Worker is gone. The execution — and the pending tier-1 timer — live on the server, so the
+    // case is still RUNNING, not failed or dropped.
+    const handle = env.client.workflow.getHandle(workflowId);
+    const desc = await handle.describe();
+    expect(desc.status.name).toBe("RUNNING");
+    expect(escalationNotifications.filter((n) => n.key === key).map((f) => f.stepIndex)).toEqual([0]);
+    // Terminate so this case's still-PENDING tier-1 timer is not left for the next test's worker to
+    // fire — resuming a mid-execution workflow under a fresh worker is the very thing the current
+    // core cannot do under the time-skip server, and it would hang the following test.
+    await handle.terminate();
+  }, 60_000);
+
+  it("records non-delivery yet still advances the ladder through every tier", async () => {
+    await withWorker(async () => {
+      const key = "critical-nondeliver";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-nd-${Date.now()}`,
+      });
+      // Every tier's send is a non-delivery (dead channel), but the ladder must not stall on it —
+      // the existing comms stance: a failed page is recorded, never a reason to freeze escalation.
+      await env.sleep("90 minutes");
+      const st = await handle.query(stateQuery);
+      expect(st.escalationStep).toBe(2);
+      const fired = escalationNotifications.filter((n) => n.key === key);
+      expect(fired.map((f) => f.stepIndex)).toEqual([0, 1, 2]);
+      expect(fired.every((f) => f.delivered === false)).toBe(true);
+    });
+  }, 60_000);
+
+  it("persists a late ack that arrives AFTER the ladder has escalated through every tier", async () => {
+    await withWorker(async () => {
+      const key = "critical-lateack";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-late-${Date.now()}`,
+      });
+      // Ladder exhausts all three tiers with no ack.
+      await env.sleep("90 minutes");
+      let st = await handle.query(stateQuery);
+      expect(st.escalationStep).toBe(2);
+      expect(st.acked).toBe(false);
+
+      // The human acks LATE — after full escalation. The durable recorder (which outlives the
+      // ladder) must still write the acknowledgment row + audit entry with the user id; the ladder
+      // loop alone would have missed it, leaving the case counted critical-unacked forever.
+      await handle.signal(acknowledgeSignal, { userId: "user-3", label: "director-2" });
+      await env.sleep("1 minute");
+      st = await handle.query(stateQuery);
+      expect(st.acked).toBe(true);
+      expect(st.ackedBy).toBe("user-3");
+
+      const acks = recordedAcks.filter((a) => a.key === key);
+      expect(acks).toHaveLength(1);
+      // Step defaults to the final tier reached (2), so the unique(case,step) constraint does not
+      // silently drop it. The real recordAck activity writes the row + `case.acknowledged` audit
+      // entry with this user id (asserted here via the captured activity args).
+      expect(acks[0]).toMatchObject({ userId: "user-3", label: "director-2", step: 2 });
     });
   }, 60_000);
 });

@@ -60,6 +60,58 @@ export interface CaseState {
   exceptionReason?: string;
   /** Whether any comms channel actually delivered — `comms_sent` only means "we tried". */
   commsDelivered?: boolean;
+  /**
+   * Escalation ladder state (PHASE6 §6.3), driving the console's per-case timeline.
+   * `escalationStep` is the highest ladder tier reached so far (0-based); `escalationEvents` is one
+   * record per tier attempted, so the timeline reads "notified → escalated → …". `acked`/`ackedBy`
+   * flip when a human acknowledges via the `acknowledgeCase` signal. Absent `escalationStep` means
+   * the ladder never ran (severity below high, or no policy configured).
+   *
+   * Each event carries its OWN tier rather than relying on array position: a tier whose send
+   * failed still occupies a slot, so position and tier index diverge the moment one does.
+   */
+  escalationStep?: number;
+  escalationEvents: EscalationEvent[];
+  acked: boolean;
+  /** The acknowledging user's `users.id` (never a claimed string). */
+  ackedBy?: string;
+  /**
+   * Why the last acknowledgment failed to persist. Set when `recordAck` exhausted its retries, at
+   * which point `acked` rolls back to false: an ack with no `acknowledgments` row and no
+   * `case.acknowledged` audit entry did not happen, and the case is still unacknowledged.
+   */
+  ackError?: string;
+}
+
+/**
+ * One attempted escalation tier. `sendFailed` marks a tier whose notification activity REJECTED
+ * outright (its own non-delivery write failed, say): the ladder keeps climbing past it, and
+ * without this record the tier would vanish while progress looked normal — the faked success this
+ * codebase refuses. A tier that merely resolved `delivered: false` is NOT flagged here; the
+ * activity already recorded that honestly in the audit chain.
+ */
+export interface EscalationEvent {
+  step: number;
+  at: string;
+  sendFailed: boolean;
+}
+
+/**
+ * A human acknowledgment of an escalating case (PHASE6 §6.3), carried by the `acknowledgeCase`
+ * signal from the console server action. `userId` is the authenticated `users.id`; `label` is the
+ * human-readable actor for the audit chain's text field. The tier is NOT carried here: the
+ * workflow derives it from its own escalation state, so a caller cannot record an ack against a
+ * tier that was never reached.
+ */
+export interface CaseAcknowledgment {
+  userId: string;
+  label: string;
+}
+
+/** One escalation ladder tier: page `notify` `afterMinutes` after escalation started. */
+export interface EscalationStep {
+  afterMinutes: number;
+  notify: string;
 }
 
 /** Max time a case may sit unresolved before it auto-escalates to the exception queue. */

@@ -3,6 +3,7 @@ import {
   feedFreshness,
   getCaseByWorkflowId,
   getDb,
+  listAcknowledgments,
   listCases,
   listShadowRuns,
   listUsers,
@@ -26,7 +27,7 @@ import type {
 } from "@stopgap/db";
 import { evaluatePromotion, type PromotionDecision } from "@stopgap/shadow";
 import { getCaseState, withTemporalClient, type CaseState } from "@stopgap/workflows";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 
 /** When each feed last returned data — the list view's freshness line. */
 export async function getFeedFreshness(): Promise<FeedFreshness[]> {
@@ -38,10 +39,19 @@ export async function getCases(): Promise<CaseRow[]> {
   return listCases(getDb(), 200);
 }
 
-/** One case plus its hash-chained audit trail (detail view). */
+/** An acknowledgment with the acking user's human label resolved, for the escalation timeline. */
+export interface CaseAck {
+  step: number;
+  ackAt: Date;
+  userId: string;
+  /** Email/display name of the acking user, or the raw id when the user row is gone. */
+  ackedByLabel: string;
+}
+
+/** One case plus its hash-chained audit trail and escalation acknowledgments (detail view). */
 export async function getCaseDetail(
   workflowId: string,
-): Promise<{ case: CaseRow; audit: AuditRow[] } | undefined> {
+): Promise<{ case: CaseRow; audit: AuditRow[]; acks: CaseAck[] } | undefined> {
   const db = getDb();
   const row = await getCaseByWorkflowId(db, workflowId);
   if (!row) return undefined;
@@ -50,7 +60,26 @@ export async function getCaseDetail(
     .from(schema.auditLog)
     .where(eq(schema.auditLog.caseId, row.id))
     .orderBy(desc(schema.auditLog.id));
-  return { case: row, audit };
+  const ackRows = await listAcknowledgments(db, row.id);
+  // Resolve each acking user's label in one query rather than per-row. A missing user row (never
+  // expected — the FK enforces it) degrades to showing the id, never a crash.
+  const userIds = [...new Set(ackRows.map((a) => a.userId))];
+  const userRows = userIds.length
+    ? await db
+        .select({ id: schema.users.id, email: schema.users.email, displayName: schema.users.displayName })
+        .from(schema.users)
+        .where(inArray(schema.users.id, userIds))
+    : [];
+  // Display name first: the timeline is rendered to every console viewer of the case, so a
+  // human-readable label is preferable to spreading email addresses across case pages.
+  const labelById = new Map(userRows.map((u) => [u.id, u.displayName ?? u.email ?? u.id]));
+  const acks: CaseAck[] = ackRows.map((a) => ({
+    step: a.step,
+    ackAt: a.ackAt,
+    userId: a.userId,
+    ackedByLabel: labelById.get(a.userId) ?? a.userId,
+  }));
+  return { case: row, audit, acks };
 }
 
 /**

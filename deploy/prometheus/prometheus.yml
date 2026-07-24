@@ -1,0 +1,43 @@
+# Prometheus — DEV scrape config (PROJECT_PLAN §14 / Phase 6.4 observability).
+#
+# In dev, the console (Next.js) and the worker sidecar run ON THE HOST, not in this
+# compose. Prometheus itself runs in a container, so it reaches the host-run targets
+# through `host.docker.internal` (Docker Desktop's host alias) rather than a compose
+# service name. See deploy/prometheus/prometheus.prod.yml for the prod variant, which
+# scrapes the compose service names `console` and `worker` instead.
+#
+# Pull model: nothing is pushed. Prometheus scrapes the two metrics endpoints and
+# evaluates the rules in alerts.yml, firing to Alertmanager.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # Prometheus scraping itself — cheap liveness of the monitoring stack.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+
+  # Console app: Next.js route handler at /api/metrics. Dev runs on the host at :3000.
+  - job_name: stopgap-console
+    metrics_path: /api/metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:3000
+
+  # Worker sidecar: a tiny HTTP server exposing /metrics on :9464. Dev runs on the host.
+  - job_name: stopgap-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:9464

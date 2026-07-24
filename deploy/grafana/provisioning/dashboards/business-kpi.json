@@ -1,0 +1,113 @@
+{
+  "uid": "stopgap-business-kpi",
+  "title": "Business KPI",
+  "tags": ["stopgap", "kpi", "slo"],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "1m",
+  "timezone": "browser",
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "LLM daily spend vs cap",
+      "description": "Today's LLM spend against the configured daily cap (cap = 0 when none configured). The cap hard-stops LLM calls at 100%; SpendOver80PctCap warns first.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "stopgap_llm_daily_spend_usd",
+          "legendFormat": "spend"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "stopgap_llm_daily_cap_usd",
+          "legendFormat": "cap"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Ack latency (avg seconds)",
+      "description": "Average seconds from case open to acknowledgment. §14 target: human touch per case well under 10 min — this is the acknowledgment leg of that.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 300 }, { "color": "red", "value": 600 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "stopgap_ack_latency_seconds"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Cases opened today",
+      "description": "Shortage cases opened today — the throughput denominator behind the §14 process metrics.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "stopgap_cases_opened_today"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Critical unacked count (under-escalation signal)",
+      "description": "§14 target: under-escalation ≈ 0. A non-zero count of critical cases sitting unacknowledged is the closest live proxy — pairs with the CriticalCaseUnacked alert.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "stopgap_critical_case_unacked_count"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "text",
+      "title": "PROJECT_PLAN §14 SLO targets",
+      "description": "Reference for the panels above.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "options": {
+        "mode": "markdown",
+        "content": "### §14 success metrics (business-process-tied)\n\nThese are the SLO targets the panels above track against. Some are computed offline (eval CI, shadow agreement) and are **not** live Prometheus series yet — the closest live signals are noted.\n\n| §14 target | Live signal on this dashboard |\n| --- | --- |\n| Time-to-approved-protocol: days → **< 1 hr** machine + review latency | **Ack latency (avg seconds)** — acknowledgment leg; p95 time-to-protocol is computed offline (may read 0 here). |\n| Human touch per case: hours → **< 10 min** | **Ack latency (avg seconds)** |\n| Draft acceptance **≥ 80%** unedited (agreement %) | Computed offline from review outcomes (not a live gauge yet). |\n| **Under-escalation ≈ 0** | **Critical unacked count** + the `CriticalCaseUnacked` alert. |\n| **0 dropped cases** (every shortage reaches terminal state) | **Cases opened today** vs terminal-state counts; dropped-case detection is offline. |\n\nA panel reading 0 here means \"no signal yet today,\" not \"target missed\" — cross-check the offline eval/KPI report for the metrics marked computed-offline."
+      }
+    }
+  ]
+}

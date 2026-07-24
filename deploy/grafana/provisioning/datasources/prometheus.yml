@@ -1,0 +1,17 @@
+# Grafana datasource provisioning (Phase 6.4 observability).
+#
+# Wires Grafana to the in-stack Prometheus at container DNS `prometheus:9090` over the
+# compose network (access: proxy = Grafana's backend queries it, so the browser never
+# needs to reach Prometheus directly). The fixed `uid: prometheus` is what the provisioned
+# dashboards (ops.json, business-kpi.json) reference by datasource uid — keep them in sync.
+# `editable: false` keeps this file the source of truth: no drift from UI edits.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

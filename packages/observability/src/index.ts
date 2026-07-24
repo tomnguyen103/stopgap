@@ -16,6 +16,17 @@ export {
   startTracing,
   stopTracing,
 } from "./tracing.js";
+export {
+  collectGaugeFamilies,
+  collectMetricsText,
+  counterFamilies,
+  incrementCounter,
+  renderPrometheus,
+  resetCounters,
+  type MetricFamily,
+  type MetricSample,
+  type MetricType,
+} from "./metrics.js";
 
 /**
  * One call for a process that runs agents (worker, eval, scripts): start the exporter and

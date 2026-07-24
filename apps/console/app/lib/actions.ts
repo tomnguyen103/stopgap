@@ -13,7 +13,13 @@ import {
   setUserDisabled,
 } from "@stopgap/db";
 import { assertMutationAllowed, isDemoMode, prepareDemoRun, type DemoRunResult } from "@stopgap/demo";
-import { resolveException, startCase, submitReview, withTemporalClient } from "@stopgap/workflows";
+import {
+  acknowledgeCase as signalAcknowledge,
+  resolveException,
+  startCase,
+  submitReview,
+  withTemporalClient,
+} from "@stopgap/workflows";
 import { requireRole } from "./auth-guards";
 
 /**
@@ -78,6 +84,27 @@ export async function resolveExceptionCase(workflowId: string, resolution: unkno
   );
   revalidatePath(`/cases/${encodeURIComponent(workflowId)}`);
   revalidatePath("/protocols");
+}
+
+/**
+ * Acknowledge an escalating case (PHASE6 §6.3). Gated to pharmacist+ (`review_case`), so the
+ * anonymous demo viewer — and any signed-in viewer — fails server-side, not just in the UI. The
+ * ack identity is the authenticated principal's real `users.id`, threaded through the workflow
+ * signal into the `acknowledgments` row and the audit chain; a viewer with no `users.id` could not
+ * ack even past the role gate. The tier is not a parameter: the workflow records the tier its own
+ * ladder has reached, so a caller cannot claim an ack for a tier that never fired.
+ */
+export async function acknowledgeCase(workflowId: unknown): Promise<void> {
+  assertMutationAllowed("Acknowledging a case");
+  const principal = await requireRole("review_case");
+  // A signed-in pharmacist always has a `users.id`; the guard already rejected the anonymous
+  // viewer, so this only guards the (impossible-past-the-gate) authenticated-without-id case.
+  if (!principal.userId) throw new Error("acknowledge requires an authenticated user id");
+  const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
+  await withTemporalClient((client) =>
+    signalAcknowledge(client, key, { userId: principal.userId!, label: principal.label }),
+  );
+  revalidatePath(`/cases/${encodeURIComponent(String(workflowId))}`);
 }
 
 /**

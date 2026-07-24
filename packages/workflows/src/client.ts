@@ -4,17 +4,22 @@ import { workflowIdForKey } from "@stopgap/db";
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
 import {
   SHORTAGE_CASE_WORKFLOW,
+  type CaseAcknowledgment,
   type CaseState,
   type ExceptionResolution,
   type ReviewDecision,
 } from "./shared.js";
 import type { shortageCaseWorkflow } from "./workflows.js";
 import {
+  acknowledgeSignal,
   exceptionResolvedSignal,
   resolvedSignal,
   reviewSignal,
   stateQuery,
 } from "./workflows.js";
+
+/** Deadline for the single readiness RPC — `/readyz` must answer, not hang. */
+const READINESS_RPC_TIMEOUT_MS = 5_000;
 
 /** Open a Temporal client against the configured address/namespace. */
 export async function makeClient(): Promise<{ client: Client; connection: Connection }> {
@@ -105,6 +110,45 @@ export async function resolveException(
 export async function markResolved(client: Client, key: string): Promise<void> {
   const handle = client.workflow.getHandle(workflowIdForKey(key));
   await handle.signal(resolvedSignal);
+}
+
+/**
+ * Acknowledge an escalating case (PHASE6 §6.3): signal the durable workflow, which stops the
+ * ladder and records the ack (DB + audit) with the authenticated `users.id`. The ack identity is
+ * the console session's principal, never a client-supplied string.
+ */
+export async function acknowledgeCase(
+  client: Client,
+  key: string,
+  ack: CaseAcknowledgment,
+): Promise<void> {
+  const handle = client.workflow.getHandle(workflowIdForKey(key));
+  await handle.signal(acknowledgeSignal, ack);
+}
+
+/**
+ * Is Temporal reachable (PHASE6 §6.4 readiness)? Connects and asks for cluster system info, then
+ * always closes the connection. Returns false instead of throwing so `/readyz` can report which
+ * dependency is down rather than 500-ing — honest "not ready", never a faked healthy.
+ *
+ * The RPC carries its own deadline: `Connection.connect()` bounds the *connect*, but a server that
+ * accepts the connection and then wedges would leave `/readyz` hanging instead of answering
+ * `ready: false`.
+ */
+export async function checkTemporal(): Promise<boolean> {
+  try {
+    const { connection } = await makeClient();
+    try {
+      await connection.withDeadline(Date.now() + READINESS_RPC_TIMEOUT_MS, () =>
+        connection.workflowService.getSystemInfo({}),
+      );
+      return true;
+    } finally {
+      await connection.close();
+    }
+  } catch {
+    return false;
+  }
 }
 
 export async function getCaseState(client: Client, key: string): Promise<CaseState> {

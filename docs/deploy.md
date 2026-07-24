@@ -22,7 +22,8 @@ which is a real loss: it is the only per-call record of what the model was asked
 
 ## First deploy
 
-1. **DNS.** Point `APP_DOMAIN`, `TEMPORAL_DOMAIN`, `TRACES_DOMAIN` at the host. Caddy cannot
+1. **DNS.** Point `APP_DOMAIN`, `TEMPORAL_DOMAIN`, `TRACES_DOMAIN`, `AUTH_DOMAIN`, `OPS_DOMAIN`
+   at the host. Caddy cannot
    issue certificates before these resolve.
 2. **Clone and configure.**
    ```bash
@@ -57,6 +58,7 @@ which is a real loss: it is the only per-call record of what the model was asked
 | `https://$APP_DOMAIN` | public | demo mode: read-only, reviews refused server-side |
 | `https://$TEMPORAL_DOMAIN` | basic auth | shows real durable workflows — and can terminate them |
 | `https://$TRACES_DOMAIN` | basic auth | Langfuse; prompts and case text are visible in spans |
+| `https://$OPS_DOMAIN` | basic auth | Grafana; ops/business dashboards show case volumes and queue depth |
 
 No container publishes a port except Caddy. **There is still no application auth layer**
 (PHASE5-TODO.md): demo mode is what makes the public console safe, by refusing every
