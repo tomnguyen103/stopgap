@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { DemoBanner } from "./demo-banner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/metrics">KPIs</Link>
           </nav>
         </header>
+        <DemoBanner />
         <main className="wrap">{children}</main>
       </body>
     </html>

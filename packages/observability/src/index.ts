@@ -1,4 +1,4 @@
-import { setLlmSink } from "@stopgap/providers";
+import { addLlmSink } from "@stopgap/providers";
 import { langfuseSink } from "./llm-span.js";
 import { isTracingConfigured, startTracing } from "./tracing.js";
 
@@ -19,6 +19,7 @@ export {
 export function initObservability(serviceName = "stopgap"): boolean {
   if (!isTracingConfigured()) return false;
   startTracing(serviceName);
-  setLlmSink(langfuseSink());
+  // Append, don't replace: the demo budget ledger installs its own sink for the same records.
+  addLlmSink(langfuseSink());
   return true;
 }

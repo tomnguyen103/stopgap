@@ -1,0 +1,21 @@
+{
+  "name": "@stopgap/demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "seed": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@stopgap/core": "workspace:*",
+    "@stopgap/db": "workspace:*",
+    "@stopgap/providers": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

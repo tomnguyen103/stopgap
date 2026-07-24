@@ -87,3 +87,17 @@ pnpm eval:full                # all golden cases (slow: hundreds of local model 
 Evals run **outside** `pnpm gate` on purpose — small local models aren't fully deterministic
 even at temperature 0, so a hard build gate on live-model output would train everyone to
 ignore red. `pnpm gate` stays deterministic; `pnpm eval` reports the real signal.
+
+## Deployment & demo mode
+
+A single-VPS `docker compose` stack lives in [`deploy/`](deploy) — console, worker, Temporal
++ UI, one Postgres with three databases, Langfuse, a CPU Ollama, and Caddy for TLS. The
+runbook is [`docs/deploy.md`](docs/deploy.md); the stack was rehearsed end to end on a local
+Docker daemon, and no paid host has been provisioned.
+
+`STOPGAP_DEMO_MODE=on` makes the console a public read-only surface: reviews and exception
+resolutions are refused in the server action (not merely hidden), and the only visitor
+mutation is **"Run a shortage"**, which starts a real Temporal case for one of three
+catalogue drugs, rate limited per hour. Every LLM call's cost accumulates in an `llm_spend`
+row; at `DEMO_DAILY_USD_CAP` routing falls back to the free local model and the banner says
+which model is answering.

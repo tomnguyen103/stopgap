@@ -1,17 +1,23 @@
-# Phase 5 — Out of scope this run (ship / deploy / extract / writeups)
+# Phase 5 — open items (ship / deploy / extract / writeups)
 
-Per the build instructions, this run stops when Phase 4 is verified. Everything below is
-deferred to Phase 5.
+Phase 5 is in progress. Deploy and demo mode are done (see PROGRESS.md); everything still
+open is listed here.
 
-## Deferred from the plan (§13 Phase 5, §11 deployment)
+## Remaining from the plan (§13 Phase 5, §11 deployment)
 
-- Hetzner VPS deploy via docker-compose (app, worker, Temporal + UI, Postgres, Langfuse,
-  Ollama container, Caddy auto-TLS). Subdomains per §11.
-- Demo mode: read-only guest, nightly re-seed of mid-lifecycle cases, "Run a shortage"
-  interactive scenario, daily budget cap → Ollama fallback, demo video fallback.
+- **Provisioning.** The compose stack, Caddyfile and runbook exist and were rehearsed on a
+  local Docker daemon; no VPS has been rented, so Let's Encrypt issuance and the public
+  subdomains are unverified. Renting the host is a paid decision, deliberately left to the
+  owner.
 - Extract `shadow-ledger` as a standalone open-source npm library (§12.5).
 - Engineering writeup + dev.to crosspost; published failure post-mortem; portfolio page;
-  3-min demo video.
+  3-min demo video (the video is also the insurance for live-demo downtime).
+
+## Done in Phase 5
+
+- Deployment stack + runbook (`deploy/`, `docs/deploy.md`).
+- Demo mode: read-only console, "Run a shortage", nightly idempotent re-seed, daily USD cap
+  with local-model fallback (`@stopgap/demo`, `llm_spend`).
 
 ## Stubbed during this run — needs real credentials/config before Phase 5
 

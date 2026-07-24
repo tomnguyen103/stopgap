@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { isDemoMode } from "@stopgap/demo";
 import { getCaseDetail, getWorkflowState } from "../../lib/data";
 import { ReviewPanel } from "./review-panel";
 
@@ -47,7 +48,19 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         </dl>
       </div>
 
-      {live ? (
+      {live && isDemoMode() ? (
+        // The server action refuses these decisions in demo mode regardless; showing buttons
+        // that always fail would be a worse lie than saying so up front. The draft below is
+        // still the live one, so a visitor sees exactly what a pharmacist would decide on.
+        <div className="card">
+          <h2>Pharmacist review (disabled in demo)</h2>
+          <p className="sub">
+            This case is blocked on a pharmacist decision. Approving clinical guidance needs a
+            verified reviewer, and this deployment has no auth layer — so the demo shows the
+            gate without opening it.
+          </p>
+        </div>
+      ) : live ? (
         <ReviewPanel
           // Keyed on case + view + draft: two cases sharing a draft (including two empty ones
           // in the exception view) would otherwise reuse one panel instance and carry a

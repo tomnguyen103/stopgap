@@ -1,0 +1,16 @@
+# Keep the build context to sources. Host node_modules must never be copied in: pnpm's store
+# is symlinked and platform-specific, and copying it over the image's own install produces
+# MODULE_NOT_FOUND at build time.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.git
+.env
+**/*.tsbuildinfo
+coverage
+graphify-out
+.codegraph
+.ua

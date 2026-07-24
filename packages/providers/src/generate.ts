@@ -3,11 +3,28 @@ import type { z } from "zod";
 import { routeModel } from "./route.js";
 import type { LlmCallRecord, LlmSink, ProviderName } from "./types.js";
 
-let sink: LlmSink = () => {};
+let sinks: LlmSink[] = [];
 
-/** Install a telemetry sink (Phase 2 wires this to Langfuse/OTel). */
+/** Replace every installed telemetry sink with this one (tests, single-consumer setups). */
 export function setLlmSink(next: LlmSink): void {
-  sink = next;
+  sinks = [next];
+}
+
+/**
+ * Append a telemetry sink. Two consumers legitimately want the same records — Langfuse spans
+ * and the demo budget ledger — and a single-slot sink made the second install silently
+ * uninstall the first. Returns a remover.
+ */
+export function addLlmSink(next: LlmSink): () => void {
+  sinks.push(next);
+  return () => {
+    sinks = sinks.filter((s) => s !== next);
+  };
+}
+
+/** Remove every installed sink (tests). */
+export function clearLlmSinks(): void {
+  sinks = [];
 }
 
 function usdCost(
@@ -74,10 +91,14 @@ export async function generateStructured<T extends z.ZodTypeAny>(
 
 /** A telemetry-sink failure must never fail case processing (observability is best-effort). */
 function safeSink(meta: LlmCallRecord): void {
-  try {
-    void Promise.resolve(sink(meta)).catch((err) => console.error("[providers] telemetry sink failed:", err));
-  } catch (err) {
-    console.error("[providers] telemetry sink failed:", err);
+  for (const sink of sinks) {
+    try {
+      void Promise.resolve(sink(meta)).catch((err) =>
+        console.error("[providers] telemetry sink failed:", err),
+      );
+    } catch (err) {
+      console.error("[providers] telemetry sink failed:", err);
+    }
   }
 }
 

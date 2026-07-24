@@ -1,6 +1,18 @@
 import type { CaseStatus, Severity, ShortageRecord } from "@stopgap/core";
 import type { AlternativesResearch, ImpactAssessment } from "@stopgap/agents";
 
+/**
+ * Workflow type names as literal strings.
+ *
+ * Starting a workflow by passing the imported function makes Temporal read `fn.name` — which
+ * a production bundler is free to mangle. It did: the console's `next build` minified
+ * `shortageCaseWorkflow` to `aa`, so every case started from the deployed console died with
+ * "no such function is exported by the workflow bundle" while the same code worked in dev.
+ * Callers use these constants; the worker still registers the real exports.
+ */
+export const SHORTAGE_CASE_WORKFLOW = "shortageCaseWorkflow";
+export const POLL_FEEDS_WORKFLOW = "pollFeedsWorkflow";
+
 /** Input to a shortage case workflow: the (possibly merged) detected shortage. */
 export interface CaseInput {
   record: ShortageRecord;

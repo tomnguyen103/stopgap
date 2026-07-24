@@ -1,5 +1,6 @@
 import { resetEnvCache } from "@stopgap/core/env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearBudgetGuard, setBudgetGuard } from "./budget.js";
 import { geminiInfo, ollamaInfo } from "./registry.js";
 import { routeModel } from "./route.js";
 
@@ -46,6 +47,50 @@ describe("routeModel failover", () => {
     expect(routed.info.name).toBe("ollama");
     expect(routed.failedOver).toBe(true);
     expect(routed.requested).toBe("gemini");
+  });
+
+  it("stays on the requested provider when the budget guard reports headroom", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    resetEnvCache();
+    globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch;
+    setBudgetGuard(() => ({ spentUsd: 0.5, capUsd: 2, overCap: false }));
+    try {
+      const routed = await routeModel("gemini");
+      expect(routed.info.name).toBe("gemini");
+      expect(routed.budgetCapped).toBe(false);
+    } finally {
+      clearBudgetGuard();
+    }
+  });
+
+  it("forces the free local provider once the daily cap is spent", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    resetEnvCache();
+    globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch;
+    setBudgetGuard(() => ({ spentUsd: 2.5, capUsd: 2, overCap: true }));
+    try {
+      const routed = await routeModel("gemini");
+      expect(routed.info.name).toBe("ollama");
+      expect(routed.budgetCapped).toBe(true);
+    } finally {
+      clearBudgetGuard();
+    }
+  });
+
+  it("treats a failing budget guard as under cap rather than silently downgrading", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    resetEnvCache();
+    globalThis.fetch = vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch;
+    setBudgetGuard(() => {
+      throw new Error("spend table unreachable");
+    });
+    try {
+      const routed = await routeModel("gemini");
+      expect(routed.info.name).toBe("gemini");
+      expect(routed.budgetCapped).toBe(false);
+    } finally {
+      clearBudgetGuard();
+    }
   });
 
   it("throws when no provider is usable", async () => {

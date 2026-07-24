@@ -41,6 +41,9 @@ importers:
       '@stopgap/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@stopgap/demo':
+        specifier: workspace:*
+        version: link:../../packages/demo
       '@stopgap/shadow':
         specifier: workspace:*
         version: link:../../packages/shadow
@@ -120,6 +123,22 @@ importers:
       drizzle-kit:
         specifier: ^0.30.0
         version: 0.30.6
+
+  packages/demo:
+    dependencies:
+      '@stopgap/core':
+        specifier: workspace:*
+        version: link:../core
+      '@stopgap/db':
+        specifier: workspace:*
+        version: link:../db
+      '@stopgap/providers':
+        specifier: workspace:*
+        version: link:../providers
+    devDependencies:
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(terser@5.49.0)(tsx@4.23.1)
 
   packages/ingest:
     dependencies:
@@ -237,6 +256,9 @@ importers:
       '@stopgap/db':
         specifier: workspace:*
         version: link:../db
+      '@stopgap/demo':
+        specifier: workspace:*
+        version: link:../demo
       '@stopgap/ingest':
         specifier: workspace:*
         version: link:../ingest

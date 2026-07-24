@@ -198,6 +198,22 @@ export const shadowRuns = pgTable(
   ],
 );
 
+/**
+ * Daily LLM spend, one row per UTC calendar day (PROJECT_PLAN §11: the public demo needs a
+ * hard daily budget cap). Aggregated rather than per-call because the cap only ever asks one
+ * question — "how much has today cost?" — and a per-call table would grow without bound for
+ * an answer that is a single number. Per-call truth stays in the OTel spans.
+ *
+ * `day` is a text `YYYY-MM-DD` in UTC, not a `date` column: the cap must mean the same thing
+ * regardless of the database's timezone setting.
+ */
+export const llmSpend = pgTable("llm_spend", {
+  day: text("day").primaryKey(),
+  usdCost: numeric("usd_cost", { precision: 12, scale: 8 }).notNull().default("0"),
+  calls: integer("calls").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type CaseRow = typeof cases.$inferSelect;
 export type NewCaseRow = typeof cases.$inferInsert;
 export type AuditRow = typeof auditLog.$inferSelect;
@@ -207,3 +223,4 @@ export type ProtocolVersionRow = typeof protocolVersions.$inferSelect;
 export type NewProtocolVersionRow = typeof protocolVersions.$inferInsert;
 export type ShadowRunRow = typeof shadowRuns.$inferSelect;
 export type NewShadowRunRow = typeof shadowRuns.$inferInsert;
+export type LlmSpendRow = typeof llmSpend.$inferSelect;

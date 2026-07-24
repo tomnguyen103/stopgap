@@ -1,10 +1,11 @@
 # Stopgap — Build Progress
 
-**Phases 1–4 are merged to `main`.** Phase 5 (deploy, demo, library extraction, writeup) is
-out of scope for this run — see `PHASE5-TODO.md`.
+**Phases 1–4 are merged to `main`; Phase 5 is in progress.** Deploy + demo mode are built and
+verified locally; `shadow-ledger` extraction and the writeups remain. Open items and known
+gaps stay in `PHASE5-TODO.md`.
 
 Single source of truth: `PROJECT_PLAN.md`. This file tracks phase status against the
-plan's build table (§13). Out of scope this run: Phase 5 (see `PHASE5-TODO.md`).
+plan's build table (§13).
 
 ## Environment (verified 2026-07-23)
 
@@ -168,6 +169,40 @@ doc; injection test suite; provider comparison table.
   structured-output reliability, and the three weakness classes). The Gemini column is empty
   and says why: no `GEMINI_API_KEY` in this environment. One command fills it when a key
   exists; nothing is estimated.
+
+## Phase 5 — Ship (weeks 8–10)
+
+**Status:** 🚧 in progress. Deploy + demo mode built and verified locally; library extraction
+and writeups are the remaining items.
+
+Target deliverable: VPS deploy (incl. Ollama container); demo mode; extract `shadow-ledger`
+lib; writeup; post-mortem; portfolio page + video.
+
+- [x] Deployment stack (`deploy/`): Dockerfile with `console`/`worker` targets,
+  `docker-compose.prod.yml` (app, worker, Temporal + UI, one Postgres with three databases,
+  Langfuse, CPU Ollama, Caddy auto-TLS), Caddyfile with basic auth on the Temporal and
+  Langfuse subdomains, `.env.prod.example`, and the runbook at
+  [docs/deploy.md](docs/deploy.md). **No paid host was provisioned** — the stack was
+  rehearsed on a local Docker daemon instead (see below).
+- [x] Demo mode (`@stopgap/demo`): read-only console (reviews and exception resolutions
+  refused in the server action, not merely hidden), "Run a shortage" against a fixed drug
+  catalogue with an hourly rate limit counted from the case table, nightly idempotent
+  re-seed of three mid-lifecycle cases (day 2 / 18 / 45) and their protocol history.
+- [x] Daily LLM budget cap: every call's cost accumulates in `llm_spend`; over
+  `DEMO_DAILY_USD_CAP` the provider layer routes to the free local model and the console
+  banner names the model that is answering. The demo degrades rather than going dark.
+- [x] **Verified live against the production compose stack** (local Docker, 2026-07-23):
+  migrations applied, seeder produced the three lifecycle cases, "Run a shortage" started a
+  real case that ran through the live agents to `awaiting_review` (severity `moderate`, five
+  hash-chained audit rows), the review gate rendered as disabled, and `llm_spend` counted the
+  two model calls the case made.
+- [x] **Bug the rehearsal caught:** `next build` minifies function names, so starting a
+  workflow by passing the imported function sent Temporal the workflow type `aa` — every case
+  started from the deployed console died with "no such function is exported by the workflow
+  bundle". Workflows are now started by name (`SHORTAGE_CASE_WORKFLOW`). Neither dev mode nor
+  the unit tests could have surfaced this; only a production build could.
+- [ ] Extract `shadow-ledger` as a standalone open-source library (§12 artifact 5)
+- [ ] Engineering writeup + post-mortem + portfolio page (§12, §15)
 
 ---
 

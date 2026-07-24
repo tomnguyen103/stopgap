@@ -1,0 +1,11 @@
+# Local-only override used to rehearse the prod stack (not part of a deployment).
+services:
+  console:
+    ports: ["3100:3000"]
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  worker:
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts: ["host.docker.internal:host-gateway"]

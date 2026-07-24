@@ -16,6 +16,8 @@ export {
   stateQuery,
 } from "./workflows.js";
 export {
+  POLL_FEEDS_WORKFLOW,
+  SHORTAGE_CASE_WORKFLOW,
   type CaseInput,
   type CaseState,
   type ReviewDecision,

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
+import { DemoPanel } from "./demo-panel";
 import { getCases } from "./lib/data";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +13,9 @@ export default async function CasesPage() {
   const cases = await getCases();
   return (
     <>
+      {isDemoMode() ? (
+        <DemoPanel drugs={DEMO_DRUGS.map((d) => ({ key: d.key, genericName: d.genericName }))} />
+      ) : null}
       <h1>Shortage cases</h1>
       <p className="sub">
         {cases.length} case{cases.length === 1 ? "" : "s"} · durable Temporal workflows mirrored from Postgres

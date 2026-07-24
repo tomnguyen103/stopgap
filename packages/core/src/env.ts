@@ -36,6 +36,18 @@ const EnvSchema = z.object({
   COMMS_PHARMACY_TO: z.string().default(""),
   COMMS_DEMO_INBOX: z.string().optional(),
   EHR_WEBHOOK_URL: z.string().default("http://localhost:4000/ehr/formulary-flag"),
+
+  /**
+   * Public-demo mode (PROJECT_PLAN §11). "on" makes the console a read-only guest surface:
+   * reviews and exception resolutions are refused, and the only mutation a visitor can make
+   * is starting a demo shortage. Off by default so a real deployment is never accidentally
+   * read-only.
+   */
+  STOPGAP_DEMO_MODE: z.enum(["on", "off"]).default("off"),
+  /** Hard daily LLM spend cap in USD; over it, routing falls back to the free local model. */
+  DEMO_DAILY_USD_CAP: z.coerce.number().nonnegative().default(2),
+  /** Rate limit on visitor-started demo scenarios, per rolling hour. */
+  DEMO_MAX_RUNS_PER_HOUR: z.coerce.number().int().positive().default(6),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
