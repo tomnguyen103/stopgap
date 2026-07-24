@@ -16,12 +16,30 @@ function canonical(value: unknown): string {
 /** Genesis hash for an empty chain. */
 export const GENESIS_HASH = "0".repeat(64);
 
-/** Hashing scheme of a row: `v1` bare SHA-256, `v2` keyed HMAC-SHA-256 (PHASE6 §6.2). */
-export type AuditScheme = "v1" | "v2";
+/**
+ * Hashing scheme of a row. Three byte-stable, append-only versions (PHASE6 §6.2, §6.1):
+ *  - `v1` bare SHA-256 over the narrow `{caseId,actor,action,detail}` payload (the pre-PHASE6
+ *    chain; attribution and metadata unhashed);
+ *  - `v2` keyed HMAC-SHA-256 over that PLUS `ts`, `runId`, `eventKey` (PR A — closes backdating
+ *    and idempotency-metadata rewrites);
+ *  - `v3` the `v2` field set PLUS the nullable `actorUserId` FK (PR B — binds the authenticated
+ *    principal so it cannot be silently reattributed, CWE-353).
+ * Each version's byte layout is FROZEN: a new field means a new scheme, never a mutation of an
+ * existing one, so already-written rows keep verifying. `v2` and `v3` both require the HMAC key.
+ */
+export type AuditScheme = "v1" | "v2" | "v3";
 
 export interface AuditEntry {
   caseId?: string;
   actor: string;
+  /**
+   * The authenticated principal (PHASE6 §6.1), a real `users.id`. Persisted to the
+   * `actor_user_id` FK on every row; HASHED only under `v3` (keyed), so a keyed deployment binds
+   * the identity into the HMAC while `v1`/`v2` rows keep it as unhashed provenance beside the
+   * text `actor`. Optional: workflow-internal (`system`/`agent`) appends resolve it from the
+   * synthetic users; a legacy caller may omit it entirely.
+   */
+  actorUserId?: string;
   action: string;
   detail?: Record<string, unknown>;
   /**
@@ -46,12 +64,18 @@ interface HashablePayload {
   actor: string;
   action: string;
   detail: Record<string, unknown>;
-  /** v2-only: hashed under HMAC so `ts` cannot be backdated. Ignored by v1. */
+  /** Hashed under `v2`/`v3` so `ts` cannot be backdated. Ignored by v1. */
   ts?: string;
-  /** v2-only: hashed so the idempotency metadata cannot be rewritten. Ignored by v1. */
+  /** Hashed under `v2`/`v3` so the idempotency metadata cannot be rewritten. Ignored by v1. */
   runId?: string;
-  /** v2-only: hashed so the idempotency metadata cannot be rewritten. Ignored by v1. */
+  /** Hashed under `v2`/`v3` so the idempotency metadata cannot be rewritten. Ignored by v1. */
   eventKey?: string;
+  /**
+   * The authenticated principal FK (PHASE6 §6.1). Hashed ONLY under `v3` — folded into the HMAC
+   * so a DB writer cannot rewrite the recorded identity while keeping the chain valid (CWE-353).
+   * Ignored by `v1` and `v2`, whose byte layouts are frozen; those keep it as unhashed provenance.
+   */
+  actorUserId?: string;
 }
 
 /**
@@ -60,15 +84,21 @@ interface HashablePayload {
  * `v1` hashes `{caseId,actor,action,detail}` with bare SHA-256 — byte-identical to the
  * pre-PHASE6 chain so rows written before HMAC existed still verify. It deliberately omits
  * `ts`/`runId`/`eventKey`; that is a known weakness of `v1` (a DB-write attacker could
- * backdate `ts`), which is exactly why `v2` exists and must not be weakened to match `v1`.
+ * backdate `ts`), which is exactly why `v2`/`v3` exist and must not be weakened to match `v1`.
  *
  * `v2` HMACs a WIDER payload under `AUDIT_HMAC_KEY` — the same fields PLUS `ts`, `runId`, and
- * `eventKey` — so an attacker with only DB write access can neither recompute a valid hash
- * (the key is not in the database) NOR silently backdate the timestamp or rewrite the
- * idempotency metadata of a keyed row (CWE-354).
+ * `eventKey` — so an attacker with only DB write access can neither recompute a valid hash (the
+ * key is not in the database) NOR silently backdate the timestamp or rewrite the idempotency
+ * metadata of a keyed row (CWE-354). Its byte layout is FROZEN (PR A shipped it); `actorUserId`
+ * is NOT in it.
+ *
+ * `v3` HMACs the `v2` field set PLUS the nullable `actorUserId`, binding the authenticated
+ * principal so it cannot be reattributed without breaking the hash (CWE-353). New keyed rows are
+ * written as `v3`; `v2` rows written before this stay verifiable because `v2`'s bytes are
+ * unchanged — a new field earns a new scheme, never a mutation of an existing one.
  *
  * Exported so tests (and any external verifier) can construct a known-good chain without a
- * live database; the byte layout is part of the audit contract.
+ * live database; each version's byte layout is part of the audit contract.
  */
 export function computeAuditHash(
   scheme: AuditScheme,
@@ -76,13 +106,13 @@ export function computeAuditHash(
   e: HashablePayload,
   hmacKey?: string,
 ): string {
-  if (scheme === "v2") {
-    if (!hmacKey) throw new Error("computeAuditHash: v2 scheme requires an HMAC key");
+  if (scheme === "v2" || scheme === "v3") {
+    if (!hmacKey) throw new Error(`computeAuditHash: ${scheme} scheme requires an HMAC key`);
     const payload = canonical({
-      // Bind the scheme literal into the keyed payload so relabeling a `v2` row to any other
-      // scheme also breaks its hash (hash-mismatch), on top of the monotonic-boundary check
-      // in `verifyChainRows` — defence in depth against a DB writer editing `scheme`.
-      scheme: "v2",
+      // Bind the scheme literal into the keyed payload so relabeling a keyed row to any other
+      // scheme also breaks its hash (hash-mismatch), on top of the monotonic-rank check in
+      // `verifyChainRows` — defence in depth against a DB writer editing `scheme`.
+      scheme,
       caseId: e.caseId ?? null,
       actor: e.actor,
       action: e.action,
@@ -90,6 +120,8 @@ export function computeAuditHash(
       ts: e.ts ?? null,
       runId: e.runId ?? null,
       eventKey: e.eventKey ?? null,
+      // v3 additionally binds the authenticated principal FK; v2 stays byte-stable without it.
+      ...(scheme === "v3" ? { actorUserId: e.actorUserId ?? null } : {}),
     });
     return createHmac("sha256", hmacKey).update(prevHash).update(payload).digest("hex");
   }
@@ -114,13 +146,14 @@ export function computeAuditHash(
  * no-ops instead of double-appending. A later run for the same drug is a different runId and
  * appends its own entries.
  *
- * The scheme is chosen from the environment: `AUDIT_HMAC_KEY` present → `v2` (keyed), absent
- * → `v1` (bare). A deployment that turns the key on writes `v2` from then on while its old
- * `v1` rows keep verifying — honest non-configuration, never a silent downgrade.
+ * The scheme is chosen from the environment: `AUDIT_HMAC_KEY` present → `v3` (keyed, binds the
+ * authenticated principal), absent → `v1` (bare). A deployment that turns the key on writes `v3`
+ * from then on while its old `v1` (and any legacy `v2`) rows keep verifying — honest
+ * non-configuration, never a silent downgrade.
  */
 export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: string }> {
   const hmacKey = getEnv().AUDIT_HMAC_KEY;
-  const scheme: AuditScheme = hmacKey ? "v2" : "v1";
+  const scheme: AuditScheme = hmacKey ? "v3" : "v1";
   return db.transaction(async (tx) => {
     // Bound the wait: a stalled lock holder must not back up every appendAudit caller across
     // all cases (single global chain lock) and exhaust the connection pool.
@@ -154,12 +187,25 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
     const hash = computeAuditHash(
       scheme,
       prevHash,
-      { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId, ts: ts.toISOString(), runId, eventKey },
+      {
+        actor: entry.actor,
+        action: entry.action,
+        detail,
+        caseId: entry.caseId,
+        ts: ts.toISOString(),
+        runId,
+        eventKey,
+        // v2 binds the principal FK into the HMAC (CWE-353); v1 ignores it.
+        actorUserId: entry.actorUserId,
+      },
       hmacKey,
     );
     await tx.insert(auditLog).values({
       caseId: entry.caseId,
       actor: entry.actor,
+      // Persisted but not part of `hash` above (computeAuditHash never sees it): the machine
+      // identity rides alongside the hashed text `actor`, leaving the chain bytes untouched.
+      actorUserId: entry.actorUserId,
       action: entry.action,
       detail,
       ts,
@@ -183,13 +229,18 @@ export interface VerifiableRow {
   prevHash: string;
   hash: string;
   scheme: string;
-  /** Hashed for v2 rows; `Date` (from the DB) or ISO string (from a test). Ignored for v1. */
+  /** Hashed for v2/v3 rows; `Date` (from the DB) or ISO string (from a test). Ignored for v1. */
   ts: Date | string;
-  /** Hashed for v2 rows. Ignored for v1. */
+  /** Hashed for v2/v3 rows. Ignored for v1. */
   runId: string;
-  /** Hashed for v2 rows. Ignored for v1. */
+  /** Hashed for v2/v3 rows. Ignored for v1. */
   eventKey: string;
+  /** The authenticated principal FK. Hashed for v3 rows only (CWE-353); ignored for v1/v2. */
+  actorUserId: string | null;
 }
+
+/** Monotonic rank of each scheme: a chain may never move to a LOWER-ranked scheme (downgrade). */
+const SCHEME_RANK: Record<AuditScheme, number> = { v1: 1, v2: 2, v3: 3 };
 
 /** Normalize a timestamp to the ISO string the writer hashed. */
 function tsToIso(ts: Date | string): string {
@@ -209,34 +260,35 @@ export interface ChainVerification {
  * Takes the rows (sorted by id) and the HMAC key rather than a database handle, so it is
  * unit-testable without Postgres and reusable by the CLI, the console, and the anchor check.
  *
- * A `v2` row with no key available FAILS at that row (`missing-hmac-key`) rather than being
+ * A `v2`/`v3` row with no key available FAILS at that row (`missing-hmac-key`) rather than being
  * skipped — that is what makes "recomputing the chain without AUDIT_HMAC_KEY cannot produce
  * valid rows" (§6.2 acceptance) true: an attacker who drops the key cannot make verification
  * pass by pretending the keyed rows are plain SHA-256.
  *
  * The `scheme` column is DB-controlled, so it cannot be trusted on its own: an attacker with
- * write access could tamper a `v2` row, relabel it `v1`, recompute its hash with keyless
- * SHA-256, and re-chain the tail — verification would pass with no key at all. We close that
- * by enforcing a MONOTONIC scheme: the chain may open with a `v1` prefix (rows written before
- * HMAC was enabled, which must still verify), but once any `v2` row appears every later row
- * must be `v2`. A `v1` row after the boundary is a downgrade attack → `scheme-downgrade`.
+ * write access could tamper a keyed row, relabel it to a weaker scheme, recompute its hash, and
+ * re-chain the tail — verification could pass with no key at all. We close that by enforcing a
+ * MONOTONIC scheme RANK (v1=1 < v2=2 < v3=3): the chain may climb (a `v1` prefix from before HMAC
+ * was enabled, then `v2`, then `v3`), but a row whose rank is LOWER than the highest rank seen so
+ * far is a downgrade attack → `scheme-downgrade`.
  */
 export function verifyChainRows(rows: VerifiableRow[], hmacKey?: string): ChainVerification {
   let prevHash = GENESIS_HASH;
-  let seenV2 = false;
+  let maxRank = 0;
   for (const row of rows) {
     // Reject an unrecognized scheme outright rather than silently coercing it to `v1`: a
     // DB writer must not be able to smuggle a tampered row past verification by stamping it
     // with a scheme the verifier does not know how to check.
-    if (row.scheme !== "v1" && row.scheme !== "v2") {
+    if (row.scheme !== "v1" && row.scheme !== "v2" && row.scheme !== "v3") {
       return { ok: false, brokenAtId: row.id, reason: "unknown-scheme" };
     }
     const scheme: AuditScheme = row.scheme;
-    if (scheme === "v1" && seenV2) {
+    const rank = SCHEME_RANK[scheme];
+    if (rank < maxRank) {
       return { ok: false, brokenAtId: row.id, reason: "scheme-downgrade" };
     }
-    if (scheme === "v2") seenV2 = true;
-    if (scheme === "v2" && !hmacKey) {
+    maxRank = rank;
+    if ((scheme === "v2" || scheme === "v3") && !hmacKey) {
       return { ok: false, brokenAtId: row.id, reason: "missing-hmac-key" };
     }
     if (row.prevHash !== prevHash) {
@@ -253,6 +305,7 @@ export function verifyChainRows(rows: VerifiableRow[], hmacKey?: string): ChainV
         ts: tsToIso(row.ts),
         runId: row.runId,
         eventKey: row.eventKey,
+        actorUserId: row.actorUserId ?? undefined,
       },
       hmacKey,
     );
@@ -279,6 +332,7 @@ export async function verifyAuditChain(db: Db): Promise<ChainVerification> {
       ts: auditLog.ts,
       runId: auditLog.runId,
       eventKey: auditLog.eventKey,
+      actorUserId: auditLog.actorUserId,
     })
     .from(auditLog)
     .orderBy(auditLog.id);

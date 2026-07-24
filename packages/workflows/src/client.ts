@@ -76,9 +76,17 @@ export async function submitReview(
   key: string,
   decision: ReviewDecision,
   reviewer?: string,
+  reviewerUserId?: string,
 ): Promise<void> {
   const handle = client.workflow.getHandle(workflowIdForKey(key));
-  await handle.signal(reviewSignal, reviewer ? { ...decision, reviewer } : decision);
+  // Overlay the caller-supplied identity onto the decision. The authenticated console passes
+  // both a label and a real `users.id`; the CLI/MCP callers pass only a claimed label.
+  const signed: ReviewDecision = {
+    ...decision,
+    ...(reviewer ? { reviewer } : {}),
+    ...(reviewerUserId ? { reviewerUserId } : {}),
+  };
+  await handle.signal(reviewSignal, signed);
 }
 
 /**

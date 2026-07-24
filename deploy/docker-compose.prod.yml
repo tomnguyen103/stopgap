@@ -34,6 +34,15 @@ x-app-env: &app-env
   STOPGAP_DEMO_MODE: ${STOPGAP_DEMO_MODE:-on}
   LLM_DAILY_USD_CAP: ${LLM_DAILY_USD_CAP:-}
   DEMO_MAX_RUNS_PER_HOUR: ${DEMO_MAX_RUNS_PER_HOUR:-6}
+  # OIDC SSO / RBAC (PHASE6 §6.1). Honest non-configuration: with these unset (and demo mode on,
+  # the default here), `authConfigured()` is false, so the console runs read-only as the
+  # anonymous viewer — never a faked sign-in. Set AUTH_SECRET + KEYCLOAK_CLIENT_SECRET and turn
+  # demo mode off to enforce the role matrix. The issuer is the PUBLIC Keycloak URL so the token
+  # `iss` matches what the browser is redirected to.
+  AUTH_SECRET: ${AUTH_SECRET:-}
+  KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://${AUTH_DOMAIN}/realms/stopgap}
+  KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-stopgap-console}
+  KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
 
 services:
   postgres:
@@ -155,6 +164,61 @@ services:
     entrypoint:
       ["sh", "-c", "while true; do pnpm --filter @stopgap/demo seed || true; sleep 86400; done"]
 
+  # ---- Keycloak (OIDC IdP, PHASE6 §6.1) ----------------------------------------------------
+  # Production mode against a dedicated `keycloak` database in the shared Postgres, behind Caddy
+  # (which terminates TLS — hence KC_PROXY_HEADERS + KC_HTTP_ENABLED). The Caddyfile routes
+  # ${AUTH_DOMAIN} to this service on :8080.
+  #
+  # CWE-798: prod does NOT import the dev realm (deploy/keycloak/realm-stopgap.json) — it carries
+  # a FIXED confidential client secret and known demo passwords (incl. an admin). The operator
+  # provisions the prod realm, `stopgap-console` client, users, and a fresh client secret out of
+  # band (Keycloak admin console at ${AUTH_DOMAIN}, bootstrap creds below), then sets
+  # KEYCLOAK_CLIENT_SECRET in deploy/.env. Until then, auth is honestly unconfigured (blank
+  # secret → console runs read-only), same stance as the rest of the blank prod .env. See
+  # docs/auth.md "Provisioning the production realm".
+  keycloak-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    command: >-
+      sh -c "psql -h postgres -U stopgap -d stopgap -tAc \"SELECT 1 FROM pg_database WHERE datname='keycloak'\" | grep -q 1 || psql -h postgres -U stopgap -d stopgap -c 'CREATE DATABASE keycloak'"
+    restart: "no"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak-db-init:
+        condition: service_completed_successfully
+    # No `--import-realm`: the prod realm is provisioned out of band, never seeded from the dev
+    # realm file (CWE-798). Nothing under deploy/keycloak is mounted here.
+    command: ["start"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: stopgap
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME: https://${AUTH_DOMAIN}
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+
   # ---- Langfuse (self-hosted tracing) ------------------------------------------------------
   langfuse-clickhouse:
     image: clickhouse/clickhouse-server:24.3
@@ -271,6 +335,7 @@ services:
       - console
       - temporal-ui
       - langfuse-web
+      - keycloak
     ports:
       - "80:80"
       - "443:443"
@@ -278,6 +343,7 @@ services:
       APP_DOMAIN: ${APP_DOMAIN}
       TEMPORAL_DOMAIN: ${TEMPORAL_DOMAIN}
       TRACES_DOMAIN: ${TRACES_DOMAIN}
+      AUTH_DOMAIN: ${AUTH_DOMAIN}
       BASIC_AUTH_USER: ${BASIC_AUTH_USER}
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
     volumes:

@@ -20,12 +20,15 @@ interface EntryFields {
   ts?: string;
   runId?: string;
   eventKey?: string;
+  actorUserId?: string;
 }
 
 const TS = "2026-07-24T00:00:00.000Z";
 
+type Scheme = "v1" | "v2" | "v3";
+
 /** Build a valid chain of rows under the given per-row schemes. */
-function buildChain(entries: (EntryFields & { scheme: "v1" | "v2" })[], hmacKey?: string): VerifiableRow[] {
+function buildChain(entries: (EntryFields & { scheme: Scheme })[], hmacKey?: string): VerifiableRow[] {
   const rows: VerifiableRow[] = [];
   let prevHash = GENESIS_HASH;
   entries.forEach((e, i) => {
@@ -36,7 +39,7 @@ function buildChain(entries: (EntryFields & { scheme: "v1" | "v2" })[], hmacKey?
       e.scheme,
       prevHash,
       { ...e, ts, runId, eventKey },
-      e.scheme === "v2" ? hmacKey : undefined,
+      e.scheme === "v1" ? undefined : hmacKey,
     );
     rows.push({
       id: i + 1,
@@ -50,13 +53,14 @@ function buildChain(entries: (EntryFields & { scheme: "v1" | "v2" })[], hmacKey?
       ts,
       runId,
       eventKey,
+      actorUserId: e.actorUserId ?? null,
     });
     prevHash = hash;
   });
   return rows;
 }
 
-const sample = (scheme: "v1" | "v2"): (EntryFields & { scheme: "v1" | "v2" })[] => [
+const sample = (scheme: Scheme): (EntryFields & { scheme: Scheme })[] => [
   { scheme, caseId: "c1", actor: "system", action: "case.detected", detail: { key: "heparin" } },
   { scheme, caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: { note: "ok" } },
   { scheme, caseId: "c1", actor: "system", action: "comms.sent", detail: { channels: 2 } },
@@ -199,6 +203,114 @@ describe("verifyChainRows", () => {
     // These fields are not in the v1 payload, so the chain is byte-identical and still verifies.
     // (That backdate-ability is precisely the v1 weakness v2 closes.)
     expect(verifyChainRows(rows)).toEqual({ ok: true });
+  });
+});
+
+describe("hashed payload is stable (PHASE6 §6.1 audit-chain-unchanged guarantee)", () => {
+  // The RBAC migration adds `actor_user_id` (and the protocol author/approver FKs) but must NOT
+  // change what the chain hashes — `actor` (text) stays the hashed identity, `actorUserId` is
+  // persisted separately and never enters `computeAuditHash`. This golden hash pins the v1
+  // payload bytes: if anyone widens the v1 hashed fields, this fails loudly. (The value is the
+  // SHA-256 of the canonical {action,actor,caseId,detail} over the genesis prev-hash.)
+  it("v1 hash of a known entry is byte-stable", () => {
+    const hash = computeAuditHash("v1", GENESIS_HASH, {
+      caseId: "c1",
+      actor: "system",
+      action: "case.detected",
+      detail: { key: "heparin" },
+    });
+    expect(hash).toBe("60965ae0cf4816456840a1e06bad15b7e59d0375e0816bd72d0e4e6f5180eec4");
+  });
+
+  // v2's byte layout is FROZEN (PR A). Adding v3 must NOT change what a v2 row hashes, or every
+  // already-written v2 chain would fail verification after deploy. This golden pins the v2 HMAC
+  // over {scheme:"v2",caseId,actor,action,detail,ts,runId,eventKey} — NO actorUserId in it.
+  it("v2 HMAC of a known entry is byte-stable (no actorUserId in the v2 payload)", () => {
+    const hash = computeAuditHash(
+      "v2",
+      GENESIS_HASH,
+      {
+        caseId: "c1",
+        actor: "system",
+        action: "case.detected",
+        detail: { key: "heparin" },
+        ts: TS,
+        runId: "run-1",
+        eventKey: "case.detected",
+        // Present on the entry but must NOT affect a v2 hash — the golden proves it.
+        actorUserId: "should-be-ignored-by-v2",
+      },
+      KEY,
+    );
+    expect(hash).toBe("beacdbe72b040a5b5468fa5d2c5198e86ca53befbcab5deb818b418fde92c37d");
+  });
+
+  it("v1 ignores actorUserId — changing it does not break a v1 chain (legacy unhashed attribution)", () => {
+    const rows = buildChain(sample("v1"));
+    // v1's narrow payload predates the FK, so mutating it leaves the byte-identical hash valid.
+    rows[1]!.actorUserId = "99999999-9999-9999-9999-999999999999";
+    expect(verifyChainRows(rows)).toEqual({ ok: true });
+  });
+});
+
+describe("v3 binds actorUserId into the HMAC (PHASE6 §6.1, CWE-353)", () => {
+  it("accepts a v3 chain carrying actorUserId", () => {
+    const rows = buildChain(
+      [{ scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" }],
+      KEY,
+    );
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("fails a v3 row whose actorUserId was reattributed without recomputing the hash", () => {
+    const rows = buildChain(
+      [{ scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" }],
+      KEY,
+    );
+    // A DB writer rewrites the recorded principal — the v3 HMAC no longer matches.
+    rows[0]!.actorUserId = "u-attacker";
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(1);
+    expect(result.reason).toBe("hash-mismatch");
+  });
+
+  it("v2 ignores actorUserId — reattributing it does NOT break a legacy v2 row (only v3 binds it)", () => {
+    const rows = buildChain(
+      [{ scheme: "v2", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" }],
+      KEY,
+    );
+    rows[0]!.actorUserId = "u-attacker";
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+});
+
+describe("monotonic scheme rank (v1 < v2 < v3)", () => {
+  it("accepts a climbing v1 → v2 → v3 chain", () => {
+    const rows = buildChain(
+      [
+        { scheme: "v1", caseId: "c1", actor: "system", action: "case.detected", detail: {} },
+        { scheme: "v2", caseId: "c1", actor: "system", action: "case.assessing", detail: {} },
+        { scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" },
+      ],
+      KEY,
+    );
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("rejects a downgrade: a v2 row after a v3 row, even with a re-chained valid tail", () => {
+    // Attacker relabels/rebuilds a lower-ranked row after v3 to strip the actorUserId binding.
+    const rows = buildChain(
+      [
+        { scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" },
+        { scheme: "v2", caseId: "c1", actor: "system", action: "comms.sent", detail: {} },
+      ],
+      KEY,
+    );
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("scheme-downgrade");
+    expect(result.brokenAtId).toBe(2);
   });
 });
 

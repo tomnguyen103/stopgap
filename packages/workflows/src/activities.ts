@@ -10,6 +10,8 @@ import {
   getApprovedProtocol,
   getCaseByWorkflowId,
   getDb,
+  getSyntheticUser,
+  syntheticUserIdForLabel,
   listOpenMonitoringCases,
   recordFeedRecords,
   resetFeedMiss,
@@ -48,6 +50,7 @@ function currentRunId(): string | undefined {
   return Context.current().info.workflowExecution?.runId;
 }
 
+
 /** Persist a newly detected case and open the audit chain. Idempotent (upsert). */
 export async function recordDetected(input: CaseInput): Promise<void> {
   const db = getDb();
@@ -55,6 +58,7 @@ export async function recordDetected(input: CaseInput): Promise<void> {
   await appendAudit(db, {
     caseId: row.id,
     actor: "system",
+    actorUserId: getSyntheticUser("system"),
     action: "case.detected",
     detail: { key: input.record.key, sources: input.sources },
     runId: currentRunId(),
@@ -75,9 +79,11 @@ export async function persistStatus(
     lastNote: detail.note as string | undefined,
     closedAt: status === "closed" ? new Date() : undefined,
   });
+  const statusActor = (detail.actor as string) ?? "system";
   await appendAudit(db, {
     caseId: row?.id,
-    actor: (detail.actor as string) ?? "system",
+    actor: statusActor,
+    actorUserId: (detail.actorUserId as string | undefined) ?? syntheticUserIdForLabel(statusActor),
     action: `case.${status}`,
     detail,
     runId: currentRunId(),
@@ -129,6 +135,7 @@ export async function sendComms(
   await appendAudit(db, {
     caseId: row?.id,
     actor: "system",
+    actorUserId: getSyntheticUser("system"),
     action: "comms.sent",
     detail: { chars: draft.length, channels: results },
     runId: currentRunId(),
@@ -146,11 +153,16 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
   const row = await getCaseByWorkflowId(db, workflowId);
   await appendAudit(db, {
     caseId: row?.id,
-    // The signal is unauthenticated, so the actor is whoever the caller claimed to be. Writing
-    // a bare "pharmacist" here would put an unverifiable assertion into a tamper-evident log.
+    // The `actor` text stays the claimed label (kept stable — it is what the chain hashes).
+    // `actorUserId`, when the console threaded an authenticated session through the signal, is
+    // the machine-checkable principal; a CLI/MCP signal without one leaves it NULL, honestly.
     actor: decision.reviewer ?? "unknown-reviewer",
+    actorUserId: decision.reviewerUserId,
     action: `review.${decision.kind}`,
-    detail: { ...decision, identitySource: "workflow-signal-claim" },
+    detail: {
+      ...decision,
+      identitySource: decision.reviewerUserId ? "authenticated-session" : "workflow-signal-claim",
+    },
     runId: currentRunId(),
   });
 }
@@ -214,6 +226,7 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
       await appendAudit(db, {
         caseId: evidence.caseId,
         actor: "system",
+        actorUserId: getSyntheticUser("system"),
         action: "case.feed_resolved",
         detail: {
           reason: evidence.reason,
@@ -277,17 +290,24 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
   // The retry still re-appends the audit entry (itself idempotent) — a crash between the
   // approval commit and the audit append would otherwise leave an approved protocol version
   // with no record of who approved it.
+  // Resolve the machine-checkable ids here (the activity, which may touch the DB) rather than in
+  // the deterministic workflow (which must never import @stopgap/db). An explicit id from an
+  // authenticated session wins; otherwise a `system`/`agent` label maps to its synthetic user,
+  // and a human label with no threaded session stays NULL.
+  const authoredByUserId = input.authoredByUserId ?? syntheticUserIdForLabel(input.authoredBy);
+  const approvedByUserId = input.approvedByUserId ?? syntheticUserIdForLabel(input.approvedBy);
   const current = await getApprovedProtocol(input.key);
   if (current && current.version.body === input.body) {
     await appendAudit(db, {
       caseId: row?.id,
       actor: input.approvedBy,
+      actorUserId: approvedByUserId,
       action: "protocol.version_approved",
       detail: {
         key: input.key,
         version: current.version.version,
         authoredBy: input.authoredBy,
-        identitySource: "workflow-signal-claim",
+        identitySource: input.approvedByUserId ? "authenticated-session" : "workflow-signal-claim",
       },
       runId: currentRunId(),
       eventKey: `protocol.version_approved.v${String(current.version.version)}`,
@@ -301,22 +321,23 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
     alternatives: input.alternatives,
     sourceCaseId: row?.id ?? null,
     authoredBy: input.authoredBy,
+    authoredByUserId: authoredByUserId ?? null,
     rationale: input.rationale ?? null,
   });
-  await approveProtocolVersion(drafted.id, input.approvedBy);
+  await approveProtocolVersion(drafted.id, input.approvedBy, approvedByUserId ?? null);
   await appendAudit(db, {
     caseId: row?.id,
     actor: input.approvedBy,
+    // Real `users.id` when the console approved through an authenticated session (PHASE6 §6.1);
+    // the free-text `approvedBy`/`authoredBy` stay recorded as the human labels. A CLI signal
+    // without a session leaves the FK NULL rather than faking a principal.
+    actorUserId: approvedByUserId,
     action: "protocol.version_approved",
     detail: {
       key: input.key,
       version: drafted.version,
       authoredBy: input.authoredBy,
-      // `approvedBy` arrives on a workflow signal and is not an authenticated principal —
-      // anyone able to signal the workflow picks the string. Recording that provenance
-      // honestly is the Phase 3 answer; verifying identity needs the auth layer the Phase 4
-      // review UI introduces (see PHASE5-TODO).
-      identitySource: "workflow-signal-claim",
+      identitySource: input.approvedByUserId ? "authenticated-session" : "workflow-signal-claim",
     },
     runId: currentRunId(),
     eventKey: `protocol.version_approved.v${String(drafted.version)}`,

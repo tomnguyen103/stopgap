@@ -112,6 +112,8 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       alternatives: resolution.alternatives,
       authoredBy: resolution.resolvedBy,
       approvedBy: resolution.resolvedBy,
+      authoredByUserId: resolution.resolvedByUserId,
+      approvedByUserId: resolution.resolvedByUserId,
       rationale: resolution.rationale,
     });
     return true;
@@ -229,6 +231,11 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
         authoredBy:
           decision!.kind === "edit" ? (decision!.reviewer ?? "unknown-reviewer") : "agent",
         approvedBy: decision!.reviewer ?? "unknown-reviewer",
+        // A human edit is authored by the reviewer; an approved agent draft stays "agent"
+        // (the activity maps that label to the synthetic agent user). Either way the approver
+        // is the authenticated reviewer whose `users.id` the console threaded through the signal.
+        authoredByUserId: decision!.kind === "edit" ? decision!.reviewerUserId : undefined,
+        approvedByUserId: decision!.reviewerUserId,
         rationale:
           decision!.kind === "edit"
             ? "Pharmacist edit of the agent draft at review."

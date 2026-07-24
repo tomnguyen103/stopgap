@@ -1,0 +1,91 @@
+{
+  "realm": "stopgap",
+  "displayName": "Stopgap (DEV-ONLY seed realm — fixed client secret + demo passwords; NEVER import in prod)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "roles": {
+    "realm": [
+      { "name": "viewer", "description": "Read-only console access." },
+      { "name": "pharmacist", "description": "Resolve exceptions, review/acknowledge cases." },
+      { "name": "pharmacy_director", "description": "Approve/supersede protocol versions (superset of pharmacist)." },
+      { "name": "admin", "description": "Manage users, spend caps, demo config (superset)." }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "stopgap-console",
+      "name": "Stopgap Console",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "secret": "stopgap-console-dev-secret",
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://console:3000/*"
+      ],
+      "webOrigins": ["http://localhost:3000"],
+      "protocolMappers": [
+        {
+          "name": "realm-roles-in-id-token",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "viewer",
+      "email": "viewer@stopgap.test",
+      "firstName": "Vera",
+      "lastName": "Viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "viewer-dev", "temporary": false }],
+      "realmRoles": ["viewer"]
+    },
+    {
+      "username": "pharmacist",
+      "email": "pharmacist@stopgap.test",
+      "firstName": "Pat",
+      "lastName": "Pharmacist",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "pharmacist-dev", "temporary": false }],
+      "realmRoles": ["pharmacist"]
+    },
+    {
+      "username": "director",
+      "email": "director@stopgap.test",
+      "firstName": "Dana",
+      "lastName": "Director",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "director-dev", "temporary": false }],
+      "realmRoles": ["pharmacy_director"]
+    },
+    {
+      "username": "admin",
+      "email": "admin@stopgap.test",
+      "firstName": "Avery",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "admin-dev", "temporary": false }],
+      "realmRoles": ["admin"]
+    }
+  ]
+}

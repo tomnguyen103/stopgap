@@ -1,2 +1,2 @@
 export * from "./domain.js";
-export { getEnv, resetEnvCache, type Env } from "./env.js";
+export { getEnv, resetEnvCache, authConfigured, type Env } from "./env.js";

@@ -19,6 +19,8 @@ export interface DraftProtocolInput {
   sourceCaseId?: string | null;
   /** "agent" for an agent draft, a pharmacist id for a human-authored one. */
   authoredBy: string;
+  /** Authenticated author (PHASE6 §6.1), a real `users.id`, beside the free-text `authoredBy`. */
+  authoredByUserId?: string | null;
   rationale?: string | null;
 }
 
@@ -93,6 +95,7 @@ export async function draftProtocolVersion(input: DraftProtocolInput): Promise<P
         alternatives: input.alternatives,
         sourceCaseId: input.sourceCaseId ?? null,
         authoredBy: input.authoredBy,
+        authoredByUserId: input.authoredByUserId ?? null,
         rationale: input.rationale ?? null,
       })
       .returning();
@@ -105,10 +108,21 @@ export async function draftProtocolVersion(input: DraftProtocolInput): Promise<P
  * superseded in the same transaction, so there is never a moment with two approved versions
  * (or none) for the same protocol.
  */
+/**
+ * Result of an approval attempt. `changed` is false when the target was ALREADY approved (a
+ * no-op): the caller uses it to avoid recording an audit entry claiming an approval that did not
+ * happen (PHASE6 §6.1 — these console audits have no caseId, so appendAudit cannot dedupe them).
+ */
+export interface ApprovalResult {
+  row: ProtocolVersionRow;
+  changed: boolean;
+}
+
 export async function approveProtocolVersion(
   versionId: string,
   approvedBy: string,
-): Promise<ProtocolVersionRow> {
+  approvedByUserId?: string | null,
+): Promise<ApprovalResult> {
   const db = getDb();
   return db.transaction(async (tx) => {
     const [target] = await tx
@@ -122,7 +136,7 @@ export async function approveProtocolVersion(
     // commit, leaving two approved versions — the exact state this function promises can
     // never exist.
     await tx.execute(sql`select id from ${protocols} where id = ${target.protocolId} for update`);
-    if (target.state === "approved") return target;
+    if (target.state === "approved") return { row: target, changed: false };
     if (target.state === "superseded") {
       throw new Error(`protocol version ${versionId} is superseded and cannot be approved`);
     }
@@ -134,11 +148,11 @@ export async function approveProtocolVersion(
 
     const [approved] = await tx
       .update(protocolVersions)
-      .set({ state: "approved", approvedBy, approvedAt: new Date() })
+      .set({ state: "approved", approvedBy, approvedByUserId: approvedByUserId ?? null, approvedAt: new Date() })
       .where(eq(protocolVersions.id, versionId))
       .returning();
 
     await tx.update(protocols).set({ updatedAt: new Date() }).where(eq(protocols.id, target.protocolId));
-    return approved!;
+    return { row: approved!, changed: true };
   });
 }

@@ -63,6 +63,23 @@ export type CaseStatus = z.infer<typeof CaseStatus>;
 export const Severity = z.enum(["none", "low", "moderate", "high", "critical"]);
 export type Severity = z.infer<typeof Severity>;
 
+/**
+ * Console/API roles (PHASE6 §6.1). Ordered least → most privileged; the authorization matrix
+ * treats them as a rank (a higher role satisfies any lower requirement), so the order here is
+ * load-bearing, not cosmetic. `viewer` is read-only (and the identity the public demo maps an
+ * anonymous visitor to); `pharmacist` resolves exceptions and acknowledges; `pharmacy_director`
+ * additionally approves/supersedes protocol versions; `admin` manages users, spend caps, and
+ * demo config. Kept here beside `CaseStatus` so every layer (db, workflows, console) shares one
+ * definition instead of drifting string literals.
+ */
+export const ROLES = ["viewer", "pharmacist", "pharmacy_director", "admin"] as const;
+export type Role = (typeof ROLES)[number];
+
+/** Type guard: is an arbitrary string one of the known roles? */
+export function isRole(value: string): value is Role {
+  return (ROLES as readonly string[]).includes(value);
+}
+
 export const TERMINAL_CASE_STATUSES: readonly CaseStatus[] = ["closed", "rejected"];
 
 export function isTerminalStatus(s: CaseStatus): boolean {

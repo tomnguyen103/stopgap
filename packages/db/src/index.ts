@@ -38,6 +38,20 @@ export {
   listProtocolVersions,
   type DraftProtocolInput,
 } from "./protocols.js";
+export {
+  upsertUserByOidc,
+  getUserByOidc,
+  getUserRoles,
+  getSyntheticUser,
+  syntheticUserIdForLabel,
+  assignRole,
+  revokeRole,
+  listUsers,
+  setUserDisabled,
+  SYNTHETIC_USER_IDS,
+  type SyntheticUser,
+  type UpsertUserInput,
+} from "./users.js";
 export { getKpis, type Kpis } from "./metrics.js";
 export {
   listShadowRuns,
@@ -52,6 +66,9 @@ export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js
 export type {
   DemoRunRow,
   LlmSpendRow,
+  UserRow,
+  NewUserRow,
+  UserRoleRow,
   CaseRow,
   NewCaseRow,
   AuditRow,
