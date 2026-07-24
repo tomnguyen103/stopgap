@@ -1,0 +1,187 @@
+import { describe, expect, it } from "vitest";
+import { buildTimestampRequest } from "./anchors.js";
+import { computeAuditHash, GENESIS_HASH, verifyChainRows, type VerifiableRow } from "./audit.js";
+
+/**
+ * Pure audit-chain verification tests (PHASE6 §6.2). No live Postgres: chains are built with
+ * the same `computeAuditHash` the writer uses, then fed to `verifyChainRows`. Tampering is
+ * simulated by mutating a field WITHOUT recomputing its hash — exactly what a DB-level edit
+ * does — and the verifier must name the row it breaks at.
+ */
+
+const KEY = "test-hmac-key";
+
+interface EntryFields {
+  caseId?: string;
+  actor: string;
+  action: string;
+  detail: Record<string, unknown>;
+}
+
+/** Build a valid chain of rows under the given per-row schemes. */
+function buildChain(entries: (EntryFields & { scheme: "v1" | "v2" })[], hmacKey?: string): VerifiableRow[] {
+  const rows: VerifiableRow[] = [];
+  let prevHash = GENESIS_HASH;
+  entries.forEach((e, i) => {
+    const hash = computeAuditHash(e.scheme, prevHash, e, e.scheme === "v2" ? hmacKey : undefined);
+    rows.push({
+      id: i + 1,
+      caseId: e.caseId ?? null,
+      actor: e.actor,
+      action: e.action,
+      detail: e.detail,
+      prevHash,
+      hash,
+      scheme: e.scheme,
+    });
+    prevHash = hash;
+  });
+  return rows;
+}
+
+const sample = (scheme: "v1" | "v2"): (EntryFields & { scheme: "v1" | "v2" })[] => [
+  { scheme, caseId: "c1", actor: "system", action: "case.detected", detail: { key: "heparin" } },
+  { scheme, caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: { note: "ok" } },
+  { scheme, caseId: "c1", actor: "system", action: "comms.sent", detail: { channels: 2 } },
+];
+
+describe("verifyChainRows", () => {
+  it("accepts a good all-v1 chain", () => {
+    expect(verifyChainRows(buildChain(sample("v1")))).toEqual({ ok: true });
+  });
+
+  it("accepts a good all-v2 chain when the key is supplied", () => {
+    const rows = buildChain(sample("v2"), KEY);
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("accepts a chain across the v1 → v2 boundary", () => {
+    const rows = buildChain(
+      [
+        { scheme: "v1", caseId: "c1", actor: "system", action: "case.detected", detail: {} },
+        { scheme: "v1", caseId: "c1", actor: "system", action: "case.assessing", detail: {} },
+        { scheme: "v2", caseId: "c1", actor: "system", action: "case.researching", detail: {} },
+        { scheme: "v2", caseId: "c1", actor: "system", action: "comms.sent", detail: {} },
+      ],
+      KEY,
+    );
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("fails a v2 chain when the key is absent (missing-hmac-key at the first v2 row)", () => {
+    const rows = buildChain(sample("v2"), KEY);
+    const result = verifyChainRows(rows); // no key
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("missing-hmac-key");
+    expect(result.brokenAtId).toBe(1);
+  });
+
+  it("names the row when `detail` is tampered", () => {
+    const rows = buildChain(sample("v1"));
+    rows[1]!.detail = { note: "tampered" };
+    const result = verifyChainRows(rows);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(2);
+    expect(result.reason).toBe("hash-mismatch");
+  });
+
+  it("names the row when `actor` is tampered", () => {
+    const rows = buildChain(sample("v1"));
+    rows[0]!.actor = "attacker";
+    const result = verifyChainRows(rows);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(1);
+  });
+
+  it("names the row when `caseId` is tampered", () => {
+    const rows = buildChain(sample("v2"), KEY);
+    rows[2]!.caseId = "c2";
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(3);
+  });
+
+  it("accepts a v1 prefix followed by v2 rows (HMAC turned on mid-history)", () => {
+    const rows = buildChain(
+      [
+        { scheme: "v1", caseId: "c1", actor: "system", action: "case.detected", detail: {} },
+        { scheme: "v1", caseId: "c1", actor: "system", action: "case.assessing", detail: {} },
+        { scheme: "v2", caseId: "c1", actor: "system", action: "comms.sent", detail: {} },
+      ],
+      KEY,
+    );
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("rejects a scheme downgrade: a v1 row after a v2 row, even with a re-chained valid tail", () => {
+    // The `scheme` column is DB-controlled. An attacker tampers a v2 row, relabels it v1,
+    // recomputes its hash with keyless SHA-256, and re-chains the tail — with monotonic-scheme
+    // enforcement this must still fail (otherwise verification would pass with no key at all).
+    const rows = buildChain(sample("v2"), KEY); // ids 1,2,3 all v2
+    const victim = rows[1]!;
+    victim.scheme = "v1";
+    victim.hash = computeAuditHash("v1", victim.prevHash, {
+      caseId: victim.caseId ?? undefined,
+      actor: victim.actor,
+      action: victim.action,
+      detail: victim.detail,
+    });
+    // Re-chain the tail so the ONLY remaining tell is the scheme downgrade itself.
+    const tail = rows[2]!;
+    tail.prevHash = victim.hash;
+    tail.hash = computeAuditHash(
+      "v2",
+      tail.prevHash,
+      { caseId: tail.caseId ?? undefined, actor: tail.actor, action: tail.action, detail: tail.detail },
+      KEY,
+    );
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("scheme-downgrade");
+    expect(result.brokenAtId).toBe(2);
+  });
+
+  it("detects a v2 row that was recomputed under the WRONG key", () => {
+    const rows = buildChain(sample("v2"), KEY);
+    // Attacker with DB write access rewrites row 2's hash under a key they guessed.
+    const r = rows[1]!;
+    r.hash = computeAuditHash(
+      "v2",
+      r.prevHash,
+      { caseId: r.caseId ?? undefined, actor: r.actor, action: r.action, detail: r.detail },
+      "wrong-key",
+    );
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(2);
+  });
+});
+
+describe("buildTimestampRequest", () => {
+  const digestHex = "01".repeat(32);
+
+  it("encodes a DER TimeStampReq with the SHA-256 imprint", () => {
+    const der = buildTimestampRequest(digestHex);
+    // Outer SEQUENCE, content length 57.
+    expect(der.length).toBe(59);
+    expect(der[0]).toBe(0x30);
+    expect(der[1]).toBe(0x39);
+    // version INTEGER 1.
+    expect([...der.subarray(2, 5)]).toEqual([0x02, 0x01, 0x01]);
+    // messageImprint SEQUENCE (len 49).
+    expect([...der.subarray(5, 7)]).toEqual([0x30, 0x31]);
+    // AlgorithmIdentifier SEQUENCE { sha256 OID, NULL }.
+    expect([...der.subarray(7, 22)]).toEqual([
+      0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00,
+    ]);
+    // hashedMessage OCTET STRING (32 bytes) == the digest.
+    expect([...der.subarray(22, 24)]).toEqual([0x04, 0x20]);
+    expect(der.subarray(24, 56).equals(Buffer.from(digestHex, "hex"))).toBe(true);
+    // certReq BOOLEAN TRUE.
+    expect([...der.subarray(56, 59)]).toEqual([0x01, 0x01, 0xff]);
+  });
+
+  it("rejects a digest that is not 32 bytes", () => {
+    expect(() => buildTimestampRequest("00")).toThrow(/32-byte/);
+  });
+});

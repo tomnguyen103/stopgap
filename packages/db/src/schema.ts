@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   bigserial,
   boolean,
   index,
@@ -33,6 +34,14 @@ export const cases = pgTable(
     sourceId: text("source_id").notNull(),
     status: text("status").notNull().default("detected"),
     severity: text("severity"),
+    /**
+     * Consecutive feed polls that no longer listed this shortage while the case was still
+     * monitoring (PHASE6 §6.6). Reset to 0 the moment the key reappears as `current`; at
+     * `FEED_RESOLVE_MISS_THRESHOLD` misses the poll signals the case resolved. A counter, not
+     * a timestamp log: the poll only ever asks "how many misses in a row", and a single miss
+     * (feed flap) must never resolve a live shortage.
+     */
+    feedMissCount: integer("feed_miss_count").notNull().default(0),
     ndcs: jsonb("ndcs").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     lastNote: text("last_note"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
@@ -74,6 +83,14 @@ export const auditLog = pgTable(
      * number, or every tick after the first would be discarded as a retry).
      */
     eventKey: text("event_key").notNull().default(""),
+    /**
+     * Hashing scheme for this row (PHASE6 §6.2). `v1` = bare SHA-256 (the original,
+     * tamper-evident but recomputable by anyone with DB write access); `v2` = HMAC-SHA-256
+     * under `AUDIT_HMAC_KEY`, whose key lives outside the DB so a write-only attacker can no
+     * longer forge a valid chain. Stored per row, not global, so a deployment that turns the
+     * key on keeps verifying its existing `v1` rows instead of invalidating history.
+     */
+    scheme: text("scheme").notNull().default("v1"),
   },
   (t) => [
     index("audit_case_idx").on(t.caseId),
@@ -85,6 +102,30 @@ export const auditLog = pgTable(
     uniqueIndex("audit_case_action_uq").on(t.caseId, t.eventKey, t.runId),
   ],
 );
+
+/**
+ * External anchors of the audit chain (PHASE6 §6.2). Every hour a Temporal schedule records
+ * the current chain head — `(maxAuditId, headHash)` — to an append-only sink outside the
+ * database (a file on a Docker volume, optionally an RFC 3161 timestamp token). HMAC stops a
+ * write-only attacker forging rows; the anchor stops even a key holder from rewriting history
+ * unnoticed, because the original head hash lives somewhere they cannot silently edit. This
+ * table mirrors what was anchored so the verification UI can cross-check stored heads against
+ * the live chain.
+ */
+export const auditAnchors = pgTable("audit_anchors", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  /** When this anchor was taken (the head it pins is the chain as of this moment). */
+  ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+  /** Highest `audit_log.id` covered by this anchor. */
+  maxAuditId: bigint("max_audit_id", { mode: "number" }).notNull(),
+  /** Hash of row `maxAuditId` at anchor time — the value re-verification compares against. */
+  headHash: text("head_hash").notNull(),
+  /** Where the anchor was written: `file` (always) or `tsa` (RFC 3161 token obtained). */
+  sink: text("sink").notNull(),
+  /** Reference into the sink — the anchor file path, or the base64 TSA token. Nullable. */
+  sinkRef: text("sink_ref"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Raw feed records for dedup + provenance; `(source, sourceId)` is unique. */
 export const feedRecords = pgTable(
@@ -235,6 +276,7 @@ export const demoRuns = pgTable(
 export type CaseRow = typeof cases.$inferSelect;
 export type NewCaseRow = typeof cases.$inferInsert;
 export type AuditRow = typeof auditLog.$inferSelect;
+export type AuditAnchorRow = typeof auditAnchors.$inferSelect;
 export type FeedRecordRow = typeof feedRecords.$inferSelect;
 export type ProtocolRow = typeof protocols.$inferSelect;
 export type ProtocolVersionRow = typeof protocolVersions.$inferSelect;

@@ -1,13 +1,44 @@
 import { getEnv } from "@stopgap/core/env";
-import { ScheduleAlreadyRunning } from "@temporalio/client";
+import { Client, ScheduleAlreadyRunning } from "@temporalio/client";
 import { makeClient } from "../client.js";
-import { POLL_FEEDS_WORKFLOW } from "../shared.js";
+import { ANCHOR_AUDIT_WORKFLOW, POLL_FEEDS_WORKFLOW } from "../shared.js";
 
-const SCHEDULE_ID = "poll-feeds";
+const POLL_SCHEDULE_ID = "poll-feeds";
+const ANCHOR_SCHEDULE_ID = "anchor-audit";
+
+/** Create one schedule, treating "already exists" as success (idempotent re-run). */
+async function ensureSchedule(
+  client: Client,
+  opts: { scheduleId: string; every: string; workflowType: string; workflowId: string; taskQueue: string },
+): Promise<void> {
+  try {
+    await client.schedule.create({
+      scheduleId: opts.scheduleId,
+      spec: { intervals: [{ every: opts.every }] },
+      action: {
+        type: "startWorkflow",
+        workflowType: opts.workflowType,
+        taskQueue: opts.taskQueue,
+        workflowId: opts.workflowId,
+      },
+      // SKIP overlap: a slow run must not stack a second one on top of itself.
+      policies: { overlap: "SKIP" },
+    });
+    console.log(`[start-schedule] created schedule "${opts.scheduleId}" (every ${opts.every})`);
+  } catch (err) {
+    if (err instanceof ScheduleAlreadyRunning) {
+      console.log(`[start-schedule] schedule "${opts.scheduleId}" already exists`);
+    } else {
+      throw err;
+    }
+  }
+}
 
 /**
- * Create (or confirm) the Temporal Schedule that drives the auto-open spine
- * (PROJECT_PLAN §4: "poll → new shortage auto-opens a case"). Idempotent — safe to re-run.
+ * Create (or confirm) the Temporal Schedules that run without a human:
+ *   - poll-feeds (15m): the auto-open spine (PROJECT_PLAN §4).
+ *   - anchor-audit (1h): the external audit-chain anchor (PHASE6 §6.2).
+ * Idempotent — safe to re-run.
  *
  *   pnpm --filter @stopgap/workflows start-schedule
  */
@@ -15,24 +46,20 @@ async function main() {
   const env = getEnv();
   const { client, connection } = await makeClient();
   try {
-    await client.schedule.create({
-      scheduleId: SCHEDULE_ID,
-      spec: { intervals: [{ every: "15m" }] },
-      action: {
-        type: "startWorkflow",
-        workflowType: POLL_FEEDS_WORKFLOW,
-        taskQueue: env.TEMPORAL_TASK_QUEUE,
-        workflowId: "poll-feeds-run",
-      },
-      policies: { overlap: "SKIP" },
+    await ensureSchedule(client, {
+      scheduleId: POLL_SCHEDULE_ID,
+      every: "15m",
+      workflowType: POLL_FEEDS_WORKFLOW,
+      workflowId: "poll-feeds-run",
+      taskQueue: env.TEMPORAL_TASK_QUEUE,
     });
-    console.log(`[start-schedule] created schedule "${SCHEDULE_ID}" (every 15m)`);
-  } catch (err) {
-    if (err instanceof ScheduleAlreadyRunning) {
-      console.log(`[start-schedule] schedule "${SCHEDULE_ID}" already exists`);
-    } else {
-      throw err;
-    }
+    await ensureSchedule(client, {
+      scheduleId: ANCHOR_SCHEDULE_ID,
+      every: "1h",
+      workflowType: ANCHOR_AUDIT_WORKFLOW,
+      workflowId: "anchor-audit-run",
+      taskQueue: env.TEMPORAL_TASK_QUEUE,
+    });
   } finally {
     await connection.close();
   }

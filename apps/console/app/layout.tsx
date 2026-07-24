@@ -21,6 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/protocols">Protocols</Link>
             <Link href="/shadow">Shadow</Link>
             <Link href="/metrics">KPIs</Link>
+            <Link href="/audit">Audit</Link>
           </nav>
         </header>
         <DemoBanner />

@@ -284,6 +284,19 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
  * run = one poll of openFDA + ASHP; a Temporal Schedule (`scripts/start-schedule.ts`) fires
  * it on a cadence so new shortages open cases without a human running `start-case` by hand.
  */
-export async function pollFeedsWorkflow(): Promise<{ polled: number; opened: number }> {
+export async function pollFeedsWorkflow(): Promise<{ polled: number; opened: number; resolved: number }> {
   return acts.pollAndOpenCases();
+}
+
+/**
+ * The audit-anchor workflow (PHASE6 §6.2). One run = one external anchor of the audit chain
+ * head. A separate hourly Temporal Schedule fires it (`scripts/start-schedule.ts`) so wholesale
+ * chain rewrites stay detectable even to someone holding the HMAC key.
+ */
+export async function anchorAuditWorkflow(): Promise<{
+  maxAuditId: number;
+  headHash: string;
+  sink: string;
+} | null> {
+  return acts.anchorAuditChain();
 }

@@ -60,6 +60,37 @@ const EnvSchema = z.object({
   ),
   /** Rate limit on visitor-started demo scenarios, per rolling hour (deployment-wide). */
   DEMO_MAX_RUNS_PER_HOUR: z.coerce.number().int().positive().default(6),
+
+  /**
+   * Keyed-HMAC secret for the audit chain (PHASE6 §6.2, CWE-345). When set, new audit rows
+   * are hashed with HMAC-SHA256 under this key (`v2` scheme) instead of a bare SHA-256
+   * (`v1`), so an attacker with only DB write access can no longer recompute a valid chain —
+   * the key lives outside the database (document a KMS as the production home). Empty/unset
+   * means the deployment stays on `v1`: honest non-configuration, not a silent downgrade of a
+   * chain that was already keyed. Existing `v1` rows keep verifying either way.
+   */
+  AUDIT_HMAC_KEY: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
+  /**
+   * Append-only file the hourly anchor writes `(ts, maxAuditId, headHash)` to — the external
+   * anchor that makes wholesale chain rewrites detectable even to someone who holds the HMAC
+   * key. In compose this points at a Docker volume; locally it defaults under the repo. The
+   * directory is created on first write.
+   */
+  AUDIT_ANCHOR_FILE: z.string().default(".audit-anchors/anchors.log"),
+  /**
+   * Optional RFC 3161 timestamp authority (e.g. https://freetsa.org/tsr). When set, each
+   * anchor also submits the head hash for an independent, signed timestamp token. Unset means
+   * the file anchor is the only sink — recorded honestly as such, never faked.
+   */
+  AUDIT_TSA_URL: z.preprocess((v) => (v === "" ? undefined : v), z.string().url().optional()),
+
+  /**
+   * Consecutive feed polls a monitored shortage must be MISSING before the poll auto-resolves
+   * its case (PHASE6 §6.6). Default 3: one miss is a feed flap, not a resolution, so a single
+   * absent poll must never close a live shortage. An explicit `resolved` status from the feed
+   * bypasses this and resolves immediately — the threshold only governs silent absence.
+   */
+  FEED_RESOLVE_MISS_THRESHOLD: z.coerce.number().int().positive().default(3),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

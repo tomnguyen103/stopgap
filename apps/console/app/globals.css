@@ -73,6 +73,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.danger { background: transparent; color: var(--crit); border: 1px solid var(--crit); }
 .error { color: var(--crit); font-size: 13px; margin: 10px 0 0; }
 
+/* Phase 6: audit-integrity verification banner. */
+.banner {
+  border-radius: 10px; padding: 14px 18px; margin: 0 0 20px; font-size: 14px;
+  border: 1px solid var(--line); background: var(--panel);
+}
+.banner.ok { border-color: var(--ok); color: var(--ok); }
+.banner.bad { border-color: var(--crit); color: var(--crit); }
+.match-ok { color: var(--ok); }
+.match-bad { color: var(--crit); }
+.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+
 /* Phase 5: demo mode. */
 .demo-banner {
   padding: 8px 24px; font-size: 13px; color: var(--text);

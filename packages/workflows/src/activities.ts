@@ -1,13 +1,18 @@
 import { Context } from "@temporalio/activity";
+import { getEnv } from "@stopgap/core/env";
 import type { CaseStatus, Severity } from "@stopgap/core";
 import {
+  anchorAuditChain as runAuditAnchor,
   appendAudit,
   approveProtocolVersion,
+  bumpFeedMiss,
   draftProtocolVersion,
   getApprovedProtocol,
   getCaseByWorkflowId,
   getDb,
+  listOpenMonitoringCases,
   recordFeedRecords,
+  resetFeedMiss,
   updateCaseStatus,
   upsertCaseForRecord,
   workflowIdForKey,
@@ -15,7 +20,8 @@ import {
 import { sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { contentHash, mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
-import { makeClient, startCase } from "./client.js";
+import { makeClient, markResolved, startCase } from "./client.js";
+import { diffResolutions } from "./feed-resolution.js";
 import type {
   CaseInput,
   ImpactResult,
@@ -156,15 +162,21 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
  * no-op here. Runs on a Temporal Schedule (see `scripts/start-schedule.ts`), so this activity
  * itself opens a client connection per invocation rather than holding one across the worker.
  */
-export async function pollAndOpenCases(): Promise<{ polled: number; opened: number }> {
+export async function pollAndOpenCases(): Promise<{ polled: number; opened: number; resolved: number }> {
+  const db = getDb();
   const [openFda, ashp] = await Promise.all([pollOpenFda(), pollAshp()]);
   const fetched = [...openFda, ...ashp];
   // Persist what the feeds returned before deciding what to do with it: `feed_records` is the
   // provenance trail behind every case, and the only thing that can answer "when did this
   // deployment last hear from openFDA" (the console's freshness panel). Resolved records are
   // stored too — a shortage dropping off the feed is information.
-  await recordFeedRecords(getDb(), fetched, contentHash);
-  const current = mergeRecords(fetched).filter((r) => r.status === "current");
+  await recordFeedRecords(db, fetched, contentHash);
+  // One merge for both jobs: opening cases for `current` shortages, and — the §6.6 half —
+  // resolving monitoring cases whose key the feed now lists `resolved` or no longer lists.
+  const merged = mergeRecords(fetched);
+  const current = merged.filter((r) => r.status === "current");
+  const currentKeys = new Set(current.map((r) => r.key));
+  const resolvedKeys = new Set(merged.filter((r) => r.status === "resolved").map((r) => r.key));
 
   const { client, connection } = await makeClient();
   try {
@@ -173,10 +185,60 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
       const { started } = await startCase(client, record, record.sources);
       if (started) opened += 1;
     }
-    return { polled: current.length, opened };
+
+    // Feed-resolution auto-detect (PHASE6 §6.6): close the lifecycle loop the deferred finding
+    // flagged — the system opened cases but never noticed a shortage ended. Diff open
+    // monitoring cases against this poll's keys; the pure `diffResolutions` owns the
+    // counting so a single feed flap can never resolve a live case.
+    const openCases = await listOpenMonitoringCases(db);
+    const pollTimestamp = new Date().toISOString();
+    const diff = diffResolutions(
+      openCases,
+      { currentKeys, resolvedKeys },
+      getEnv().FEED_RESOLVE_MISS_THRESHOLD,
+      pollTimestamp,
+    );
+    for (const caseId of diff.toReset) await resetFeedMiss(db, caseId);
+    for (const caseId of diff.toBump) await bumpFeedMiss(db, caseId);
+    for (const evidence of diff.toResolve) {
+      // Signal the durable workflow (it owns the state machine), record the evidence in the
+      // tamper-evident chain, then clear the counter. The audit `eventKey` carries no runId,
+      // so a later poll that catches the case before its status has left `monitoring`
+      // no-ops on the same entry instead of double-appending.
+      await markResolved(client, evidence.key);
+      await appendAudit(db, {
+        caseId: evidence.caseId,
+        actor: "system",
+        action: "case.feed_resolved",
+        detail: {
+          reason: evidence.reason,
+          source: evidence.source,
+          lastSeenSourceId: evidence.lastSeenSourceId,
+          consecutiveMisses: evidence.consecutiveMisses,
+          missPollTimestamps: evidence.missPollTimestamps,
+        },
+        eventKey: "case.feed_resolved",
+      });
+      await resetFeedMiss(db, evidence.caseId);
+    }
+    return { polled: current.length, opened, resolved: diff.toResolve.length };
   } finally {
     await connection.close();
   }
+}
+
+/**
+ * Take one external anchor of the audit chain head (PHASE6 §6.2). Runs on its own hourly
+ * Temporal schedule (see `scripts/start-schedule.ts`). A no-op on an empty chain — nothing to
+ * pin yet — so an anchor never claims to have anchored something that does not exist.
+ */
+export async function anchorAuditChain(): Promise<{
+  maxAuditId: number;
+  headHash: string;
+  sink: string;
+} | null> {
+  const row = await runAuditAnchor(getDb());
+  return row ? { maxAuditId: row.maxAuditId, headHash: row.headHash, sink: row.sink } : null;
 }
 
 /**

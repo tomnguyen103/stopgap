@@ -10,12 +10,15 @@ export {
 export {
   shortageCaseWorkflow,
   pollFeedsWorkflow,
+  anchorAuditWorkflow,
   reviewSignal,
   resolvedSignal,
   exceptionResolvedSignal,
   stateQuery,
 } from "./workflows.js";
+export { diffResolutions, type FeedResolutionDiff, type ResolutionEvidence } from "./feed-resolution.js";
 export {
+  ANCHOR_AUDIT_WORKFLOW,
   POLL_FEEDS_WORKFLOW,
   SHORTAGE_CASE_WORKFLOW,
   type CaseInput,

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
-    "push": "drizzle-kit push"
+    "push": "drizzle-kit push",
+    "verify-audit": "tsx src/scripts/verify-audit.ts"
   },
   "dependencies": {
     "@stopgap/core": "workspace:*",

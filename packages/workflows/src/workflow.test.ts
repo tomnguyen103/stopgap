@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type * as activities from "./activities.js";
 import type { CaseInput, RecordProtocolInput } from "./shared.js";
 import {
+  anchorAuditWorkflow,
   exceptionResolvedSignal,
   pollFeedsWorkflow,
   resolvedSignal,
@@ -13,6 +14,8 @@ import {
   shortageCaseWorkflow,
   stateQuery,
 } from "./workflows.js";
+import type { OpenMonitoringCase } from "@stopgap/db";
+import { diffResolutions } from "./feed-resolution.js";
 
 /**
  * Time-skipped durability test (PROJECT_PLAN §3C): proves a case blocks for weeks on a
@@ -58,7 +61,8 @@ const mockActivities: typeof activities = {
         : { alternatives: ["alt-a", "alt-b"], draft: "draft protocol", confidence: 0.9 },
   sendComms: async () => ({ delivered: true }),
   recordDecision: async () => {},
-  pollAndOpenCases: async () => ({ polled: 0, opened: 0 }),
+  pollAndOpenCases: async () => ({ polled: 0, opened: 0, resolved: 0 }),
+  anchorAuditChain: async () => ({ maxAuditId: 7, headHash: "deadbeef", sink: "file" }),
   // Memory hit only for the drug whose name says so, so every other case exercises the
   // agent-research path exactly as before.
   lookupProtocol: async (key: string) =>
@@ -294,7 +298,128 @@ describe("pollFeedsWorkflow (time-skipped)", () => {
         taskQueue: TASK_QUEUE,
         workflowId: `wf-poll-${Date.now()}`,
       });
-      expect(await handle.result()).toEqual({ polled: 0, opened: 0 });
+      expect(await handle.result()).toEqual({ polled: 0, opened: 0, resolved: 0 });
+    });
+  }, 60_000);
+});
+
+describe("anchorAuditWorkflow (time-skipped)", () => {
+  it("delegates to the anchorAuditChain activity and returns its result", async () => {
+    await withWorker(async () => {
+      const handle = await env.client.workflow.start(anchorAuditWorkflow, {
+        args: [],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-anchor-${Date.now()}`,
+      });
+      expect(await handle.result()).toEqual({ maxAuditId: 7, headHash: "deadbeef", sink: "file" });
+    });
+  }, 60_000);
+});
+
+describe("feed-resolution auto-detect (time-skipped)", () => {
+  /**
+   * Drives a real case into monitoring, then simulates the poller: each "poll" runs the real
+   * `diffResolutions` against an in-memory case whose miss counter accrues, and signals the
+   * workflow's `resolvedSignal` exactly when the diff says to. This ties the pure counting to
+   * the actual workflow signal without a database — the case must stay monitoring while the
+   * key is absent for fewer than N polls, and close once absence reaches N.
+   */
+  async function driveToMonitoring(workflowId: string) {
+    const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+      args: [{ record: heparin(), sources: ["openfda"] }],
+      taskQueue: TASK_QUEUE,
+      workflowId,
+    });
+    await env.sleep("1 hour");
+    await handle.signal(reviewSignal, { kind: "approve" });
+    await env.sleep("1 hour");
+    expect((await handle.query(stateQuery)).status).toBe("monitoring");
+    return handle;
+  }
+
+  it("resolves a case after N consecutive absent polls, not before", async () => {
+    await withWorker(async () => {
+      const handle = await driveToMonitoring(`wf-resolve-${Date.now()}`);
+      const threshold = 3;
+      const inMemory: OpenMonitoringCase = {
+        caseId: "c",
+        key: heparin().key,
+        source: "openfda",
+        sourceId: heparin().sourceId,
+        feedMissCount: 0,
+      };
+      const emptyFeed = { currentKeys: new Set<string>(), resolvedKeys: new Set<string>() };
+
+      // Two absent polls: still monitoring (single/double flap must not resolve).
+      for (let poll = 1; poll < threshold; poll += 1) {
+        const diff = diffResolutions([inMemory], emptyFeed, threshold, new Date().toISOString());
+        expect(diff.toResolve).toHaveLength(0);
+        inMemory.feedMissCount += diff.toBump.length;
+        await env.sleep("1 hour");
+        expect((await handle.query(stateQuery)).status).toBe("monitoring");
+      }
+
+      // Nth absent poll: the diff says resolve → signal the workflow.
+      const finalDiff = diffResolutions([inMemory], emptyFeed, threshold, new Date().toISOString());
+      expect(finalDiff.toResolve).toHaveLength(1);
+      await handle.signal(resolvedSignal);
+      expect((await handle.result()).status).toBe("closed");
+    });
+  }, 60_000);
+
+  it("keeps a case monitoring while its key stays current (no false resolution)", async () => {
+    await withWorker(async () => {
+      const handle = await driveToMonitoring(`wf-stay-${Date.now()}`);
+      const present = { currentKeys: new Set([heparin().key]), resolvedKeys: new Set<string>() };
+      for (let poll = 0; poll < 5; poll += 1) {
+        const diff = diffResolutions(
+          [{ caseId: "c", key: heparin().key, source: "openfda", sourceId: "x", feedMissCount: 0 }],
+          present,
+          3,
+          new Date().toISOString(),
+        );
+        expect(diff.toResolve).toHaveLength(0);
+        await env.sleep("1 hour");
+      }
+      expect((await handle.query(stateQuery)).status).toBe("monitoring");
+    });
+  }, 60_000);
+
+  it("reopens a fresh run against the same case after the key reappears (recurrence path)", async () => {
+    await withWorker(async () => {
+      // A recurring shortage reuses ONE workflow id (workflowIdForKey), so this stands in for
+      // the case row. First run: absence resolves it and it closes.
+      const workflowId = `wf-recurrence-${Date.now()}`;
+      const first = await driveToMonitoring(workflowId);
+      const threshold = 3;
+      const inMemory: OpenMonitoringCase = {
+        caseId: "c",
+        key: heparin().key,
+        source: "openfda",
+        sourceId: heparin().sourceId,
+        feedMissCount: 0,
+      };
+      const emptyFeed = { currentKeys: new Set<string>(), resolvedKeys: new Set<string>() };
+      for (let poll = 1; poll <= threshold; poll += 1) {
+        const diff = diffResolutions([inMemory], emptyFeed, threshold, new Date().toISOString());
+        if (diff.toResolve.length > 0) await first.signal(resolvedSignal);
+        else inMemory.feedMissCount += diff.toBump.length;
+        await env.sleep("1 hour");
+      }
+      expect((await first.result()).status).toBe("closed");
+
+      // Key reappears as current → the poll's startCase reopens against the SAME workflow id
+      // (ALLOW_DUPLICATE reuse policy, allowed now the previous run is terminal). This is the
+      // existing Phase 3 recurrence path — a new RUN, same case row, not a new path. Asserting
+      // a fresh run started (a new run id on the same workflow id) is the reopen proof; the new
+      // run's own lifecycle is covered by the other cases in this file.
+      const second = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: heparin(), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId,
+        workflowIdReusePolicy: "ALLOW_DUPLICATE",
+      });
+      expect(second.firstExecutionRunId).not.toBe(first.firstExecutionRunId);
     });
   }, 60_000);
 });
