@@ -1,6 +1,6 @@
 import { getEnv } from "@stopgap/core/env";
 import type { ShortageRecord } from "@stopgap/core";
-import { countDemoRunsSince, getDb, recordDemoRun } from "@stopgap/db";
+import { getDb, reserveDemoRun } from "@stopgap/db";
 
 /**
  * "Run a shortage" — the one mutation a demo visitor is allowed (PROJECT_PLAN §11).
@@ -74,8 +74,10 @@ export async function prepareDemoRun(
 
   const limit = getEnv().DEMO_MAX_RUNS_PER_HOUR;
   const since = new Date(Date.now() - 60 * 60 * 1000);
-  const recent = await countDemoRunsSince(getDb(), since);
-  if (recent >= limit) {
+  // Count-and-reserve in one atomic step: a separate check-then-record lets concurrent
+  // requests all pass the check and blow past the cap.
+  const { allowed } = await reserveDemoRun(getDb(), drug.key, since, limit);
+  if (!allowed) {
     return {
       ok: false,
       reason: "rate-limited",
@@ -93,6 +95,5 @@ export async function prepareDemoRun(
     rxcuis: [],
     note: drug.note,
   };
-  await recordDemoRun(getDb(), drug.key);
   return { ok: true, record };
 }

@@ -21,12 +21,12 @@ export default async function CasesPage() {
         {feeds.length === 0 ? (
           // Absence is the honest reading: no stored record means no feed has returned data
           // to this deployment yet (ASHP without a key never does).
-          <p className="sub sub-tight">No feed data yet — run the poll schedule.</p>
+          <p className="sub sub-tight">No feed data stored yet — run the poll schedule.</p>
         ) : (
           <p className="sub sub-tight">
             {feeds.map((f) => (
               <span key={f.source} className="feed-line">
-                <b>{f.source}</b> · last polled {new Date(f.lastFetchedAt).toLocaleString()} ·{" "}
+                <b>{f.source}</b> · latest stored record {new Date(f.lastFetchedAt).toLocaleString()} ·{" "}
                 {f.records} record{f.records === 1 ? "" : "s"}
               </span>
             ))}

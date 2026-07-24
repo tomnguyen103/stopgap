@@ -46,11 +46,18 @@ const EnvSchema = z.object({
   STOPGAP_DEMO_MODE: z.enum(["on", "off"]).default("off"),
   /**
    * Daily LLM spend cap in USD. Applies to every deployment, not just the demo — a scheduled
-   * poll spends the same dollars a visitor does. Unset means no cap: a hospital deployment
-   * must not silently downgrade clinical calls to a 7B local model because nobody configured
-   * a number. Over the cap, routing is restricted to the free local provider.
+   * poll spends the same dollars a visitor does. Unset OR empty means no cap: a hospital
+   * deployment must not silently downgrade clinical calls to a 7B local model because nobody
+   * configured a number. Over the cap, routing is restricted to the free local provider.
+   *
+   * The empty-string preprocess matters: `LLM_DAILY_USD_CAP=` in an env file is how "no cap"
+   * is written, and `z.coerce.number()` would turn "" into 0 — a $0 cap that routes every
+   * call to the local model, the exact opposite of "no cap".
    */
-  LLM_DAILY_USD_CAP: z.coerce.number().nonnegative().optional(),
+  LLM_DAILY_USD_CAP: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z.coerce.number().nonnegative().optional(),
+  ),
   /** Rate limit on visitor-started demo scenarios, per rolling hour (deployment-wide). */
   DEMO_MAX_RUNS_PER_HOUR: z.coerce.number().int().positive().default(6),
 });

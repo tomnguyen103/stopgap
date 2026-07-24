@@ -40,10 +40,16 @@ RUN pnpm --filter @stopgap/console build
 # ---- console ------------------------------------------------------------------------------
 FROM build AS console
 ENV NODE_ENV=production PORT=3000
+# Drop root once the build is done — the runtime needs no privileges. The base image ships a
+# `node` user; the workspace was installed as root, so hand ownership over before switching.
+RUN chown -R node:node /app
+USER node
 EXPOSE 3000
 CMD ["pnpm", "--filter", "@stopgap/console", "start"]
 
 # ---- worker (Temporal activities + agents; also runs migrations and the demo seed) -------
 FROM build AS worker
 ENV NODE_ENV=production
+RUN chown -R node:node /app
+USER node
 CMD ["pnpm", "--filter", "@stopgap/workflows", "worker"]

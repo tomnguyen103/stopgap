@@ -1,6 +1,12 @@
 import { getEnv } from "@stopgap/core/env";
 import { getDb, getLlmSpend, recordLlmSpend, type DailySpend } from "@stopgap/db";
-import { addLlmSink, setBudgetGuard, type BudgetStatus } from "@stopgap/providers";
+import {
+  addLlmSink,
+  clearBudgetGuard,
+  clearLlmSinks,
+  setBudgetGuard,
+  type BudgetStatus,
+} from "@stopgap/providers";
 
 /**
  * Durable spend accounting and the daily cap it feeds (PROJECT_PLAN §11).
@@ -70,8 +76,14 @@ export function installSpendCap(): boolean {
   return capUsd !== undefined;
 }
 
-/** Test helper: forget the install flag and the cached read. */
+/**
+ * Test helper: forget the install flag and the cached read, and unregister the sink and guard
+ * this module installed. Without the unregister a later `installSpendCap()` appends a second
+ * sink — double-counting spend — and leaves a stale guard behind.
+ */
 export function resetSpendCap(): void {
   installed = false;
   cached = undefined;
+  clearLlmSinks();
+  clearBudgetGuard();
 }

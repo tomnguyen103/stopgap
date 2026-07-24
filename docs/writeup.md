@@ -155,7 +155,7 @@ repository, because everything else in it would then need checking too.
 ## 8. Guardrails that mattered
 
 Feed text is untrusted input that reaches a prompt, so it is delimited and labelled as data.
-The injection suite covers five attack classes; **6 of 7 cases are resisted**.
+The injection suite spans five attack classes across seven cases; **6 of the 7 cases are resisted**.
 
 The one that landed and got fixed is the instructive one. A dose-injection payload got the
 model to copy "200 mEq IV push over 30 seconds" out of feed text into a clinical draft — a

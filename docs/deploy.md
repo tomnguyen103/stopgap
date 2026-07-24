@@ -61,7 +61,9 @@ which is a real loss: it is the only per-call record of what the model was asked
 No container publishes a port except Caddy. **There is still no application auth layer**
 (PHASE5-TODO.md): demo mode is what makes the public console safe, by refusing every
 mutation except starting a demo shortage. Turning `STOPGAP_DEMO_MODE=off` on a
-publicly-reachable host means anyone who finds it can approve clinical guidance.
+publicly-reachable host means anyone who finds it can approve clinical guidance. `STOPGAP_DEMO_MODE`
+therefore defaults to `on` in the prod compose file: a public deploy fails closed (read-only)
+unless the operator deliberately sets it `off`.
 
 ## Demo mode
 
@@ -104,8 +106,10 @@ docker compose -f docker-compose.prod.yml exec worker \
 changes and worker code must ship together — a worker running against a newer audit schema
 than its own code fails cases with duplicate-key errors.
 
-**Backups**: the only irreplaceable volume is `pgdata` (cases, audit chain, protocols).
-`docker compose exec postgres pg_dump -U stopgap stopgap | gzip > stopgap-$(date +%F).sql.gz`,
+**Backups**: `pgdata` holds all three databases — the app (cases, audit chain, protocols),
+Temporal's own workflow state, and Langfuse. Dump the whole cluster, not just `stopgap`, or a
+restore loses in-flight workflows:
+`docker compose -f docker-compose.prod.yml exec postgres pg_dumpall -U stopgap | gzip > stopgap-$(date +%F).sql.gz`,
 off-host. ClickHouse holds traces (nice to have) and the Ollama volume is a re-downloadable
 model.
 

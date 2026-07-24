@@ -1,12 +1,12 @@
 import { resetEnvCache } from "@stopgap/core/env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const countDemoRunsSince = vi.fn(async (_db: unknown, _since: Date) => 0);
-const recordDemoRun = vi.fn(async (_db: unknown, _key: string) => {});
+const reserveDemoRun = vi.fn(
+  async (_db: unknown, _key: string, _since: Date, _limit: number) => ({ allowed: true, recent: 1 }),
+);
 
 vi.mock("@stopgap/db", () => ({
-  countDemoRunsSince,
-  recordDemoRun,
+  reserveDemoRun,
   getDb: () => ({}),
 }));
 
@@ -38,16 +38,20 @@ describe("demo mode", () => {
 });
 
 describe("demo scenario", () => {
+  const originalMaxRuns = process.env.DEMO_MAX_RUNS_PER_HOUR;
+
   beforeEach(() => {
-    countDemoRunsSince.mockClear();
-    countDemoRunsSince.mockResolvedValue(0);
-    recordDemoRun.mockClear();
+    reserveDemoRun.mockClear();
+    reserveDemoRun.mockResolvedValue({ allowed: true, recent: 1 });
     delete process.env.DEMO_MAX_RUNS_PER_HOUR;
     resetEnvCache();
   });
 
   afterEach(() => {
-    delete process.env.DEMO_MAX_RUNS_PER_HOUR;
+    // Restore rather than blindly delete: a value configured for the worker running these
+    // tests would otherwise vanish for every later suite in the same process.
+    if (originalMaxRuns === undefined) delete process.env.DEMO_MAX_RUNS_PER_HOUR;
+    else process.env.DEMO_MAX_RUNS_PER_HOUR = originalMaxRuns;
     resetEnvCache();
   });
 
@@ -64,16 +68,15 @@ describe("demo scenario", () => {
     // The `demo-` key is what keeps a visitor's run from colliding with a live openFDA case.
     expect(result.record.key.startsWith("demo-")).toBe(true);
     expect(result.record.sourceId.startsWith("demo:")).toBe(true);
-    // The slot is consumed at acceptance, so a failed start cannot be retried for free.
-    expect(recordDemoRun).toHaveBeenCalledTimes(1);
+    // The slot is reserved atomically at acceptance, so a failed start cannot be retried free.
+    expect(reserveDemoRun).toHaveBeenCalledTimes(1);
   });
 
   it("refuses once the hourly limit is reached", async () => {
     process.env.DEMO_MAX_RUNS_PER_HOUR = "2";
     resetEnvCache();
-    countDemoRunsSince.mockResolvedValue(2);
+    reserveDemoRun.mockResolvedValue({ allowed: false, recent: 2 });
     const result = await prepareDemoRun(DEMO_DRUGS[0]!.key);
     expect(result).toMatchObject({ ok: false, reason: "rate-limited" });
-    expect(recordDemoRun).not.toHaveBeenCalled();
   });
 });

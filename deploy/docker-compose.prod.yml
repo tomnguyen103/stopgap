@@ -32,7 +32,7 @@ x-app-env: &app-env
   COMMS_DEMO_INBOX: ${COMMS_DEMO_INBOX:-}
   EHR_WEBHOOK_URL: ${EHR_WEBHOOK_URL:-http://localhost:4000/ehr/formulary-flag}
   STOPGAP_DEMO_MODE: ${STOPGAP_DEMO_MODE:-on}
-  LLM_DAILY_USD_CAP: ${LLM_DAILY_USD_CAP:-2}
+  LLM_DAILY_USD_CAP: ${LLM_DAILY_USD_CAP:-}
   DEMO_MAX_RUNS_PER_HOUR: ${DEMO_MAX_RUNS_PER_HOUR:-6}
 
 services:
@@ -134,8 +134,10 @@ services:
         condition: service_completed_successfully
       temporal:
         condition: service_healthy
-      ollama:
-        condition: service_started
+      # Wait for the model download, not just the container: the worker's first case would
+      # otherwise fail its assessment before `ollama pull` finishes (a multi-GB first boot).
+      ollama-pull:
+        condition: service_completed_successfully
     environment: *app-env
 
   # Nightly demo re-seed (PROJECT_PLAN §11). A sleep loop rather than a cron image: one

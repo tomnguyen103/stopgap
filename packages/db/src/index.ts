@@ -24,7 +24,7 @@ export {
   type ShadowClassStats,
 } from "./shadow.js";
 export { getLlmSpend, recordLlmSpend, utcDay, type DailySpend } from "./spend.js";
-export { countDemoRunsSince, recordDemoRun } from "./demo-runs.js";
+export { countDemoRunsSince, reserveDemoRun } from "./demo-runs.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export type {
   DemoRunRow,

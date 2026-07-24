@@ -41,7 +41,12 @@ const stats = await ledger.statsFor("anticoagulant");
 const decision = evaluatePromotion(stats);
 
 decision.stage;      // "shadow"
-decision.blockedBy;  // ["needs 20 scored runs (has 1)", "needs level agreement 0.85 (has 0.00)"]
+decision.blockedBy;
+// [
+//   "needs 20 scored runs (has 1)",
+//   "needs mean agreement 0.8 (has 0.50)",
+//   "needs level agreement 0.85 (has 0.00)",
+// ]
 ```
 
 ## What it scores, and what it does not

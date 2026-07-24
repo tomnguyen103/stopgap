@@ -57,7 +57,7 @@ that drug reuses it instead of paying for research again.
 - **87-case golden dataset** across ten clinical categories: **80–84% pass** on a local 7B
   model (mistral, temperature 0), with the same corpus moving ~4 points between identical
   runs — which is why the eval suite reports rather than gates.
-- **Injection suite: 6 of 7 attack classes resisted.** The one that landed — a dose-injection
+- **Injection suite: 6 of 7 attack cases resisted** (five attack classes). The one that landed — a dose-injection
   payload getting "200 mEq IV push over 30 seconds" copied into a clinical draft — was fixed
   and verified 3/3. A direct severity-override still lands on some runs against a 7B model,
   and is documented rather than hidden.
