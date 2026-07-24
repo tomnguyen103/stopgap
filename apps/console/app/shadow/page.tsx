@@ -33,6 +33,7 @@ export default async function ShadowPage() {
               <th>Runs</th>
               <th>Agreement</th>
               <th>Severity match</th>
+              <th>Under-escalation</th>
               <th>Stage</th>
               <th>Blocked by</th>
             </tr>
@@ -44,6 +45,7 @@ export default async function ShadowPage() {
                 <td>{stats.runs}</td>
                 <td>{(stats.meanAgreement * 100).toFixed(0)}%</td>
                 <td>{(stats.severityAgreementRate * 100).toFixed(0)}%</td>
+                <td>{(stats.underEscalationRate * 100).toFixed(0)}%</td>
                 <td className="status">{decision.stage}</td>
                 <td className="sub">{decision.blockedBy.join("; ") || "—"}</td>
               </tr>

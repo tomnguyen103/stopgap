@@ -26,15 +26,27 @@ export interface AgreementScore {
   /** 0-1; 1 means the agent matched the human on both axes. */
   agreement: number;
   severityAgreed: boolean;
+  /**
+   * True when the agent called the shortage LESS severe than the human. The two directions
+   * of a severity miss are not equally bad — over-escalation costs pharmacist time,
+   * under-escalation is the one PROJECT_PLAN §8 targets at ~0 — so the promotion gates bound
+   * this on its own rather than folding it into overall disagreement.
+   */
+  severityUnderCalled: boolean;
   alternativeExistenceAgreed: boolean;
 }
 
+const SEVERITY_RANK: Severity[] = ["none", "low", "moderate", "high", "critical"];
+
 export function scoreAgreement(proposal: ShadowProposal, baseline: ShadowBaseline): AgreementScore {
   const severityAgreed = proposal.severity === baseline.severity;
+  const severityUnderCalled =
+    SEVERITY_RANK.indexOf(proposal.severity) < SEVERITY_RANK.indexOf(baseline.severity);
   const alternativeExistenceAgreed = proposal.alternatives.length > 0 === baseline.hasAlternative;
   return {
     agreement: (Number(severityAgreed) + Number(alternativeExistenceAgreed)) / 2,
     severityAgreed,
+    severityUnderCalled,
     alternativeExistenceAgreed,
   };
 }

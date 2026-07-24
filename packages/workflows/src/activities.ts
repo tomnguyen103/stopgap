@@ -73,6 +73,13 @@ export async function persistStatus(
     action: `case.${status}`,
     detail,
     runId: currentRunId(),
+    // The monitoring loop persists `case.monitoring` every completed week, so the week
+    // number has to be part of the idempotency key — otherwise week 2 onwards look like
+    // retries of week 1 and never reach the audit trail.
+    eventKey:
+      detail.monitoringWeeks === undefined
+        ? `case.${status}`
+        : `case.${status}.week-${String(detail.monitoringWeeks)}`,
   });
 }
 
@@ -165,8 +172,26 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
   const row = await getCaseByWorkflowId(db, workflowIdForKey(input.key));
   // Idempotent under retry: an activity whose insert committed before the worker crashed
   // would otherwise write a second identical version and supersede the one it just approved.
+  // The retry still re-appends the audit entry (itself idempotent) — a crash between the
+  // approval commit and the audit append would otherwise leave an approved protocol version
+  // with no record of who approved it.
   const current = await getApprovedProtocol(input.key);
-  if (current && current.version.body === input.body) return;
+  if (current && current.version.body === input.body) {
+    await appendAudit(db, {
+      caseId: row?.id,
+      actor: input.approvedBy,
+      action: "protocol.version_approved",
+      detail: {
+        key: input.key,
+        version: current.version.version,
+        authoredBy: input.authoredBy,
+        identitySource: "workflow-signal-claim",
+      },
+      runId: currentRunId(),
+      eventKey: `protocol.version_approved.v${String(current.version.version)}`,
+    });
+    return;
+  }
   const drafted = await draftProtocolVersion({
     key: input.key,
     title: input.title,
@@ -181,7 +206,17 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
     caseId: row?.id,
     actor: input.approvedBy,
     action: "protocol.version_approved",
-    detail: { key: input.key, version: drafted.version, authoredBy: input.authoredBy },
+    detail: {
+      key: input.key,
+      version: drafted.version,
+      authoredBy: input.authoredBy,
+      // `approvedBy` arrives on a workflow signal and is not an authenticated principal —
+      // anyone able to signal the workflow picks the string. Recording that provenance
+      // honestly is the Phase 3 answer; verifying identity needs the auth layer the Phase 4
+      // review UI introduces (see PHASE5-TODO).
+      identitySource: "workflow-signal-claim",
+    },
     runId: currentRunId(),
+    eventKey: `protocol.version_approved.v${String(drafted.version)}`,
   });
 }

@@ -20,6 +20,12 @@ export interface PromotionThresholds {
   minRuns: number;
   minMeanAgreement: number;
   minSeverityAgreementRate: number;
+  /**
+   * Ceiling on the share of runs where the agent called a shortage LESS severe than the
+   * human. A plain agreement rate treats the two directions of a miss as equivalent; this one
+   * does not, because only one of them sends a critical shortage down the low-priority path.
+   */
+  maxUnderEscalationRate: number;
 }
 
 /**
@@ -27,8 +33,18 @@ export interface PromotionThresholds {
  * because under-escalation is the dangerous failure mode (PROJECT_PLAN §8 targets ≈ 0).
  */
 export const PROMOTION_GATES: Record<Exclude<PromotionStage, "shadow">, PromotionThresholds> = {
-  suggest: { minRuns: 20, minMeanAgreement: 0.8, minSeverityAgreementRate: 0.85 },
-  "auto-draft": { minRuns: 50, minMeanAgreement: 0.9, minSeverityAgreementRate: 0.95 },
+  suggest: {
+    minRuns: 20,
+    minMeanAgreement: 0.8,
+    minSeverityAgreementRate: 0.85,
+    maxUnderEscalationRate: 0.05,
+  },
+  "auto-draft": {
+    minRuns: 50,
+    minMeanAgreement: 0.9,
+    minSeverityAgreementRate: 0.95,
+    maxUnderEscalationRate: 0.01,
+  },
 };
 
 export interface PromotionDecision {
@@ -50,6 +66,11 @@ function unmet(stats: ShadowClassStats, thresholds: PromotionThresholds): string
   if (stats.severityAgreementRate < thresholds.minSeverityAgreementRate) {
     reasons.push(
       `needs severity agreement ${thresholds.minSeverityAgreementRate} (has ${stats.severityAgreementRate.toFixed(2)})`,
+    );
+  }
+  if (stats.underEscalationRate > thresholds.maxUnderEscalationRate) {
+    reasons.push(
+      `needs under-escalation at or below ${thresholds.maxUnderEscalationRate} (has ${stats.underEscalationRate.toFixed(2)})`,
     );
   }
   return reasons;

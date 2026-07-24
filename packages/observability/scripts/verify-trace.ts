@@ -16,18 +16,22 @@ if (!enabled) {
   process.exit(1);
 }
 
-const impact = await assessImpact({
-  source: "openfda",
-  sourceId: "verify-trace-1",
-  key: "heparin sodium",
-  genericName: "Heparin Sodium Injection",
-  status: "current",
-  ndcs: ["0338-0431-03", "0338-0433-04"],
-  rxcuis: ["1658690"],
-  note: "Manufacturing delay, no restock date.",
-});
-console.log("[verify-trace] impact:", impact.severity, "confidence:", impact.confidence);
-
-await flushTracing();
-await stopTracing();
-console.log("[verify-trace] spans flushed to Langfuse");
+try {
+  const impact = await assessImpact({
+    source: "openfda",
+    sourceId: "verify-trace-1",
+    key: "heparin sodium",
+    genericName: "Heparin Sodium Injection",
+    status: "current",
+    ndcs: ["0338-0431-03", "0338-0433-04"],
+    rxcuis: ["1658690"],
+    note: "Manufacturing delay, no restock date.",
+  });
+  console.log("[verify-trace] impact:", impact.severity, "confidence:", impact.confidence);
+} finally {
+  // In `finally` because a failed call still produces a span worth exporting — that failure
+  // is exactly what the trace is meant to show.
+  await flushTracing();
+  await stopTracing();
+  console.log("[verify-trace] spans flushed to Langfuse");
+}

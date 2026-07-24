@@ -68,6 +68,12 @@ export const auditLog = pgTable(
      * exactly the rows that need it.
      */
     runId: text("run_id").notNull().default(""),
+    /**
+     * The logical event within a run, for idempotency. Defaults to `action`; legs that
+     * legitimately repeat set something finer (the weekly monitoring tick keys on its week
+     * number, or every tick after the first would be discarded as a retry).
+     */
+    eventKey: text("event_key").notNull().default(""),
   },
   (t) => [
     index("audit_case_idx").on(t.caseId),
@@ -76,7 +82,7 @@ export const auditLog = pgTable(
     // run_id) is a natural idempotency key: a Temporal activity retry after a committed
     // insert lands here as a no-op instead of double-appending. run_id is in the key because
     // a recurring shortage opens a new run against the same case row (Phase 3).
-    uniqueIndex("audit_case_action_uq").on(t.caseId, t.action, t.runId),
+    uniqueIndex("audit_case_action_uq").on(t.caseId, t.eventKey, t.runId),
   ],
 );
 
@@ -172,6 +178,13 @@ export const shadowRuns = pgTable(
     /** 0-1 agreement against the human baseline (see @stopgap/shadow scoring). */
     agreement: numeric("agreement", { precision: 4, scale: 3 }).notNull(),
     severityAgreed: boolean("severity_agreed").notNull(),
+    /**
+     * True when the agent called the shortage LESS severe than the human baseline. Tracked
+     * separately from plain disagreement because the two directions are not equally bad:
+     * over-escalation wastes pharmacist time, under-escalation is the one that hurts patients
+     * (PROJECT_PLAN §8 targets it at ~0), and the promotion gates bound it on its own.
+     */
+    severityUnderCalled: boolean("severity_under_called").notNull().default(false),
     latencyMs: integer("latency_ms").notNull(),
     usdCost: numeric("usd_cost", { precision: 12, scale: 8 }).notNull(),
     provider: text("provider").notNull(),

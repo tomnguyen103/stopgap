@@ -17,6 +17,13 @@ export async function runShadowEntry(entry: ReplayEntry): Promise<void> {
   // reflected here — the per-call truth lives in the Langfuse spans (ADR-0003). Good enough
   // for aggregating the ledger by provider; not a per-call attribution.
   const routed = await routeModel();
+  if (routed.info.usdPer1mInput !== 0 || routed.info.usdPer1mOutput !== 0) {
+    throw new Error(
+      `shadow replay is local-provider only (routed to ${routed.info.name}/${routed.info.modelId}): ` +
+        "per-call cost attribution for a paid provider is not implemented, and writing 0 into " +
+        "the ledger's cost column would corrupt every per-class cost aggregate",
+    );
+  }
   const start = Date.now();
   const impact = await assessImpact(entry.record);
   const research = await researchAlternatives(entry.record);
@@ -39,11 +46,11 @@ export async function runShadowEntry(entry: ReplayEntry): Promise<void> {
     baselineAlternatives: entry.baseline.hasAlternative ? ["<alternative exists>"] : [],
     agreement: score.agreement.toFixed(3),
     severityAgreed: score.severityAgreed,
+    severityUnderCalled: score.severityUnderCalled,
     latencyMs,
-    // Local Ollama is free, so 0 is the true cost of today's runs. Attributing real cost to a
-    // paid-provider replay needs per-call token counts plumbed back from the telemetry sink
-    // (they exist in the Langfuse span, not here) — logged as an open item rather than
-    // guessed, because a made-up number in a cost column is worse than an obvious zero.
+    // 0 is the true cost of a free-provider run. A paid provider would need per-call token
+    // counts plumbed back from the telemetry sink (they exist in the Langfuse span, not
+    // here), so rather than write a fiction into a cost column the replay refuses above.
     usdCost: "0",
     provider: routed.info.name,
     modelId: routed.info.modelId,

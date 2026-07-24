@@ -9,6 +9,7 @@ const stats = (over: Partial<Parameters<typeof evaluatePromotion>[0]> = {}) => (
   runs: 100,
   meanAgreement: 1,
   severityAgreementRate: 1,
+  underEscalationRate: 0,
   meanLatencyMs: 1000,
   totalUsdCost: 0,
   ...over,
@@ -20,7 +21,12 @@ describe("scoreAgreement", () => {
       { severity: "high", alternatives: ["Argatroban"] },
       { severity: "high", hasAlternative: true },
     );
-    expect(score).toEqual({ agreement: 1, severityAgreed: true, alternativeExistenceAgreed: true });
+    expect(score).toEqual({
+      agreement: 1,
+      severityAgreed: true,
+      severityUnderCalled: false,
+      alternativeExistenceAgreed: true,
+    });
   });
 
   it("scores a total mismatch as 0", () => {
@@ -71,6 +77,30 @@ describe("evaluatePromotion", () => {
     const decision = evaluatePromotion(stats({ runs: 100, meanAgreement: 0.95, severityAgreementRate: 0.9 }));
     expect(decision.stage).toBe("suggest");
     expect(decision.blockedBy.join(" ")).toContain("severity agreement");
+  });
+
+  it("blocks promotion on under-escalation even when overall agreement looks fine", () => {
+    // 90% severity agreement with every miss in the dangerous direction: the plain agreement
+    // bars would pass `suggest`, the directional bar must not.
+    const decision = evaluatePromotion(
+      stats({ runs: 100, meanAgreement: 0.95, severityAgreementRate: 0.9, underEscalationRate: 0.1 }),
+    );
+    expect(decision.stage).toBe("shadow");
+    expect(decision.blockedBy.join(" ")).toContain("under-escalation");
+  });
+
+  it("distinguishes the direction of a severity miss", () => {
+    const under = scoreAgreement(
+      { severity: "low", alternatives: ["a"] },
+      { severity: "critical", hasAlternative: true },
+    );
+    const over = scoreAgreement(
+      { severity: "critical", alternatives: ["a"] },
+      { severity: "low", hasAlternative: true },
+    );
+    expect(under.severityUnderCalled).toBe(true);
+    expect(over.severityUnderCalled).toBe(false);
+    expect(under.agreement).toBe(over.agreement);
   });
 
   it("reaches auto-draft only when every bar is cleared", () => {

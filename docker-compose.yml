@@ -111,7 +111,9 @@ services:
 
   # Langfuse needs its own database in the shared Postgres. The image's own init scripts only
   # run on a first-boot empty volume, and the Phase 1 volume already exists — so create it
-  # here, idempotently (the `|| true` swallows "already exists" on every later boot).
+  # here. `|| true` would also swallow connection and auth failures and let langfuse-worker
+  # start against a database that does not exist, so check for existence first and let any
+  # real psql error fail the service.
   langfuse-db-init:
     image: postgres:16-alpine
     profiles: ["langfuse"]
@@ -121,7 +123,7 @@ services:
     environment:
       PGPASSWORD: stopgap
     command: >-
-      sh -c "psql -h postgres -U stopgap -d stopgap -c 'CREATE DATABASE langfuse' || true"
+      sh -c "psql -h postgres -U stopgap -d stopgap -tAc \"SELECT 1 FROM pg_database WHERE datname='langfuse'\" | grep -q 1 || psql -h postgres -U stopgap -d stopgap -c 'CREATE DATABASE langfuse'"
     restart: "no"
 
   langfuse-worker:

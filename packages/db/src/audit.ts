@@ -27,6 +27,13 @@ export interface AuditEntry {
    * would retry forever against a constraint it can never satisfy.
    */
   runId?: string;
+  /**
+   * Distinguishes repeats of the same `action` within one run. The monitoring loop appends
+   * `case.monitoring` once a week; keyed on `action` alone, every tick after the first would
+   * be swallowed by the idempotency check below and the case would look frozen at week 1.
+   * Defaults to `action`.
+   */
+  eventKey?: string;
 }
 
 /**
@@ -74,7 +81,7 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
         .where(
           and(
             eq(auditLog.caseId, entry.caseId),
-            eq(auditLog.action, entry.action),
+            eq(auditLog.eventKey, entry.eventKey ?? entry.action),
             eq(auditLog.runId, entry.runId ?? ""),
           ),
         )
@@ -99,6 +106,7 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
       prevHash,
       hash,
       runId: entry.runId ?? "",
+      eventKey: entry.eventKey ?? entry.action,
     });
     return { hash };
   });

@@ -23,6 +23,8 @@ export interface ShadowClassStats {
   meanAgreement: number;
   /** Share of runs where the severity call matched exactly. */
   severityAgreementRate: number;
+  /** Share of runs where the agent called the shortage less severe than the human did. */
+  underEscalationRate: number;
   meanLatencyMs: number;
   totalUsdCost: number;
 }
@@ -39,6 +41,7 @@ export async function shadowStatsByClass(): Promise<ShadowClassStats[]> {
       runs: sql<string>`count(*)`,
       meanAgreement: sql<string>`avg(${shadowRuns.agreement})`,
       severityAgreed: sql<string>`sum(case when ${shadowRuns.severityAgreed} then 1 else 0 end)`,
+      underCalled: sql<string>`sum(case when ${shadowRuns.severityUnderCalled} then 1 else 0 end)`,
       meanLatencyMs: sql<string>`avg(${shadowRuns.latencyMs})`,
       totalUsdCost: sql<string>`sum(${shadowRuns.usdCost})`,
     })
@@ -52,6 +55,7 @@ export async function shadowStatsByClass(): Promise<ShadowClassStats[]> {
       runs,
       meanAgreement: Number(row.meanAgreement ?? 0),
       severityAgreementRate: runs === 0 ? 0 : Number(row.severityAgreed) / runs,
+      underEscalationRate: runs === 0 ? 0 : Number(row.underCalled) / runs,
       meanLatencyMs: Number(row.meanLatencyMs ?? 0),
       totalUsdCost: Number(row.totalUsdCost ?? 0),
     };
