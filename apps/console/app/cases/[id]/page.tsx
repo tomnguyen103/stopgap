@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getCaseDetail } from "../../lib/data";
+import { getCaseDetail, getWorkflowState } from "../../lib/data";
+import { ReviewPanel } from "./review-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   const detail = await getCaseDetail(decodeURIComponent(id));
   if (!detail) notFound();
   const { case: c, audit } = detail;
+  const live = await getWorkflowState(c.key);
   return (
     <>
       <p className="back">
@@ -44,6 +46,27 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           ) : null}
         </dl>
       </div>
+
+      <ReviewPanel
+        workflowId={c.workflowId}
+        status={live?.status ?? c.status}
+        draft={live?.draft ?? ""}
+        alternatives={live?.alternatives ?? []}
+      />
+
+      {live?.protocolSource ? (
+        <div className="card">
+          <h2>Protocol</h2>
+          <p className="sub">
+            {live.protocolSource === "memory"
+              ? `Reused approved protocol v${String(live.protocolVersion)} from organizational memory`
+              : live.protocolSource === "exception-resolution"
+                ? "Written by a pharmacist resolving the exception"
+                : "Drafted by the alternatives agent"}
+          </p>
+          {live.draft ? <pre className="draft">{live.draft}</pre> : null}
+        </div>
+      ) : null}
 
       <div className="card">
         <h1 style={{ fontSize: 15 }}>Audit trail (hash-chained)</h1>
