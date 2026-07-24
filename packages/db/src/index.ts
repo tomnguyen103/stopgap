@@ -15,6 +15,7 @@ export {
   listProtocolVersions,
   type DraftProtocolInput,
 } from "./protocols.js";
+export { getKpis, type Kpis } from "./metrics.js";
 export {
   listShadowRuns,
   listShadowRunsForClass,

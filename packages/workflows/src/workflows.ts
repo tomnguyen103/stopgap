@@ -188,7 +188,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // Approved → comms out.
   state.status = "approved";
   await acts.persistStatus(key, "approved");
-  await acts.sendComms(key, state.draft ?? "");
+  await acts.sendComms(key, state.draft ?? "", state.alternatives);
   state.status = "comms_sent";
   await acts.persistStatus(key, "comms_sent");
 
