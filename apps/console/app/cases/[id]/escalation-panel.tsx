@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import type { EscalationEvent } from "@stopgap/workflows";
 import { acknowledgeCase } from "../../lib/actions";
 import { formatUtc } from "../../lib/format";
 
@@ -23,8 +24,7 @@ export interface AckRow {
 export function EscalationPanel({
   workflowId,
   escalationStep,
-  escalatedAt,
-  escalationSendFailures,
+  escalationEvents,
   acked,
   ackError,
   acks,
@@ -32,8 +32,7 @@ export function EscalationPanel({
 }: {
   workflowId: string;
   escalationStep: number | undefined;
-  escalatedAt: string[];
-  escalationSendFailures: number[];
+  escalationEvents: EscalationEvent[];
   acked: boolean;
   ackError: string | undefined;
   acks: AckRow[];
@@ -43,7 +42,8 @@ export function EscalationPanel({
   const [error, setError] = useState<string | undefined>();
 
   // The ladder never ran (severity below high, or no policy) and nothing was acked — nothing to show.
-  if (escalationStep === undefined && escalatedAt.length === 0 && acks.length === 0) return null;
+  if (escalationStep === undefined && escalationEvents.length === 0 && acks.length === 0) return null;
+  const notified = escalationEvents.filter((e) => !e.sendFailed);
 
   return (
     <div className="card">
@@ -51,8 +51,8 @@ export function EscalationPanel({
       <p className="sub">
         {acked
           ? "Acknowledged — the ladder stopped."
-          : escalatedAt.length > 0
-            ? `Notified through tier ${String(escalationStep ?? 0)} — awaiting acknowledgment.`
+          : notified.length > 0
+            ? `Notified through tier ${String(notified[notified.length - 1]?.step ?? 0)} — awaiting acknowledgment.`
             : "Escalation pending."}
       </p>
       {/* An ack whose durable write failed rolled back to unacknowledged; say why, or the ack just
@@ -63,17 +63,19 @@ export function EscalationPanel({
         </p>
       ) : null}
       <ol className="audit">
-        {escalatedAt.map((ts, i) => (
-          <li key={`notified-${String(i)}`}>
-            <b>tier {i} notified</b> · {formatUtc(ts)}
-          </li>
-        ))}
-        {/* A tier whose send activity failed outright: recorded, never presented as "notified". */}
-        {escalationSendFailures.map((i) => (
-          <li key={`sendfail-${String(i)}`} className="match-bad">
-            <b>tier {i} send failed</b> · nobody was paged for this tier
-          </li>
-        ))}
+        {/* Each event carries its own tier: a failed send occupies a slot, so array position is
+            not the tier number once one has failed. */}
+        {escalationEvents.map((e) =>
+          e.sendFailed ? (
+            <li key={`tier-${String(e.step)}`} className="match-bad">
+              <b>tier {e.step} send failed</b> · nobody was paged for this tier · {formatUtc(e.at)}
+            </li>
+          ) : (
+            <li key={`tier-${String(e.step)}`}>
+              <b>tier {e.step} notified</b> · {formatUtc(e.at)}
+            </li>
+          ),
+        )}
         {acks.map((a) => (
           <li key={`ack-${String(a.step)}`}>
             <b>acknowledged</b> · tier {a.step} · {a.ackedByLabel} · {formatUtc(a.ackAt)}

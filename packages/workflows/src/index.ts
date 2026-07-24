@@ -27,6 +27,7 @@ export {
   type CaseAcknowledgment,
   type CaseInput,
   type CaseState,
+  type EscalationEvent,
   type EscalationStep,
   type ReviewDecision,
   type ExceptionResolution,

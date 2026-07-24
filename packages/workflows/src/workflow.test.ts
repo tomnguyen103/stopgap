@@ -110,6 +110,11 @@ const mockActivities: typeof activities = {
           }
         : null,
   sendEscalationNotification: async (input) => {
+    // A key saying "tier0rejects" models the activity itself failing on tier 0 (its own
+    // non-delivery write died), as opposed to resolving with `delivered: false`.
+    if (/tier0rejects/i.test(input.key) && input.stepIndex === 0) {
+      throw new Error("audit write failed");
+    }
     // A key saying "nondeliver" models a channel that is down: non-delivery is recorded and the
     // ladder STILL advances (the workflow never branches on `delivered`).
     const delivered = !/nondeliver/i.test(input.key);
@@ -393,6 +398,31 @@ describe("escalation ladder (time-skipped)", () => {
     });
   }, 60_000);
 
+  it("records a tier whose send rejected, and keeps every event tied to its own tier", async () => {
+    await withWorker(async () => {
+      // Tier 0's activity rejects outright, so nothing recorded that page. The ladder must climb
+      // past it, and the timeline must not present tier 1's timestamp as tier 0's page — which is
+      // exactly what a positional timestamp array would do.
+      const key = "critical-tier0rejects";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-tier0rejects-${Date.now()}`,
+      });
+      await env.sleep("90 minutes");
+
+      const st = await handle.query(stateQuery);
+      expect(st.escalationEvents.map((e) => [e.step, e.sendFailed])).toEqual([
+        [0, true],
+        [1, false],
+        [2, false],
+      ]);
+      expect(st.escalationStep).toBe(2);
+      // Tiers 1 and 2 were still paged: a dead tier does not bury the director and admin.
+      expect(escalationNotifications.filter((n) => n.key === key).map((n) => n.stepIndex)).toEqual([1, 2]);
+    });
+  }, 60_000);
+
   it("resumes the ladder when an acknowledgment cannot be persisted", async () => {
     await withWorker(async () => {
       // An ack the DB never accepts must not quietly bury the remaining tiers: the case is not
@@ -433,7 +463,8 @@ describe("escalation ladder (time-skipped)", () => {
       const st = await handle.query(stateQuery);
       expect(st.status).toBe("awaiting_review");
       expect(st.escalationStep).toBe(2);
-      expect(st.escalatedAt).toHaveLength(3);
+      expect(st.escalationEvents.map((e) => e.step)).toEqual([0, 1, 2]);
+      expect(st.escalationEvents.every((e) => !e.sendFailed)).toBe(true);
       expect(st.acked).toBe(false);
 
       const fired = escalationNotifications.filter((n) => n.key === key);

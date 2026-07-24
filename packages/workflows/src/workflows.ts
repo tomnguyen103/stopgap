@@ -80,8 +80,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     alternatives: [],
     monitoringWeeks: 0,
     resolved: false,
-    escalatedAt: [],
-    escalationSendFailures: [],
+    escalationEvents: [],
     acked: false,
   };
   setHandler(stateQuery, () => state);
@@ -188,13 +187,19 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
           notify: step.notify,
           afterMinutes: step.afterMinutes,
         });
-        state.escalatedAt = [...state.escalatedAt, new Date().toISOString()];
+        state.escalationEvents = [
+          ...state.escalationEvents,
+          { step: i, at: new Date().toISOString(), sendFailed: false },
+        ];
       } catch {
         // Keep climbing — the next tier is a different audience and may well be reachable — but
-        // RECORD the skipped tier instead of appending to `escalatedAt`. A rejecting activity
-        // wrote no non-delivery row and bumped no counter, so claiming "tier i notified" here
-        // would be exactly the faked success this codebase refuses.
-        state.escalationSendFailures = [...state.escalationSendFailures, i];
+        // RECORD the skipped tier rather than claiming it was notified. A rejecting activity wrote
+        // no non-delivery row and bumped no counter, so presenting it as a page would be exactly
+        // the faked success this codebase refuses.
+        state.escalationEvents = [
+          ...state.escalationEvents,
+          { step: i, at: new Date().toISOString(), sendFailed: true },
+        ];
       }
       state.escalationStep = i;
       elapsedMin = step.afterMinutes;

@@ -61,21 +61,17 @@ export interface CaseState {
   /** Whether any comms channel actually delivered — `comms_sent` only means "we tried". */
   commsDelivered?: boolean;
   /**
-   * Escalation ladder state (PHASE6 §6.3), driving the console's per-case timeline. `escalationStep`
-   * is the highest ladder tier notified so far (0-based); `escalatedAt` is one ISO timestamp per
-   * tier fired, so the timeline reads "notified → escalated → …". `acked`/`ackedBy` flip when a
-   * human acknowledges via the `acknowledgeCase` signal. Absent `escalationStep` means the ladder
-   * never ran (severity below high, or no policy configured).
+   * Escalation ladder state (PHASE6 §6.3), driving the console's per-case timeline.
+   * `escalationStep` is the highest ladder tier reached so far (0-based); `escalationEvents` is one
+   * record per tier attempted, so the timeline reads "notified → escalated → …". `acked`/`ackedBy`
+   * flip when a human acknowledges via the `acknowledgeCase` signal. Absent `escalationStep` means
+   * the ladder never ran (severity below high, or no policy configured).
+   *
+   * Each event carries its OWN tier rather than relying on array position: a tier whose send
+   * failed still occupies a slot, so position and tier index diverge the moment one does.
    */
   escalationStep?: number;
-  escalatedAt: string[];
-  /**
-   * Tiers whose notification activity REJECTED outright (its own non-delivery write failed, say).
-   * The ladder keeps climbing past them, so without this the tier would vanish from the record
-   * while progress looked normal — the faked success this codebase refuses. A tier that merely
-   * resolved `delivered: false` is NOT here: the activity already recorded that honestly.
-   */
-  escalationSendFailures: number[];
+  escalationEvents: EscalationEvent[];
   acked: boolean;
   /** The acknowledging user's `users.id` (never a claimed string). */
   ackedBy?: string;
@@ -85,6 +81,19 @@ export interface CaseState {
    * `case.acknowledged` audit entry did not happen, and the case is still unacknowledged.
    */
   ackError?: string;
+}
+
+/**
+ * One attempted escalation tier. `sendFailed` marks a tier whose notification activity REJECTED
+ * outright (its own non-delivery write failed, say): the ladder keeps climbing past it, and
+ * without this record the tier would vanish while progress looked normal — the faked success this
+ * codebase refuses. A tier that merely resolved `delivered: false` is NOT flagged here; the
+ * activity already recorded that honestly in the audit chain.
+ */
+export interface EscalationEvent {
+  step: number;
+  at: string;
+  sendFailed: boolean;
 }
 
 /**
