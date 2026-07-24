@@ -1,6 +1,6 @@
 import { getEnv } from "@stopgap/core/env";
 import type { ShortageRecord } from "@stopgap/core";
-import { countCasesOpenedSince, getDb } from "@stopgap/db";
+import { countDemoRunsSince, getDb, recordDemoRun } from "@stopgap/db";
 
 /**
  * "Run a shortage" — the one mutation a demo visitor is allowed (PROJECT_PLAN §11).
@@ -12,7 +12,11 @@ import { countCasesOpenedSince, getDb } from "@stopgap/db";
  *   reaches a prompt (the injection suite covers feed text; this closes the other door);
  * - keys are `demo-` prefixed, so a demo run can never collide with, or reopen, a case that
  *   the live openFDA poller opened;
- * - starts are rate limited per rolling hour, counted from the case table rather than memory.
+ * - starts are rate limited per rolling hour, counted from a durable table rather than memory.
+ *
+ * The limit is deployment-wide, not per visitor: with no auth layer there is no honest way to
+ * tell two visitors apart (an IP is not a person), and a per-IP limit would read as a
+ * stronger guarantee than it is. One busy visitor can therefore use up the hour's runs.
  */
 
 export interface DemoDrug {
@@ -70,7 +74,7 @@ export async function prepareDemoRun(
 
   const limit = getEnv().DEMO_MAX_RUNS_PER_HOUR;
   const since = new Date(Date.now() - 60 * 60 * 1000);
-  const recent = await countCasesOpenedSince(getDb(), DEMO_SOURCE_ID_PREFIX, since);
+  const recent = await countDemoRunsSince(getDb(), since);
   if (recent >= limit) {
     return {
       ok: false,
@@ -89,5 +93,6 @@ export async function prepareDemoRun(
     rxcuis: [],
     note: drug.note,
   };
+  await recordDemoRun(getDb(), drug.key);
   return { ok: true, record };
 }

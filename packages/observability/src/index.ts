@@ -4,6 +4,12 @@ import { isTracingConfigured, startTracing } from "./tracing.js";
 
 export { langfuseSink } from "./llm-span.js";
 export {
+  currentSpend,
+  installSpendCap,
+  resetSpendCap,
+  spendCapStatus,
+} from "./spend-cap.js";
+export {
   flushTracing,
   isTracingConfigured,
   langfuseOtlpEndpoint,

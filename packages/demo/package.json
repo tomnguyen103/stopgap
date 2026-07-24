@@ -13,6 +13,7 @@
   "dependencies": {
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
+    "@stopgap/observability": "workspace:*",
     "@stopgap/providers": "workspace:*"
   },
   "devDependencies": {

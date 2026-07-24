@@ -16,8 +16,23 @@ open is listed here.
 ## Done in Phase 5
 
 - Deployment stack + runbook (`deploy/`, `docs/deploy.md`).
-- Demo mode: read-only console, "Run a shortage", nightly idempotent re-seed, daily USD cap
-  with local-model fallback (`@stopgap/demo`, `llm_spend`).
+- Demo mode: read-only console, "Run a shortage", nightly idempotent re-seed, live-feed
+  freshness panel, daily USD cap with local-model fallback (`@stopgap/demo`,
+  `@stopgap/observability` spend cap, `llm_spend`, `demo_runs`).
+
+## Deliberate deviations from §11 (recorded, not dropped)
+
+- **The demo seed writes no shadow-ledger rows.** §11 lists a "populated shadow ledger" in
+  the nightly re-seed. Seeding it would mean inventing agreement percentages and printing
+  them on a dashboard whose whole purpose is to report measured agreement. The runbook
+  instead populates `/shadow` by running the real replay on the host, so every figure there
+  was actually measured.
+- **The scenario rate limit is deployment-wide, not per visitor.** §11 says "generous
+  per-visitor limits". Without an auth layer there is no honest way to tell two visitors
+  apart — an IP is not a person — and a per-IP limit would read as a stronger guarantee than
+  it is. One busy visitor can use up the hour's runs. Per-visitor limits land with auth.
+- **The `ollama` container and the over-cap fallback are unexercised.** The local rehearsal
+  pointed the containers at a host Ollama, so the in-cluster model service has not run.
 
 ## Stubbed during this run — needs real credentials/config before Phase 5
 

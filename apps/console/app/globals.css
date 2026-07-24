@@ -79,3 +79,7 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   background: #12202c; border-bottom: 1px solid var(--line);
 }
 .demo-banner.capped { background: #2a1e12; }
+.card-title { margin: 0 0 6px; }
+.sub-tight { margin: 0; }
+.sub-note { margin: 10px 0 0; }
+.feed-line { display: block; }

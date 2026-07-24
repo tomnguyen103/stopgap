@@ -44,9 +44,14 @@ const EnvSchema = z.object({
    * read-only.
    */
   STOPGAP_DEMO_MODE: z.enum(["on", "off"]).default("off"),
-  /** Hard daily LLM spend cap in USD; over it, routing falls back to the free local model. */
-  DEMO_DAILY_USD_CAP: z.coerce.number().nonnegative().default(2),
-  /** Rate limit on visitor-started demo scenarios, per rolling hour. */
+  /**
+   * Daily LLM spend cap in USD. Applies to every deployment, not just the demo — a scheduled
+   * poll spends the same dollars a visitor does. Unset means no cap: a hospital deployment
+   * must not silently downgrade clinical calls to a 7B local model because nobody configured
+   * a number. Over the cap, routing is restricted to the free local provider.
+   */
+  LLM_DAILY_USD_CAP: z.coerce.number().nonnegative().optional(),
+  /** Rate limit on visitor-started demo scenarios, per rolling hour (deployment-wide). */
   DEMO_MAX_RUNS_PER_HOUR: z.coerce.number().int().positive().default(6),
 });
 

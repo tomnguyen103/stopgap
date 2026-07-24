@@ -1,10 +1,12 @@
 import { resetEnvCache } from "@stopgap/core/env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const countCasesOpenedSince = vi.fn(async (_db: unknown, _prefix: string, _since: Date) => 0);
+const countDemoRunsSince = vi.fn(async (_db: unknown, _since: Date) => 0);
+const recordDemoRun = vi.fn(async (_db: unknown, _key: string) => {});
 
 vi.mock("@stopgap/db", () => ({
-  countCasesOpenedSince,
+  countDemoRunsSince,
+  recordDemoRun,
   getDb: () => ({}),
 }));
 
@@ -37,8 +39,9 @@ describe("demo mode", () => {
 
 describe("demo scenario", () => {
   beforeEach(() => {
-    countCasesOpenedSince.mockClear();
-    countCasesOpenedSince.mockResolvedValue(0);
+    countDemoRunsSince.mockClear();
+    countDemoRunsSince.mockResolvedValue(0);
+    recordDemoRun.mockClear();
     delete process.env.DEMO_MAX_RUNS_PER_HOUR;
     resetEnvCache();
   });
@@ -61,13 +64,16 @@ describe("demo scenario", () => {
     // The `demo-` key is what keeps a visitor's run from colliding with a live openFDA case.
     expect(result.record.key.startsWith("demo-")).toBe(true);
     expect(result.record.sourceId.startsWith("demo:")).toBe(true);
+    // The slot is consumed at acceptance, so a failed start cannot be retried for free.
+    expect(recordDemoRun).toHaveBeenCalledTimes(1);
   });
 
   it("refuses once the hourly limit is reached", async () => {
     process.env.DEMO_MAX_RUNS_PER_HOUR = "2";
     resetEnvCache();
-    countCasesOpenedSince.mockResolvedValue(2);
+    countDemoRunsSince.mockResolvedValue(2);
     const result = await prepareDemoRun(DEMO_DRUGS[0]!.key);
     expect(result).toMatchObject({ ok: false, reason: "rate-limited" });
+    expect(recordDemoRun).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,6 @@ export * as schema from "./schema.js";
 export { getDb, closeDb, type Db } from "./client.js";
 export { appendAudit, verifyAuditChain, GENESIS_HASH, type AuditEntry } from "./audit.js";
 export {
-  countCasesOpenedSince,
   upsertCaseForRecord,
   getCaseByWorkflowId,
   updateCaseStatus,
@@ -25,7 +24,10 @@ export {
   type ShadowClassStats,
 } from "./shadow.js";
 export { getLlmSpend, recordLlmSpend, utcDay, type DailySpend } from "./spend.js";
+export { countDemoRunsSince, recordDemoRun } from "./demo-runs.js";
+export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export type {
+  DemoRunRow,
   LlmSpendRow,
   CaseRow,
   NewCaseRow,

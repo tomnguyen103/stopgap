@@ -9,12 +9,14 @@ import { demoStatus } from "@stopgap/demo";
 export async function DemoBanner() {
   const status = await demoStatus().catch(() => undefined);
   if (!status?.demoMode) return null;
-  const pct = status.capUsd > 0 ? Math.min(100, Math.round((status.spentUsd / status.capUsd) * 100)) : 0;
+  const budget = status.budget;
   return (
-    <div className={status.overCap ? "demo-banner capped" : "demo-banner"}>
-      <b>Read-only demo</b> — reviews and exception resolutions are disabled. Today&apos;s model
-      budget: ${status.spentUsd.toFixed(3)} of ${status.capUsd.toFixed(2)} ({pct}%).
-      {status.overCap ? " Cap reached — now answering on the local Ollama model." : null}
+    <div className={budget?.overCap ? "demo-banner capped" : "demo-banner"}>
+      <b>Read-only demo</b> — reviews and exception resolutions are disabled.
+      {budget
+        ? ` Today's model budget: $${budget.spentUsd.toFixed(3)} of $${budget.capUsd.toFixed(2)}.`
+        : null}
+      {budget?.overCap ? " Cap reached — now answering on the local Ollama model." : null}
     </div>
   );
 }

@@ -186,16 +186,34 @@ lib; writeup; post-mortem; portfolio page + video.
   rehearsed on a local Docker daemon instead (see below).
 - [x] Demo mode (`@stopgap/demo`): read-only console (reviews and exception resolutions
   refused in the server action, not merely hidden), "Run a shortage" against a fixed drug
-  catalogue with an hourly rate limit counted from the case table, nightly idempotent
-  re-seed of three mid-lifecycle cases (day 2 / 18 / 45) and their protocol history.
-- [x] Daily LLM budget cap: every call's cost accumulates in `llm_spend`; over
-  `DEMO_DAILY_USD_CAP` the provider layer routes to the free local model and the console
-  banner names the model that is answering. The demo degrades rather than going dark.
-- [x] **Verified live against the production compose stack** (local Docker, 2026-07-23):
-  migrations applied, seeder produced the three lifecycle cases, "Run a shortage" started a
-  real case that ran through the live agents to `awaiting_review` (severity `moderate`, five
-  hash-chained audit rows), the review gate rendered as disabled, and `llm_spend` counted the
-  two model calls the case made.
+  catalogue with an hourly rate limit counted from a durable `demo_runs` table, nightly
+  idempotent re-seed of three mid-lifecycle cases (day 2 / 18 / 45) and their protocol
+  history. The limit is deployment-wide rather than per visitor, and the seed writes no
+  shadow-ledger rows — both deviations from §11, recorded in `PHASE5-TODO.md` with reasons.
+- [x] Live-feed panel with a last-polled timestamp (§11). Building it surfaced that nothing
+  had ever written `feed_records` — the table existed from Phase 1 but the poll path never
+  persisted to it, so provenance for "which feed record opened this case" did not exist.
+  `pollAndOpenCases` now stores every fetched record. Verified against live openFDA: 100
+  records stored, panel rendering the real timestamp.
+- [x] An agent-layer outage now parks a case in the exception queue instead of killing the
+  workflow. Found by pulling Ollama out from under a running case during the rehearsal: the
+  activity exhausted its five retries, the failure escaped, and the case sat at `assessing`
+  forever with nobody told — a dropped case, the one number §14 puts at zero. Regression
+  test added (`agent-unavailable`).
+- [x] Daily LLM spend cap (`LLM_DAILY_USD_CAP`, off unless set): every call's cost
+  accumulates in `llm_spend`, and past the cap the provider layer routes only to the free
+  local model. It lives with tracing rather than with the demo because it has to hold for
+  every caller — a 03:00 scheduled poll spends the same dollars a visitor does.
+- [x] **Verified partially live against the production compose images** (local Docker,
+  2026-07-23). What actually ran: `postgres`, `temporal`, `migrate`, `console`, `worker`, and
+  the seeder — migrations applied, the seeder produced the day 2 / 18 / 45 cases, "Run a
+  shortage" started a real case that reached `awaiting_review` (severity `moderate`) through
+  the live agents with five hash-chained audit rows, the case page rendered the
+  review-disabled card in place of the approve/reject panel, and `llm_spend` counted the two
+  model calls the case made. What did **not** run: Caddy (needs public DNS), the Temporal UI,
+  the whole Langfuse stack, the long-running `demo-seed` service, and the `ollama` container —
+  the rehearsal pointed the containers at a host Ollama (`docker-compose.localcheck.yml`), so
+  the in-cluster model container and the over-cap fallback path are still unexercised.
 - [x] **Bug the rehearsal caught:** `next build` minifies function names, so starting a
   workflow by passing the imported function sent Temporal the workflow type `aa` — every case
   started from the deployed console died with "no such function is exported by the workflow

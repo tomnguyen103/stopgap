@@ -214,6 +214,24 @@ export const llmSpend = pgTable("llm_spend", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * One row per accepted demo scenario start (PROJECT_PLAN §11 rate limiting).
+ *
+ * A separate table rather than counting `cases`: a demo drug reuses one case row, so
+ * `cases.opened_at` stops moving after the first run and a count over it would let the limit
+ * decay to "unlimited" within an hour. Rows are written when a run is accepted, so the count
+ * is of attempts that were allowed through, not of cases that happened to be created.
+ */
+export const demoRuns = pgTable(
+  "demo_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("demo_runs_started_at_idx").on(t.startedAt)],
+);
+
 export type CaseRow = typeof cases.$inferSelect;
 export type NewCaseRow = typeof cases.$inferInsert;
 export type AuditRow = typeof auditLog.$inferSelect;
@@ -224,3 +242,4 @@ export type NewProtocolVersionRow = typeof protocolVersions.$inferInsert;
 export type ShadowRunRow = typeof shadowRuns.$inferSelect;
 export type NewShadowRunRow = typeof shadowRuns.$inferInsert;
 export type LlmSpendRow = typeof llmSpend.$inferSelect;
+export type DemoRunRow = typeof demoRuns.$inferSelect;

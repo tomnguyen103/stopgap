@@ -4,10 +4,10 @@ Everything Stopgap needs runs on one host with `docker compose` (PROJECT_PLAN §
 worker, Temporal + UI, one Postgres holding three databases, Langfuse, a CPU Ollama, and
 Caddy for TLS.
 
-**Status: written and verified locally, not provisioned.** The compose stack in this
-directory was built and started on a local Docker daemon; no paid VPS has been rented for it.
-Everything below is the procedure, not a description of a running deployment. The one thing
-that cannot be verified without the host is Let's Encrypt issuance, which needs public DNS.
+**Status: written and rehearsed locally, not provisioned.** The images were built and the
+app half of the stack was started on a local Docker daemon; no paid VPS has been rented.
+Everything below is the procedure, not a description of a running deployment. See "Local
+rehearsal" at the end for exactly which services ran and which did not.
 
 ## Sizing and cost
 
@@ -70,10 +70,15 @@ publicly-reachable host means anyone who finds it can approve clinical guidance.
 - **"Run a shortage"** starts a real Temporal case through the real agents. The drug comes
   from a fixed catalogue (never free text, so a visitor cannot reach the prompt), keys are
   `demo-` prefixed so a demo run cannot collide with a live openFDA case, and starts are
-  limited to `DEMO_MAX_RUNS_PER_HOUR` counted from the case table.
+  limited to `DEMO_MAX_RUNS_PER_HOUR` counted from a durable `demo_runs` table. The limit is
+  deployment-wide, not per visitor: with no auth layer there is no honest way to tell two
+  visitors apart, so one busy visitor can use up the hour's runs.
 - **Budget cap.** Every LLM call's cost is added to a daily row (`llm_spend`); at
-  `DEMO_DAILY_USD_CAP` routing switches to the free local model and the banner says so. The
-  demo degrades to a smaller model rather than going dark.
+  `LLM_DAILY_USD_CAP` routing is restricted to the free local model and the banner says so.
+  The cap is not demo-specific — a scheduled poll spends the same dollars a visitor does — and
+  it is off unless the variable is set, so a real deployment never inherits "answer on a 7B
+  model past $2" from a default. Past the cap the local model is the only route left: if
+  Ollama is also down, the call fails rather than spending over budget.
 - **Nightly re-seed** (`demo-seed` service) parks three cases at day 2 / 18 / 45 with the
   protocol history behind them. It updates rather than deletes: `audit_log` is an append-only
   hash chain and a tidy-up would break verification for every later row.
@@ -119,10 +124,16 @@ docker compose -f docker-compose.prod.yml -f docker-compose.localcheck.yml \
   exec worker pnpm --filter @stopgap/demo seed
 ```
 
-Verified this way on 2026-07-23: migrations applied, seeder produced the day 2 / 18 / 45
-cases, "Run a shortage" started a real case that ran through the live agents to
-`awaiting_review` with a hash-chained audit trail, the review gate showed as disabled, and
-the `llm_spend` row counted the two model calls the case made.
+Verified this way on 2026-07-23 — `postgres`, `temporal`, `migrate`, `console`, `worker` and
+the seeder: migrations applied, the seeder produced the day 2 / 18 / 45 cases, "Run a
+shortage" started a real case that ran through the live agents to `awaiting_review` with a
+hash-chained audit trail, the case page rendered the review-disabled card instead of the
+approve/reject panel, and the `llm_spend` row counted the two model calls the case made.
+
+Not exercised by that rehearsal, and therefore unverified: Caddy (needs public DNS), the
+Temporal UI, the Langfuse stack, the long-running `demo-seed` loop, and the `ollama`
+container — the override points at a host Ollama, so the in-cluster model service and the
+over-cap fallback to it have not been run.
 
 That rehearsal is also what caught the one bug this deployment path had: `next build`
 minifies function names, so starting a workflow by passing the imported function sent
@@ -130,5 +141,4 @@ Temporal the workflow type `aa`. Workflows are now started by name
 (`SHORTAGE_CASE_WORKFLOW`). Nothing in dev mode or the unit tests could have surfaced it —
 only a production build could.
 
-Caddy is the one service the rehearsal cannot cover: it needs public DNS to issue a
-certificate.
+

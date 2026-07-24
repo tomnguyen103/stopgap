@@ -37,8 +37,8 @@ export function DemoPanel({ drugs }: { drugs: { key: string; genericName: string
 
   return (
     <div className="card">
-      <h2 style={{ margin: "0 0 6px" }}>Run a shortage</h2>
-      <p className="sub" style={{ margin: 0 }}>
+      <h2 className="card-title">Run a shortage</h2>
+      <p className="sub sub-tight">
         Starts a real Temporal case against the live agent layer. Reviews stay disabled — this
         is a read-only demo.
       </p>
@@ -49,7 +49,7 @@ export function DemoPanel({ drugs }: { drugs: { key: string; genericName: string
           </button>
         ))}
       </div>
-      {message ? <p className="sub" style={{ margin: "10px 0 0" }}>{message}</p> : null}
+      {message ? <p className="sub sub-note">{message}</p> : null}
       {error ? <p className="error">{error}</p> : null}
     </div>
   );

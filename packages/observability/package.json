@@ -17,6 +17,7 @@
     "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "@stopgap/core": "workspace:*",
+    "@stopgap/db": "workspace:*",
     "@stopgap/providers": "workspace:*",
     "@stopgap/agents": "workspace:*"
   },

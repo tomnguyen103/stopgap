@@ -17,7 +17,6 @@
     "@stopgap/agents": "workspace:*",
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
-    "@stopgap/demo": "workspace:*",
     "@stopgap/ingest": "workspace:*",
     "@stopgap/observability": "workspace:*",
     "@temporalio/activity": "^1.11.0",

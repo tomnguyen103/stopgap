@@ -132,6 +132,9 @@ importers:
       '@stopgap/db':
         specifier: workspace:*
         version: link:../db
+      '@stopgap/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@stopgap/providers':
         specifier: workspace:*
         version: link:../providers
@@ -194,6 +197,9 @@ importers:
       '@stopgap/core':
         specifier: workspace:*
         version: link:../core
+      '@stopgap/db':
+        specifier: workspace:*
+        version: link:../db
       '@stopgap/providers':
         specifier: workspace:*
         version: link:../providers
@@ -256,9 +262,6 @@ importers:
       '@stopgap/db':
         specifier: workspace:*
         version: link:../db
-      '@stopgap/demo':
-        specifier: workspace:*
-        version: link:../demo
       '@stopgap/ingest':
         specifier: workspace:*
         version: link:../ingest

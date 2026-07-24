@@ -32,7 +32,7 @@ x-app-env: &app-env
   COMMS_DEMO_INBOX: ${COMMS_DEMO_INBOX:-}
   EHR_WEBHOOK_URL: ${EHR_WEBHOOK_URL:-http://localhost:4000/ehr/formulary-flag}
   STOPGAP_DEMO_MODE: ${STOPGAP_DEMO_MODE:-on}
-  DEMO_DAILY_USD_CAP: ${DEMO_DAILY_USD_CAP:-2}
+  LLM_DAILY_USD_CAP: ${LLM_DAILY_USD_CAP:-2}
   DEMO_MAX_RUNS_PER_HOUR: ${DEMO_MAX_RUNS_PER_HOUR:-6}
 
 services:
@@ -78,7 +78,7 @@ services:
       - temporal
     environment:
       TEMPORAL_ADDRESS: temporal:7233
-      TEMPORAL_CORS_ORIGINS: https://${APP_DOMAIN}
+      TEMPORAL_CORS_ORIGINS: https://${TEMPORAL_DOMAIN}
 
   # Local model, CPU-only. `ollama-pull` runs once at boot so the first case doesn't pay for
   # a multi-GB download while a visitor waits.

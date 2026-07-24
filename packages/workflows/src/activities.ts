@@ -7,12 +7,13 @@ import {
   getApprovedProtocol,
   getCaseByWorkflowId,
   getDb,
+  recordFeedRecords,
   updateCaseStatus,
   upsertCaseForRecord,
   workflowIdForKey,
 } from "@stopgap/db";
 import { sendEhrFlag, sendEmail } from "@stopgap/comms";
-import { mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
+import { contentHash, mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, startCase } from "./client.js";
 import type {
@@ -157,7 +158,13 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
  */
 export async function pollAndOpenCases(): Promise<{ polled: number; opened: number }> {
   const [openFda, ashp] = await Promise.all([pollOpenFda(), pollAshp()]);
-  const current = mergeRecords([...openFda, ...ashp]).filter((r) => r.status === "current");
+  const fetched = [...openFda, ...ashp];
+  // Persist what the feeds returned before deciding what to do with it: `feed_records` is the
+  // provenance trail behind every case, and the only thing that can answer "when did this
+  // deployment last hear from openFDA" (the console's freshness panel). Resolved records are
+  // stored too — a shortage dropping off the feed is information.
+  await recordFeedRecords(getDb(), fetched, contentHash);
+  const current = mergeRecords(fetched).filter((r) => r.status === "current");
 
   const { client, connection } = await makeClient();
   try {

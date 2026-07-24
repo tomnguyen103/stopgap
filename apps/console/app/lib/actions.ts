@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCaseByWorkflowId, getDb } from "@stopgap/db";
-import { assertMutationAllowed, prepareDemoRun, type DemoRunResult } from "@stopgap/demo";
+import { assertMutationAllowed, isDemoMode, prepareDemoRun, type DemoRunResult } from "@stopgap/demo";
 import { resolveException, startCase, submitReview, withTemporalClient } from "@stopgap/workflows";
 
 /**
@@ -70,6 +70,11 @@ export async function resolveExceptionCase(workflowId: string, resolution: unkno
  * they must hold for every caller and not just for whoever came through this button.
  */
 export async function startDemoShortage(key: unknown): Promise<DemoRunResult> {
+  // A server action is a public endpoint whether or not a button renders it, and outside the
+  // demo there is no reason for anyone to open cases for three fixed drugs.
+  if (!isDemoMode()) {
+    return { ok: false, reason: "unknown-drug", message: "demo scenarios are not enabled" };
+  }
   const prepared = await prepareDemoRun(z.string().min(1).max(120).parse(key));
   if (!prepared.ok) return prepared;
   const started = await withTemporalClient((client) => startCase(client, prepared.record));

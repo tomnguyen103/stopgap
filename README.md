@@ -98,6 +98,8 @@ Docker daemon, and no paid host has been provisioned.
 `STOPGAP_DEMO_MODE=on` makes the console a public read-only surface: reviews and exception
 resolutions are refused in the server action (not merely hidden), and the only visitor
 mutation is **"Run a shortage"**, which starts a real Temporal case for one of three
-catalogue drugs, rate limited per hour. Every LLM call's cost accumulates in an `llm_spend`
-row; at `DEMO_DAILY_USD_CAP` routing falls back to the free local model and the banner says
-which model is answering.
+catalogue drugs, rate limited per hour (deployment-wide, not per visitor — without auth there
+is no honest way to tell visitors apart). Every LLM call's cost accumulates in an `llm_spend`
+row; if `LLM_DAILY_USD_CAP` is set, routing past it is restricted to the free local model and
+the banner says which model is answering. That cap applies to every deployment, not just the
+demo, and is off unless configured.

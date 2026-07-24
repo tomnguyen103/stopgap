@@ -38,12 +38,18 @@ function heparin(): ShortageRecord {
 const mockActivities: typeof activities = {
   recordDetected: async () => {},
   persistStatus: async () => {},
-  assessImpact: async (input: CaseInput) => ({
-    severity: input.record.ndcs.length >= 2 ? "high" : "moderate",
-    affectedFormularyItems: input.record.ndcs.length,
-    rationale: "test",
-    confidence: /low impact confidence/i.test(input.record.genericName) ? 0.2 : 0.9,
-  }),
+  assessImpact: async (input: CaseInput) => {
+    // Simulates the provider being down long enough to exhaust the activity's retries.
+    if (/provider outage/i.test(input.record.genericName)) {
+      throw new Error("no usable LLM provider (requested ollama); checked ollama, gemini");
+    }
+    return {
+      severity: input.record.ndcs.length >= 2 ? ("high" as const) : ("moderate" as const),
+      affectedFormularyItems: input.record.ndcs.length,
+      rationale: "test",
+      confidence: /low impact confidence/i.test(input.record.genericName) ? 0.2 : 0.9,
+    };
+  },
   researchAlternatives: async (input: CaseInput) =>
     /immune globulin/i.test(input.record.genericName)
       ? { alternatives: [], draft: "", confidence: 0.9 }
@@ -129,6 +135,22 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
       });
       const final = await handle.result();
       expect(final.status).toBe("exception");
+    });
+  }, 60_000);
+
+  it("parks a case in the exception queue when the agent layer is down, instead of dropping it", async () => {
+    await withWorker(async () => {
+      const record = { ...heparin(), genericName: "Provider Outage Drug", key: "provider outage drug" };
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record, sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-outage-${Date.now()}`,
+      });
+      // The workflow must survive the failure: a thrown activity would fail the run and
+      // leave the case frozen mid-assessment with nobody told (PROJECT_PLAN §14: 0 dropped).
+      const final = await handle.result();
+      expect(final.status).toBe("exception");
+      expect(final.exceptionReason).toBe("agent-unavailable");
     });
   }, 60_000);
 

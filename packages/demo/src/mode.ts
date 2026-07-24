@@ -1,5 +1,6 @@
 import { getEnv } from "@stopgap/core/env";
-import { demoBudgetStatus } from "./budget.js";
+import { spendCapStatus } from "@stopgap/observability";
+import type { BudgetStatus } from "@stopgap/providers";
 
 /**
  * Demo-mode state for the console banner and the server-action guard (PROJECT_PLAN §11).
@@ -14,23 +15,12 @@ export function isDemoMode(): boolean {
 
 export interface DemoStatus {
   demoMode: boolean;
-  spentUsd: number;
-  capUsd: number;
-  /** Over the cap the deployment answers on the free local model instead of the paid one. */
-  overCap: boolean;
-  /** The provider a call would be routed to right now, as far as the cap is concerned. */
-  effectiveProvider: "configured" | "ollama (budget cap)";
+  /** Undefined when no daily cap is configured for this deployment. */
+  budget?: BudgetStatus;
 }
 
 export async function demoStatus(): Promise<DemoStatus> {
-  const budget = await demoBudgetStatus();
-  return {
-    demoMode: isDemoMode(),
-    spentUsd: budget.spentUsd,
-    capUsd: budget.capUsd,
-    overCap: budget.overCap,
-    effectiveProvider: budget.overCap ? "ollama (budget cap)" : "configured",
-  };
+  return { demoMode: isDemoMode(), budget: await spendCapStatus() };
 }
 
 /** Thrown by the guard below; the console turns it into a message rather than a crash. */
