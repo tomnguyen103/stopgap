@@ -16,14 +16,28 @@ interface EntryFields {
   actor: string;
   action: string;
   detail: Record<string, unknown>;
+  /** v2-hashed fields; defaulted so most tests need not spell them out. */
+  ts?: string;
+  runId?: string;
+  eventKey?: string;
 }
+
+const TS = "2026-07-24T00:00:00.000Z";
 
 /** Build a valid chain of rows under the given per-row schemes. */
 function buildChain(entries: (EntryFields & { scheme: "v1" | "v2" })[], hmacKey?: string): VerifiableRow[] {
   const rows: VerifiableRow[] = [];
   let prevHash = GENESIS_HASH;
   entries.forEach((e, i) => {
-    const hash = computeAuditHash(e.scheme, prevHash, e, e.scheme === "v2" ? hmacKey : undefined);
+    const ts = e.ts ?? TS;
+    const runId = e.runId ?? "run-1";
+    const eventKey = e.eventKey ?? e.action;
+    const hash = computeAuditHash(
+      e.scheme,
+      prevHash,
+      { ...e, ts, runId, eventKey },
+      e.scheme === "v2" ? hmacKey : undefined,
+    );
     rows.push({
       id: i + 1,
       caseId: e.caseId ?? null,
@@ -33,6 +47,9 @@ function buildChain(entries: (EntryFields & { scheme: "v1" | "v2" })[], hmacKey?
       prevHash,
       hash,
       scheme: e.scheme,
+      ts,
+      runId,
+      eventKey,
     });
     prevHash = hash;
   });
@@ -154,6 +171,25 @@ describe("verifyChainRows", () => {
     const result = verifyChainRows(rows, KEY);
     expect(result.ok).toBe(false);
     expect(result.brokenAtId).toBe(2);
+  });
+
+  it("fails a v2 row whose `ts` was backdated (ts is inside the HMAC payload)", () => {
+    const rows = buildChain(sample("v2"), KEY);
+    rows[1]!.ts = "2000-01-01T00:00:00.000Z"; // backdate without recomputing the hash
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(2);
+    expect(result.reason).toBe("hash-mismatch");
+  });
+
+  it("still verifies a v1 chain after ts/runId/eventKey change (v1 omits them by design)", () => {
+    const rows = buildChain(sample("v1"));
+    rows[1]!.ts = "1999-01-01T00:00:00.000Z";
+    rows[1]!.runId = "different-run";
+    rows[1]!.eventKey = "different-key";
+    // These fields are not in the v1 payload, so the chain is byte-identical and still verifies.
+    // (That backdate-ability is precisely the v1 weakness v2 closes.)
+    expect(verifyChainRows(rows)).toEqual({ ok: true });
   });
 });
 

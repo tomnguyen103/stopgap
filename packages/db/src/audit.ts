@@ -46,16 +46,26 @@ interface HashablePayload {
   actor: string;
   action: string;
   detail: Record<string, unknown>;
+  /** v2-only: hashed under HMAC so `ts` cannot be backdated. Ignored by v1. */
+  ts?: string;
+  /** v2-only: hashed so the idempotency metadata cannot be rewritten. Ignored by v1. */
+  runId?: string;
+  /** v2-only: hashed so the idempotency metadata cannot be rewritten. Ignored by v1. */
+  eventKey?: string;
 }
 
 /**
  * Recompute a single row's hash under its scheme.
  *
- * `runId`/`eventKey`/`ts`/`scheme` are deliberately NOT hashed: they are idempotency and
- * bookkeeping metadata, not claims about what happened, and leaving them out keeps the `v1`
- * formula byte-identical to the pre-PHASE6 chain — rows written before HMAC existed still
- * verify. `v2` HMACs the same payload under `AUDIT_HMAC_KEY`, so an attacker with only DB
- * write access can no longer recompute a valid hash (the key is not in the database).
+ * `v1` hashes `{caseId,actor,action,detail}` with bare SHA-256 — byte-identical to the
+ * pre-PHASE6 chain so rows written before HMAC existed still verify. It deliberately omits
+ * `ts`/`runId`/`eventKey`; that is a known weakness of `v1` (a DB-write attacker could
+ * backdate `ts`), which is exactly why `v2` exists and must not be weakened to match `v1`.
+ *
+ * `v2` HMACs a WIDER payload under `AUDIT_HMAC_KEY` — the same fields PLUS `ts`, `runId`, and
+ * `eventKey` — so an attacker with only DB write access can neither recompute a valid hash
+ * (the key is not in the database) NOR silently backdate the timestamp or rewrite the
+ * idempotency metadata of a keyed row (CWE-354).
  *
  * Exported so tests (and any external verifier) can construct a known-good chain without a
  * live database; the byte layout is part of the audit contract.
@@ -66,11 +76,21 @@ export function computeAuditHash(
   e: HashablePayload,
   hmacKey?: string,
 ): string {
-  const payload = canonical({ caseId: e.caseId ?? null, actor: e.actor, action: e.action, detail: e.detail });
   if (scheme === "v2") {
     if (!hmacKey) throw new Error("computeAuditHash: v2 scheme requires an HMAC key");
+    const payload = canonical({
+      caseId: e.caseId ?? null,
+      actor: e.actor,
+      action: e.action,
+      detail: e.detail,
+      ts: e.ts ?? null,
+      runId: e.runId ?? null,
+      eventKey: e.eventKey ?? null,
+    });
     return createHmac("sha256", hmacKey).update(prevHash).update(payload).digest("hex");
   }
+  // v1: keep the original narrow payload byte-for-byte.
+  const payload = canonical({ caseId: e.caseId ?? null, actor: e.actor, action: e.action, detail: e.detail });
   return createHash("sha256").update(prevHash).update(payload).digest("hex");
 }
 
@@ -121,10 +141,16 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
     const [last] = await tx.select({ hash: auditLog.hash }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
     const prevHash = last?.hash ?? GENESIS_HASH;
     const detail = entry.detail ?? {};
+    const runId = entry.runId ?? "";
+    const eventKey = entry.eventKey ?? entry.action;
+    // Set `ts` explicitly (not the column default) so the value we HASH for a v2 row is the
+    // exact value we PERSIST — otherwise re-verification would recompute against a different
+    // timestamp and every keyed row would fail.
+    const ts = new Date();
     const hash = computeAuditHash(
       scheme,
       prevHash,
-      { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId },
+      { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId, ts: ts.toISOString(), runId, eventKey },
       hmacKey,
     );
     await tx.insert(auditLog).values({
@@ -132,10 +158,11 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
       actor: entry.actor,
       action: entry.action,
       detail,
+      ts,
       prevHash,
       hash,
-      runId: entry.runId ?? "",
-      eventKey: entry.eventKey ?? entry.action,
+      runId,
+      eventKey,
       scheme,
     });
     return { hash };
@@ -152,6 +179,17 @@ export interface VerifiableRow {
   prevHash: string;
   hash: string;
   scheme: string;
+  /** Hashed for v2 rows; `Date` (from the DB) or ISO string (from a test). Ignored for v1. */
+  ts: Date | string;
+  /** Hashed for v2 rows. Ignored for v1. */
+  runId: string;
+  /** Hashed for v2 rows. Ignored for v1. */
+  eventKey: string;
+}
+
+/** Normalize a timestamp to the ISO string the writer hashed. */
+function tsToIso(ts: Date | string): string {
+  return typeof ts === "string" ? ts : ts.toISOString();
 }
 
 export interface ChainVerification {
@@ -197,7 +235,15 @@ export function verifyChainRows(rows: VerifiableRow[], hmacKey?: string): ChainV
     const expected = computeAuditHash(
       scheme,
       prevHash,
-      { caseId: row.caseId ?? undefined, actor: row.actor, action: row.action, detail: row.detail },
+      {
+        caseId: row.caseId ?? undefined,
+        actor: row.actor,
+        action: row.action,
+        detail: row.detail,
+        ts: tsToIso(row.ts),
+        runId: row.runId,
+        eventKey: row.eventKey,
+      },
       hmacKey,
     );
     if (row.hash !== expected) {
@@ -220,6 +266,9 @@ export async function verifyAuditChain(db: Db): Promise<ChainVerification> {
       prevHash: auditLog.prevHash,
       hash: auditLog.hash,
       scheme: auditLog.scheme,
+      ts: auditLog.ts,
+      runId: auditLog.runId,
+      eventKey: auditLog.eventKey,
     })
     .from(auditLog)
     .orderBy(auditLog.id);

@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { getEnv } from "@stopgap/core/env";
 import { desc, inArray } from "drizzle-orm";
@@ -127,31 +127,81 @@ export async function listAnchors(db: Db, limit = 50): Promise<AuditAnchorRow[]>
   return db.select().from(auditAnchors).orderBy(desc(auditAnchors.id)).limit(limit);
 }
 
+/**
+ * Read the EXTERNAL anchor file into a `maxAuditId → headHash` map. This is the sink the DB
+ * cannot reach, so it is the only anchor an attacker with DB write access cannot also patch.
+ * Returns `null` (honest "no external record") when the file is missing or unreadable — never
+ * throws, so verification degrades to DB-internal-only rather than crashing. The file is one
+ * JSON object per line (`{ts,maxAuditId,headHash}`), appended hourly, so it stays small.
+ */
+export async function readAnchorFile(): Promise<Map<number, string> | null> {
+  try {
+    const contents = await readFile(getEnv().AUDIT_ANCHOR_FILE, "utf8");
+    const map = new Map<number, string>();
+    for (const line of contents.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const parsed = JSON.parse(trimmed) as { maxAuditId?: unknown; headHash?: unknown };
+        if (typeof parsed.maxAuditId === "number" && typeof parsed.headHash === "string") {
+          // Later lines win for a repeated id (append-only, so newest is last).
+          map.set(parsed.maxAuditId, parsed.headHash);
+        }
+      } catch {
+        // A single malformed line must not sink the whole external check.
+      }
+    }
+    return map;
+  } catch {
+    return null;
+  }
+}
+
 export interface AnchorVerification extends AuditAnchorRow {
   /**
-   * Whether row `maxAuditId`'s hash in the LIVE chain still equals the head this anchor
-   * pinned. A wholesale rewrite (even by a key holder) changes that hash, so a stored anchor
-   * that no longer matches is the tell.
+   * DB-internal check: does row `maxAuditId`'s hash in the LIVE chain still equal the head
+   * this anchor row pinned? Both sides live in the database, so an attacker who patches
+   * `audit_anchors` too passes this — it is the weaker of the two checks.
    */
   headMatches: boolean;
+  /**
+   * EXTERNAL check: does the anchor file's recorded head for `maxAuditId` still equal the live
+   * chain's hash there? The file is outside the DB, so a DB-write attacker cannot patch it —
+   * a mismatch here is the strong, distinct failure. `null` = no external record for this id
+   * (or the file is unreadable), which is honest, not a pass.
+   */
+  externalMatches: boolean | null;
 }
 
 /**
- * Cross-check every stored anchor against the live chain: does row `maxAuditId` still carry
- * the hash we anchored? Batches the head lookups into one query rather than one per anchor.
+ * Cross-check stored anchors against BOTH the live chain (DB-internal) and the external anchor
+ * file. `limit` defaults to "all" so the verification path never silently stops re-checking
+ * older anchors; the display `listAnchors` keeps its small default. Batches the head lookups
+ * into one query rather than one per anchor.
  */
-export async function verifyAnchors(db: Db): Promise<AnchorVerification[]> {
-  const anchors = await listAnchors(db, 200);
+export async function verifyAnchors(
+  db: Db,
+  limit: number = Number.MAX_SAFE_INTEGER,
+): Promise<AnchorVerification[]> {
+  const anchors = await listAnchors(db, limit);
   if (anchors.length === 0) return [];
   const ids = [...new Set(anchors.map((a) => a.maxAuditId))];
   const heads = await db
     .select({ id: auditLog.id, hash: auditLog.hash })
     .from(auditLog)
     .where(inArray(auditLog.id, ids));
-  const hashById = new Map(heads.map((h) => [h.id, h.hash]));
-  return anchors.map((anchor) => ({
-    ...anchor,
-    // Missing row (truncated chain) is a mismatch too — the anchored head is simply gone.
-    headMatches: hashById.get(anchor.maxAuditId) === anchor.headHash,
-  }));
+  const liveHashById = new Map(heads.map((h) => [h.id, h.hash]));
+  const external = await readAnchorFile();
+  return anchors.map((anchor) => {
+    const liveHash = liveHashById.get(anchor.maxAuditId);
+    const externalHead = external?.get(anchor.maxAuditId);
+    return {
+      ...anchor,
+      // Missing row (truncated chain) is a mismatch too — the anchored head is simply gone.
+      headMatches: liveHash === anchor.headHash,
+      // Compare the OUTSIDE-the-DB record against the live chain. null when we have no external
+      // record for this id (file missing/unreadable, or this anchor predates the file).
+      externalMatches: external === null || externalHead === undefined ? null : externalHead === liveHash,
+    };
+  });
 }

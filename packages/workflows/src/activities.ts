@@ -192,6 +192,11 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
     // counting so a single feed flap can never resolve a live case.
     const openCases = await listOpenMonitoringCases(db);
     const pollTimestamp = new Date().toISOString();
+    // The run token behind the retry-idempotent miss counter. `currentRunId()` differs per
+    // poll execution (so distinct polls increment) and is stable across retries of the same
+    // execution (so a retry is a no-op); the ISO-timestamp fallback keeps it deterministic if
+    // ever called outside a Temporal activity context.
+    const pollRun = currentRunId() ?? pollTimestamp;
     const diff = diffResolutions(
       openCases,
       { currentKeys, resolvedKeys },
@@ -199,12 +204,12 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
       pollTimestamp,
     );
     for (const caseId of diff.toReset) await resetFeedMiss(db, caseId);
-    for (const caseId of diff.toBump) await bumpFeedMiss(db, caseId);
+    for (const caseId of diff.toBump) await bumpFeedMiss(db, caseId, pollRun);
     for (const evidence of diff.toResolve) {
       // Signal the durable workflow (it owns the state machine), record the evidence in the
-      // tamper-evident chain, then clear the counter. The audit `eventKey` carries no runId,
-      // so a later poll that catches the case before its status has left `monitoring`
-      // no-ops on the same entry instead of double-appending.
+      // tamper-evident chain, then clear the counter. `runId` is the poll's run id so a retry
+      // within one poll dedups on the idempotency key while a later recurrence's resolution
+      // (a different poll run) still lands its own entry instead of colliding with the first.
       await markResolved(client, evidence.key);
       await appendAudit(db, {
         caseId: evidence.caseId,
@@ -217,6 +222,7 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
           consecutiveMisses: evidence.consecutiveMisses,
           missPollTimestamps: evidence.missPollTimestamps,
         },
+        runId: currentRunId(),
         eventKey: "case.feed_resolved",
       });
       await resetFeedMiss(db, evidence.caseId);

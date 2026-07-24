@@ -1,5 +1,5 @@
 import type { CaseStatus, Severity, ShortageRecord } from "@stopgap/core";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { cases, type CaseRow } from "./schema.js";
 
@@ -94,17 +94,20 @@ export async function listOpenMonitoringCases(db: Db): Promise<OpenMonitoringCas
 }
 
 /**
- * Increment a case's consecutive-miss counter by one. Done in SQL (not read-modify-write) so
- * concurrent polls cannot lose an increment against each other.
+ * Increment a case's consecutive-miss counter by one, idempotently per poll run. Done in SQL
+ * (not read-modify-write) so concurrent polls cannot lose an increment; guarded on
+ * `lastFeedPollRun IS DISTINCT FROM runId` so a RETRY of the same at-least-once poll is a
+ * no-op (the run already bumped this case) while a genuinely later poll still increments.
+ * Without the guard, a retry after a partial failure would double-count and resolve early.
  */
-export async function bumpFeedMiss(db: Db, caseId: string): Promise<void> {
+export async function bumpFeedMiss(db: Db, caseId: string, runId: string): Promise<void> {
   // Counter-only writes deliberately leave `updatedAt` alone: a silent miss-count is not a
   // case state change, and touching it would bubble every monitoring case to the top of the
   // console's newest-first list on every 15-minute poll.
   await db
     .update(cases)
-    .set({ feedMissCount: sql`${cases.feedMissCount} + 1` })
-    .where(eq(cases.id, caseId));
+    .set({ feedMissCount: sql`${cases.feedMissCount} + 1`, lastFeedPollRun: runId })
+    .where(and(eq(cases.id, caseId), sql`${cases.lastFeedPollRun} is distinct from ${runId}`));
 }
 
 /** Reset a case's miss counter to zero (key reappeared, or resolution fired). */

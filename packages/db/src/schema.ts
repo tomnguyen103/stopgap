@@ -42,6 +42,13 @@ export const cases = pgTable(
      * (feed flap) must never resolve a live shortage.
      */
     feedMissCount: integer("feed_miss_count").notNull().default(0),
+    /**
+     * The feed-poll run that last touched `feedMissCount` (PHASE6 §6.6). `pollAndOpenCases` is
+     * at-least-once, so a retry after a partial failure would otherwise re-increment cases it
+     * already bumped and resolve them too early. `bumpFeedMiss` guards on this being DISTINCT
+     * from the current run, making the per-poll counter update idempotent under retry.
+     */
+    lastFeedPollRun: text("last_feed_poll_run"),
     ndcs: jsonb("ndcs").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     lastNote: text("last_note"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),

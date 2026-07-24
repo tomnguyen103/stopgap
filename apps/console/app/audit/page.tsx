@@ -46,7 +46,8 @@ export default async function AuditPage() {
               <th>Head row</th>
               <th>Head hash</th>
               <th>Sink</th>
-              <th>Head matches</th>
+              <th>DB match</th>
+              <th>External match</th>
             </tr>
           </thead>
           <tbody>
@@ -60,6 +61,14 @@ export default async function AuditPage() {
                 <td>{a.sink}</td>
                 <td className={a.headMatches ? "match-ok" : "match-bad"}>
                   {a.headMatches ? "✓" : "✗ mismatch"}
+                </td>
+                <td
+                  className={
+                    a.externalMatches === null ? "sub" : a.externalMatches ? "match-ok" : "match-bad"
+                  }
+                  title="Outside-the-DB anchor file vs the live chain"
+                >
+                  {a.externalMatches === null ? "—" : a.externalMatches ? "✓" : "✗ mismatch"}
                 </td>
               </tr>
             ))}

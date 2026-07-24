@@ -15,6 +15,7 @@ export {
   anchorAuditChain,
   listAnchors,
   verifyAnchors,
+  readAnchorFile,
   buildTimestampRequest,
   type AnchorVerification,
 } from "./anchors.js";
