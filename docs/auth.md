@@ -9,7 +9,7 @@ free-text string.
 
 Roles form a rank — a higher role satisfies any lower requirement:
 
-```
+```text
 viewer  <  pharmacist  <  pharmacy_director  <  admin
 ```
 
@@ -92,5 +92,33 @@ speaks generic OIDC discovery; only the URLs change.)
 - Demo users (DEV-ONLY passwords): `viewer`/`viewer-dev`, `pharmacist`/`pharmacist-dev`,
   `director`/`director-dev`, `admin`/`admin-dev`.
 
-Set `AUTH_SECRET` and `STOPGAP_DEMO_MODE=off` in `.env` to exercise the real sign-in + matrix
-locally; leave them at defaults for the read-only demo.
+The seeded client secret is `stopgap-console-dev-secret` (DEV-ONLY). To exercise the real sign-in
++ matrix locally, set BOTH `AUTH_SECRET` and `KEYCLOAK_CLIENT_SECRET=stopgap-console-dev-secret`
+in `.env`, plus `STOPGAP_DEMO_MODE=off` — auth stays unconfigured (read-only) if either secret is
+missing. Leave them at defaults for the read-only demo.
+
+> **DEV-ONLY realm.** `deploy/keycloak/realm-stopgap.json` carries a fixed confidential client
+> secret and known demo passwords (incl. an `admin`). It is imported ONLY by the dev
+> `docker-compose.yml`. It is **never** imported in production — see below (CWE-798).
+
+## Provisioning the production realm
+
+The prod stack (`deploy/docker-compose.prod.yml`) starts Keycloak with `start` and **no**
+`--import-realm`, and mounts nothing under `deploy/keycloak`. So no known privileged credential is
+ever reachable by the prod stack. The operator provisions the realm once, out of band:
+
+1. Reach the Keycloak admin console at `https://${AUTH_DOMAIN}` and sign in with the bootstrap
+   admin (`KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` from `deploy/.env`). Rotate that
+   password after first login.
+2. Create the `stopgap` realm and the four realm roles (`viewer`, `pharmacist`,
+   `pharmacy_director`, `admin`).
+3. Create a confidential `stopgap-console` OIDC client: redirect URI
+   `https://${APP_DOMAIN}/api/auth/callback/keycloak`, and a protocol mapper that emits realm
+   roles into the token as `realm_access.roles`. Generate a fresh client secret.
+4. Put that secret in `deploy/.env` as `KEYCLOAK_CLIENT_SECRET`, set `AUTH_SECRET`
+   (`openssl rand -base64 33`), set `STOPGAP_DEMO_MODE=off`, and redeploy.
+5. Create real users (or federate your directory) and assign roles — or grant them locally at
+   `/admin/users` once an admin exists.
+
+Until step 4 is done, `KEYCLOAK_CLIENT_SECRET` is blank, `authConfigured()` is false, and the
+console runs read-only as the anonymous viewer — honest non-configuration, not a faked sign-in.

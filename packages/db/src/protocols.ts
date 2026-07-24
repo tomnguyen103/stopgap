@@ -108,11 +108,21 @@ export async function draftProtocolVersion(input: DraftProtocolInput): Promise<P
  * superseded in the same transaction, so there is never a moment with two approved versions
  * (or none) for the same protocol.
  */
+/**
+ * Result of an approval attempt. `changed` is false when the target was ALREADY approved (a
+ * no-op): the caller uses it to avoid recording an audit entry claiming an approval that did not
+ * happen (PHASE6 §6.1 — these console audits have no caseId, so appendAudit cannot dedupe them).
+ */
+export interface ApprovalResult {
+  row: ProtocolVersionRow;
+  changed: boolean;
+}
+
 export async function approveProtocolVersion(
   versionId: string,
   approvedBy: string,
   approvedByUserId?: string | null,
-): Promise<ProtocolVersionRow> {
+): Promise<ApprovalResult> {
   const db = getDb();
   return db.transaction(async (tx) => {
     const [target] = await tx
@@ -126,7 +136,7 @@ export async function approveProtocolVersion(
     // commit, leaving two approved versions — the exact state this function promises can
     // never exist.
     await tx.execute(sql`select id from ${protocols} where id = ${target.protocolId} for update`);
-    if (target.state === "approved") return target;
+    if (target.state === "approved") return { row: target, changed: false };
     if (target.state === "superseded") {
       throw new Error(`protocol version ${versionId} is superseded and cannot be approved`);
     }
@@ -143,6 +153,6 @@ export async function approveProtocolVersion(
       .returning();
 
     await tx.update(protocols).set({ updatedAt: new Date() }).where(eq(protocols.id, target.protocolId));
-    return approved!;
+    return { row: approved!, changed: true };
   });
 }

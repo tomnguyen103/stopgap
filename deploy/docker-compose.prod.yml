@@ -166,9 +166,16 @@ services:
 
   # ---- Keycloak (OIDC IdP, PHASE6 §6.1) ----------------------------------------------------
   # Production mode against a dedicated `keycloak` database in the shared Postgres, behind Caddy
-  # (which terminates TLS — hence KC_PROXY_HEADERS + KC_HTTP_ENABLED). `--import-realm` seeds the
-  # stopgap realm/client/demo-users on first boot. The Caddyfile must route ${AUTH_DOMAIN} to
-  # this service on :8080. Rotate KEYCLOAK_ADMIN_PASSWORD and the client secret from the seed.
+  # (which terminates TLS — hence KC_PROXY_HEADERS + KC_HTTP_ENABLED). The Caddyfile routes
+  # ${AUTH_DOMAIN} to this service on :8080.
+  #
+  # CWE-798: prod does NOT import the dev realm (deploy/keycloak/realm-stopgap.json) — it carries
+  # a FIXED confidential client secret and known demo passwords (incl. an admin). The operator
+  # provisions the prod realm, `stopgap-console` client, users, and a fresh client secret out of
+  # band (Keycloak admin console at ${AUTH_DOMAIN}, bootstrap creds below), then sets
+  # KEYCLOAK_CLIENT_SECRET in deploy/.env. Until then, auth is honestly unconfigured (blank
+  # secret → console runs read-only), same stance as the rest of the blank prod .env. See
+  # docs/auth.md "Provisioning the production realm".
   keycloak-db-init:
     image: postgres:16-alpine
     depends_on:
@@ -188,7 +195,9 @@ services:
         condition: service_healthy
       keycloak-db-init:
         condition: service_completed_successfully
-    command: ["start", "--import-realm"]
+    # No `--import-realm`: the prod realm is provisioned out of band, never seeded from the dev
+    # realm file (CWE-798). Nothing under deploy/keycloak is mounted here.
+    command: ["start"]
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
@@ -200,8 +209,6 @@ services:
       KC_HEALTH_ENABLED: "true"
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-    volumes:
-      - ./keycloak:/opt/keycloak/data/import:ro
     healthcheck:
       test:
         [

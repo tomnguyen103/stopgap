@@ -10,6 +10,15 @@
 	reverse_proxy console:3000
 }
 
+# OIDC IdP (Keycloak, PHASE6 §6.1). Public — it has its own login and manages the console's SSO,
+# so no basic-auth layer here (that would block the sign-in redirect). Keycloak runs with
+# KC_PROXY_HEADERS=xforwarded + KC_HOSTNAME=https://{$AUTH_DOMAIN}, so Caddy terminates TLS and
+# forwards the forwarded-proto/host headers it expects.
+{$AUTH_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy keycloak:8080
+}
+
 # Visitors can watch real durable workflows execute — behind basic auth, because the Temporal
 # UI can also terminate them.
 {$TEMPORAL_DOMAIN} {

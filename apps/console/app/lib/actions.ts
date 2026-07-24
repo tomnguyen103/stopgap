@@ -113,15 +113,19 @@ export async function approveProtocolVersionAction(versionId: unknown): Promise<
   assertMutationAllowed("Approving a protocol version");
   const principal = await requireRole("approve_protocol_version");
   const id = z.string().uuid().parse(versionId);
-  const approved = await approveProtocolVersion(id, principal.label, principal.userId ?? undefined);
-  await recordPrivilegedAudit(
-    principal,
-    "protocol.version_approved",
-    { versionId: id, version: approved.version, via: "director-approval" },
-    // Keyed by version id so it never collides with the workflow's own
-    // `protocol.version_approved.v<n>` entries (which are keyed by case run + version).
-    `protocol.version_approved.direct.${id}`,
-  );
+  const { row, changed } = await approveProtocolVersion(id, principal.label, principal.userId ?? undefined);
+  // Skip the audit entry when the version was already approved (no-op): recording it would put a
+  // second "approved" claim into the chain for an approval that did not happen.
+  if (changed) {
+    await recordPrivilegedAudit(
+      principal,
+      "protocol.version_approved",
+      { versionId: id, version: row.version, via: "director-approval" },
+      // Keyed by version id so it never collides with the workflow's own
+      // `protocol.version_approved.v<n>` entries (which are keyed by case run + version).
+      `protocol.version_approved.direct.${id}`,
+    );
+  }
   revalidatePath("/protocols");
 }
 
@@ -134,8 +138,10 @@ export async function assignRoleAction(userId: unknown, role: unknown): Promise<
   const principal = await requireRole("manage_users");
   const uid = userIdSchema.parse(userId);
   const r = roleSchema.parse(role);
-  await assignRole(uid, r);
-  await recordPrivilegedAudit(principal, "user.role_granted", { targetUserId: uid, role: r }, `user.role_granted.${uid}.${r}`);
+  // Only audit a real grant — assignRole is a no-op when the user already holds the role.
+  if (await assignRole(uid, r)) {
+    await recordPrivilegedAudit(principal, "user.role_granted", { targetUserId: uid, role: r }, `user.role_granted.${uid}.${r}`);
+  }
   revalidatePath("/admin/users");
 }
 
@@ -145,8 +151,10 @@ export async function revokeRoleAction(userId: unknown, role: unknown): Promise<
   const principal = await requireRole("manage_users");
   const uid = userIdSchema.parse(userId);
   const r = roleSchema.parse(role);
-  await revokeRole(uid, r);
-  await recordPrivilegedAudit(principal, "user.role_revoked", { targetUserId: uid, role: r }, `user.role_revoked.${uid}.${r}`);
+  // Only audit a real revoke — revokeRole is a no-op when the user never held the role.
+  if (await revokeRole(uid, r)) {
+    await recordPrivilegedAudit(principal, "user.role_revoked", { targetUserId: uid, role: r }, `user.role_revoked.${uid}.${r}`);
+  }
   revalidatePath("/admin/users");
 }
 
@@ -156,11 +164,12 @@ export async function setUserDisabledAction(userId: unknown, disabled: unknown):
   const principal = await requireRole("manage_users");
   const uid = userIdSchema.parse(userId);
   const flag = z.boolean().parse(disabled);
-  await setUserDisabled(uid, flag);
-  // eventKey matches the action label — "user.disabled" when disabling, "user.enabled" when
-  // re-enabling — instead of the previous contradictory "user.disabled…" label on the enable path.
-  const action = flag ? "user.disabled" : "user.enabled";
-  await recordPrivilegedAudit(principal, action, { targetUserId: uid }, `${action}.${uid}`);
+  // Only audit a real state flip — setUserDisabled is a no-op when the account is already in the
+  // requested state. eventKey matches the action label ("user.disabled"/"user.enabled").
+  if (await setUserDisabled(uid, flag)) {
+    const action = flag ? "user.disabled" : "user.enabled";
+    await recordPrivilegedAudit(principal, action, { targetUserId: uid }, `${action}.${uid}`);
+  }
   revalidatePath("/admin/users");
 }
 

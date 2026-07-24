@@ -78,6 +78,17 @@ export async function upsertUserByOidc(input: UpsertUserInput): Promise<UserRow>
   return existing;
 }
 
+/**
+ * The local user for an OIDC subject, if one exists — the sign-in gate reads this BEFORE the
+ * upsert so a disabled account (`disabledAt` set) can be denied instead of getting a fresh token
+ * with full roles (CWE-285). Returns undefined for a subject that has never signed in.
+ */
+export async function getUserByOidc(oidcSubject: string): Promise<UserRow | undefined> {
+  const db = getDb();
+  const [row] = await db.select().from(users).where(eq(users.oidcSubject, oidcSubject)).limit(1);
+  return row;
+}
+
 /** The roles a user currently holds, validated against the known set (a stray value is dropped). */
 export async function getUserRoles(userId: string): Promise<Role[]> {
   const db = getDb();
@@ -85,18 +96,29 @@ export async function getUserRoles(userId: string): Promise<Role[]> {
   return rows.map((r) => r.role).filter(isRole);
 }
 
-/** Grant a role. Idempotent: the `(userId, role)` unique index makes a re-grant a no-op. */
-export async function assignRole(userId: string, role: Role): Promise<void> {
+/**
+ * Grant a role. Idempotent: the `(userId, role)` unique index makes a re-grant a no-op. Returns
+ * whether a row was actually inserted (`false` = the user already held the role) so the caller
+ * can skip an audit entry that would otherwise claim a grant that never happened (PHASE6 §6.1).
+ */
+export async function assignRole(userId: string, role: Role): Promise<boolean> {
   const db = getDb();
-  await db.insert(userRoles).values({ userId, role }).onConflictDoNothing({
-    target: [userRoles.userId, userRoles.role],
-  });
+  const inserted = await db
+    .insert(userRoles)
+    .values({ userId, role })
+    .onConflictDoNothing({ target: [userRoles.userId, userRoles.role] })
+    .returning({ id: userRoles.id });
+  return inserted.length > 0;
 }
 
-/** Revoke a role. A no-op if the user never held it. */
-export async function revokeRole(userId: string, role: Role): Promise<void> {
+/** Revoke a role. Returns whether a row was actually deleted (`false` = the user never held it). */
+export async function revokeRole(userId: string, role: Role): Promise<boolean> {
   const db = getDb();
-  await db.delete(userRoles).where(and(eq(userRoles.userId, userId), eq(userRoles.role, role)));
+  const deleted = await db
+    .delete(userRoles)
+    .where(and(eq(userRoles.userId, userId), eq(userRoles.role, role)))
+    .returning({ id: userRoles.id });
+  return deleted.length > 0;
 }
 
 /** Active (non-disabled) users with their roles, for the admin management page. */
@@ -106,8 +128,18 @@ export async function listUsers(): Promise<(UserRow & { roles: Role[] })[]> {
   return Promise.all(rows.map(async (u) => ({ ...u, roles: await getUserRoles(u.id) })));
 }
 
-/** Soft-disable / re-enable an account without touching its audit provenance. */
-export async function setUserDisabled(userId: string, disabled: boolean): Promise<void> {
+/**
+ * Soft-disable / re-enable an account without touching its audit provenance. The WHERE clause
+ * only matches when the state actually flips (disable an enabled row, or enable a disabled one),
+ * so `returning()` is empty on a no-op and the boolean tells the caller whether anything changed
+ * — no audit entry for a toggle that did nothing (PHASE6 §6.1).
+ */
+export async function setUserDisabled(userId: string, disabled: boolean): Promise<boolean> {
   const db = getDb();
-  await db.update(users).set({ disabledAt: disabled ? new Date() : null }).where(eq(users.id, userId));
+  const changed = await db
+    .update(users)
+    .set({ disabledAt: disabled ? new Date() : null })
+    .where(and(eq(users.id, userId), disabled ? isNull(users.disabledAt) : isNotNull(users.disabledAt)))
+    .returning({ id: users.id });
+  return changed.length > 0;
 }

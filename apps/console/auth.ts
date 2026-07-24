@@ -2,6 +2,7 @@ import { isRole, type Role } from "@stopgap/core";
 import { getUserRoles, upsertUserByOidc } from "@stopgap/db";
 import NextAuth, { type NextAuthResult } from "next-auth";
 import { authConfig } from "./auth.config";
+import { isSignInAllowed } from "./app/lib/sign-in-guard";
 
 /**
  * Roles a caller holds come from EITHER source, unioned: locally-granted roles in `user_roles`
@@ -31,6 +32,11 @@ function realmRolesFrom(profile: unknown): Role[] {
 const nextAuth = NextAuth({
   ...authConfig,
   callbacks: {
+    // Admission gate (CWE-285): runs before jwt, so a disabled account is turned away instead of
+    // being upserted and handed a token with full roles.
+    async signIn({ profile }) {
+      return isSignInAllowed(profile?.sub);
+    },
     async jwt({ token, account, profile }) {
       // `account` is present only on the initial sign-in exchange. Upsert then, so we hit the DB
       // once per login rather than on every token refresh.

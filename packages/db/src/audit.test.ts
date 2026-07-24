@@ -20,6 +20,7 @@ interface EntryFields {
   ts?: string;
   runId?: string;
   eventKey?: string;
+  actorUserId?: string;
 }
 
 const TS = "2026-07-24T00:00:00.000Z";
@@ -50,6 +51,7 @@ function buildChain(entries: (EntryFields & { scheme: "v1" | "v2" })[], hmacKey?
       ts,
       runId,
       eventKey,
+      actorUserId: e.actorUserId ?? null,
     });
     prevHash = hash;
   });
@@ -218,25 +220,38 @@ describe("hashed payload is stable (PHASE6 §6.1 audit-chain-unchanged guarantee
     expect(hash).toBe("60965ae0cf4816456840a1e06bad15b7e59d0375e0816bd72d0e4e6f5180eec4");
   });
 
-  it("computeAuditHash has no actor-user-id input — the FK cannot affect the hash", () => {
-    // The verifier's row shape (`VerifiableRow`) carries the hashed fields only; there is no
-    // `actorUserId` on it, so a chain verifies identically whether or not the FK is populated.
-    const base: VerifiableRow[] = [
-      {
-        id: 1,
-        caseId: "c1",
-        actor: "system",
-        action: "case.detected",
-        detail: {},
-        prevHash: GENESIS_HASH,
-        hash: computeAuditHash("v1", GENESIS_HASH, { caseId: "c1", actor: "system", action: "case.detected", detail: {} }),
-        scheme: "v1",
-        ts: TS,
-        runId: "run-1",
-        eventKey: "case.detected",
-      },
-    ];
-    expect(verifyChainRows(base)).toEqual({ ok: true });
+  it("v1 ignores actorUserId — changing it does not break a v1 chain (legacy unhashed attribution)", () => {
+    const rows = buildChain(sample("v1"));
+    // v1's narrow payload predates the FK, so mutating it leaves the byte-identical hash valid.
+    rows[1]!.actorUserId = "99999999-9999-9999-9999-999999999999";
+    expect(verifyChainRows(rows)).toEqual({ ok: true });
+  });
+});
+
+describe("v2 binds actorUserId into the HMAC (PHASE6 §6.1, CWE-353)", () => {
+  it("accepts a v2 chain carrying actorUserId", () => {
+    const rows = buildChain(
+      [
+        { scheme: "v2", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" },
+      ],
+      KEY,
+    );
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("fails a v2 row whose actorUserId was reattributed without recomputing the hash", () => {
+    const rows = buildChain(
+      [
+        { scheme: "v2", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" },
+      ],
+      KEY,
+    );
+    // A DB writer rewrites the recorded principal — the HMAC no longer matches.
+    rows[0]!.actorUserId = "u-attacker";
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(1);
+    expect(result.reason).toBe("hash-mismatch");
   });
 });
 

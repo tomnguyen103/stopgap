@@ -60,6 +60,13 @@ interface HashablePayload {
   runId?: string;
   /** v2-only: hashed so the idempotency metadata cannot be rewritten. Ignored by v1. */
   eventKey?: string;
+  /**
+   * The authenticated principal FK (PHASE6 §6.1). v2-only: folded into the HMAC so a DB writer
+   * cannot rewrite the recorded identity while keeping the chain valid (CWE-353). Ignored by v1,
+   * whose narrow payload predates it — legacy v1 attribution stays unhashed by design, which is
+   * one of the weaknesses v2 closes.
+   */
+  actorUserId?: string;
 }
 
 /**
@@ -70,10 +77,11 @@ interface HashablePayload {
  * `ts`/`runId`/`eventKey`; that is a known weakness of `v1` (a DB-write attacker could
  * backdate `ts`), which is exactly why `v2` exists and must not be weakened to match `v1`.
  *
- * `v2` HMACs a WIDER payload under `AUDIT_HMAC_KEY` — the same fields PLUS `ts`, `runId`, and
- * `eventKey` — so an attacker with only DB write access can neither recompute a valid hash
- * (the key is not in the database) NOR silently backdate the timestamp or rewrite the
- * idempotency metadata of a keyed row (CWE-354).
+ * `v2` HMACs a WIDER payload under `AUDIT_HMAC_KEY` — the same fields PLUS `ts`, `runId`,
+ * `eventKey`, and `actorUserId` — so an attacker with only DB write access can neither recompute
+ * a valid hash (the key is not in the database) NOR silently backdate the timestamp, rewrite the
+ * idempotency metadata, or reattribute the authenticated principal of a keyed row (CWE-354,
+ * CWE-353).
  *
  * Exported so tests (and any external verifier) can construct a known-good chain without a
  * live database; the byte layout is part of the audit contract.
@@ -98,6 +106,7 @@ export function computeAuditHash(
       ts: e.ts ?? null,
       runId: e.runId ?? null,
       eventKey: e.eventKey ?? null,
+      actorUserId: e.actorUserId ?? null,
     });
     return createHmac("sha256", hmacKey).update(prevHash).update(payload).digest("hex");
   }
@@ -162,7 +171,17 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
     const hash = computeAuditHash(
       scheme,
       prevHash,
-      { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId, ts: ts.toISOString(), runId, eventKey },
+      {
+        actor: entry.actor,
+        action: entry.action,
+        detail,
+        caseId: entry.caseId,
+        ts: ts.toISOString(),
+        runId,
+        eventKey,
+        // v2 binds the principal FK into the HMAC (CWE-353); v1 ignores it.
+        actorUserId: entry.actorUserId,
+      },
       hmacKey,
     );
     await tx.insert(auditLog).values({
@@ -200,6 +219,8 @@ export interface VerifiableRow {
   runId: string;
   /** Hashed for v2 rows. Ignored for v1. */
   eventKey: string;
+  /** The authenticated principal FK. Hashed for v2 rows (CWE-353); ignored for v1. */
+  actorUserId: string | null;
 }
 
 /** Normalize a timestamp to the ISO string the writer hashed. */
@@ -264,6 +285,7 @@ export function verifyChainRows(rows: VerifiableRow[], hmacKey?: string): ChainV
         ts: tsToIso(row.ts),
         runId: row.runId,
         eventKey: row.eventKey,
+        actorUserId: row.actorUserId ?? undefined,
       },
       hmacKey,
     );
@@ -290,6 +312,7 @@ export async function verifyAuditChain(db: Db): Promise<ChainVerification> {
       ts: auditLog.ts,
       runId: auditLog.runId,
       eventKey: auditLog.eventKey,
+      actorUserId: auditLog.actorUserId,
     })
     .from(auditLog)
     .orderBy(auditLog.id);

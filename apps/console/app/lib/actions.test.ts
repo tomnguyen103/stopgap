@@ -16,7 +16,7 @@ const resolvePrincipal = vi.fn<() => Promise<Principal>>();
 vi.mock("./principal", () => ({ resolvePrincipal: () => resolvePrincipal() }));
 
 // DB side effects — spies so we can assert they never fire on an unauthorized call.
-const approveProtocolVersion = vi.fn(async (..._a: unknown[]) => ({ version: 3 }));
+const approveProtocolVersion = vi.fn(async (..._a: unknown[]) => ({ row: { version: 3 }, changed: true }));
 const appendAudit = vi.fn(async (..._a: unknown[]) => ({ hash: "h" }));
 vi.mock("@stopgap/db", () => ({
   appendAudit: (...a: unknown[]) => appendAudit(...a),
@@ -79,6 +79,7 @@ describe("approveProtocolVersionAction (server-enforced authorization)", () => {
 
   it("lets a pharmacy_director through, performing the approval and the audit append", async () => {
     resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
+    approveProtocolVersion.mockResolvedValueOnce({ row: { version: 3 }, changed: true });
     await approveProtocolVersionAction(VERSION_ID);
     expect(approveProtocolVersion).toHaveBeenCalledTimes(1);
     expect(approveProtocolVersion).toHaveBeenCalledWith(
@@ -87,5 +88,13 @@ describe("approveProtocolVersionAction (server-enforced authorization)", () => {
       "22222222-2222-2222-2222-222222222222",
     );
     expect(appendAudit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT audit a no-op approval (version already approved → changed:false)", async () => {
+    resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
+    approveProtocolVersion.mockResolvedValueOnce({ row: { version: 3 }, changed: false });
+    await approveProtocolVersionAction(VERSION_ID);
+    expect(approveProtocolVersion).toHaveBeenCalledTimes(1);
+    expect(appendAudit).not.toHaveBeenCalled();
   });
 });

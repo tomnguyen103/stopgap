@@ -40,6 +40,7 @@ export {
 } from "./protocols.js";
 export {
   upsertUserByOidc,
+  getUserByOidc,
   getUserRoles,
   getSyntheticUser,
   syntheticUserIdForLabel,
