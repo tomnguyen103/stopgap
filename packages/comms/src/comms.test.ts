@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetEnvCache } from "@stopgap/core/env";
 import { sendEhrFlag, sendEmail } from "./index.js";
 
@@ -9,9 +9,19 @@ const message = {
   to: ["pharmacy@example.test"],
 };
 
+beforeEach(() => {
+  // A developer's real distribution list in the ambient environment would otherwise turn the
+  // "no recipients" case into a delivery and quietly void the assertion.
+  delete process.env.COMMS_PHARMACY_TO;
+  delete process.env.COMMS_DEMO_INBOX;
+  delete process.env.RESEND_API_KEY;
+  resetEnvCache();
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.RESEND_API_KEY;
+  delete process.env.COMMS_PHARMACY_TO;
   delete process.env.COMMS_DEMO_INBOX;
   resetEnvCache();
 });
@@ -51,7 +61,18 @@ describe("sendEmail", () => {
     expect(headers["idempotency-key"]).toBe(message.idempotencyKey);
   });
 
-  it("falls back to the demo inbox when the caller has no explicit recipients", async () => {
+  it("uses the configured distribution list when the caller passes no explicit recipients", async () => {
+    process.env.RESEND_API_KEY = "re_test";
+    process.env.COMMS_PHARMACY_TO = "one@example.test, two@example.test";
+    resetEnvCache();
+    const listMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    vi.stubGlobal("fetch", listMock);
+    await sendEmail({ ...message, to: [] });
+    const listBody = JSON.parse((listMock.mock.calls[0]?.[1] as { body: string }).body) as { to: string[] };
+    expect(listBody.to).toEqual(["one@example.test", "two@example.test"]);
+  });
+
+  it("falls back to the demo inbox when nothing else is configured", async () => {
     process.env.RESEND_API_KEY = "re_test";
     process.env.COMMS_DEMO_INBOX = "demo@example.test";
     resetEnvCache();

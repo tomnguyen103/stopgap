@@ -47,12 +47,26 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         </dl>
       </div>
 
-      <ReviewPanel
-        workflowId={c.workflowId}
-        status={live?.status ?? c.status}
-        draft={live?.draft ?? ""}
-        alternatives={live?.alternatives ?? []}
-      />
+      {live ? (
+        <ReviewPanel
+          key={live.draft ?? ""}
+          workflowId={c.workflowId}
+          status={live.status}
+          draft={live.draft ?? ""}
+          alternatives={live.alternatives}
+        />
+      ) : c.status === "awaiting_review" || c.status === "exception" ? (
+        // Without live state there is no draft to read, and approving text you cannot see is
+        // worse than waiting. Say why the gate is missing instead of rendering an empty one.
+        <div className="card">
+          <h2>Review unavailable</h2>
+          <p className="sub">
+            This case is {c.status.replace("_", " ")}, but the workflow could not be reached, so
+            the drafted protocol cannot be shown. Start the worker (<code>pnpm worker</code>)
+            and reload — decisions are taken against the live draft, never a stale copy.
+          </p>
+        </div>
+      ) : null}
 
       {live?.protocolSource ? (
         <div className="card">
