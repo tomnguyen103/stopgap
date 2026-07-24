@@ -1,8 +1,10 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { Db } from "./client.js";
 import {
   acknowledgments,
   escalationPolicies,
+  userRoles,
+  users,
   type AcknowledgmentRow,
   type EscalationPolicyRow,
   type EscalationStep,
@@ -53,6 +55,23 @@ export async function upsertEscalationPolicy(
     .returning();
   if (!row) throw new Error(`upsertEscalationPolicy: no row returned for ${severity}`);
   return row;
+}
+
+/**
+ * The email addresses to page for one ladder tier. A step's `notify` is a role name
+ * (`pharmacist`, `pharmacy_director`, `admin` in the seeded ladders), so the audience is whoever
+ * currently holds that role — disabled accounts and role holders with no email on file are
+ * excluded, because neither can be paged. An empty result is a real answer ("nobody holds this
+ * role"), which the caller records as a non-delivery rather than silently paging someone else.
+ */
+export async function listRoleRecipients(db: Db, role: string): Promise<string[]> {
+  const rows = await db
+    .select({ email: users.email })
+    .from(userRoles)
+    .innerJoin(users, eq(users.id, userRoles.userId))
+    .where(and(eq(userRoles.role, role), isNull(users.disabledAt), isNotNull(users.email)))
+    .orderBy(asc(users.email));
+  return [...new Set(rows.map((r) => r.email).filter((e): e is string => e !== null))];
 }
 
 /**

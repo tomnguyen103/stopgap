@@ -39,7 +39,7 @@ export async function getOpsMetrics(): Promise<OpsMetrics> {
   }>(sql`
     select
       count(*) filter (
-        where opened_at >= date_trunc('day', now() at time zone 'utc')
+        where (opened_at at time zone 'utc') >= date_trunc('day', now() at time zone 'utc')
       ) as opened_today,
       count(*) filter (where status = 'exception') as exception_depth,
       count(*) filter (

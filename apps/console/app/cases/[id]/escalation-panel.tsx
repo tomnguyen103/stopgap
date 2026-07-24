@@ -18,6 +18,15 @@ export interface AckRow {
   ackedByLabel: string;
 }
 
+/**
+ * UTC, not locale: this is a client component, so a locale/timezone-dependent string would render
+ * one way on the server and another in the browser and trip React's hydration check. Matches the
+ * audit page's format.
+ */
+function formatUtc(ts: string): string {
+  return new Date(ts).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+}
+
 export function EscalationPanel({
   workflowId,
   escalationStep,
@@ -52,12 +61,12 @@ export function EscalationPanel({
       <ol className="audit">
         {escalatedAt.map((ts, i) => (
           <li key={`notified-${String(i)}`}>
-            <b>tier {i} notified</b> · {new Date(ts).toLocaleString()}
+            <b>tier {i} notified</b> · {formatUtc(ts)}
           </li>
         ))}
         {acks.map((a) => (
           <li key={`ack-${String(a.step)}`}>
-            <b>acknowledged</b> · tier {a.step} · {a.ackedByLabel} · {new Date(a.ackAt).toLocaleString()}
+            <b>acknowledged</b> · tier {a.step} · {a.ackedByLabel} · {formatUtc(a.ackAt)}
           </li>
         ))}
       </ol>

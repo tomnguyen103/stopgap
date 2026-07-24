@@ -70,7 +70,9 @@ export async function getCaseDetail(
         .from(schema.users)
         .where(inArray(schema.users.id, userIds))
     : [];
-  const labelById = new Map(userRows.map((u) => [u.id, u.email ?? u.displayName ?? u.id]));
+  // Display name first: the timeline is rendered to every console viewer of the case, so a
+  // human-readable label is preferable to spreading email addresses across case pages.
+  const labelById = new Map(userRows.map((u) => [u.id, u.displayName ?? u.email ?? u.id]));
   const acks: CaseAck[] = ackRows.map((a) => ({
     step: a.step,
     ackAt: a.ackAt,

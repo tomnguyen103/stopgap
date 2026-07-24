@@ -72,18 +72,24 @@ export interface CaseState {
   acked: boolean;
   /** The acknowledging user's `users.id` (never a claimed string). */
   ackedBy?: string;
+  /**
+   * Why the last acknowledgment failed to persist. Set when `recordAck` exhausted its retries, at
+   * which point `acked` rolls back to false: an ack with no `acknowledgments` row and no
+   * `case.acknowledged` audit entry did not happen, and the case is still unacknowledged.
+   */
+  ackError?: string;
 }
 
 /**
  * A human acknowledgment of an escalating case (PHASE6 §6.3), carried by the `acknowledgeCase`
  * signal from the console server action. `userId` is the authenticated `users.id`; `label` is the
- * human-readable actor for the audit chain's text field; `step` optionally pins the tier the ack
- * answers (defaults to the tier currently reached).
+ * human-readable actor for the audit chain's text field. The tier is NOT carried here: the
+ * workflow derives it from its own escalation state, so a caller cannot record an ack against a
+ * tier that was never reached.
  */
 export interface CaseAcknowledgment {
   userId: string;
   label: string;
-  step?: number;
 }
 
 /** One escalation ladder tier: page `notify` `afterMinutes` after escalation started. */

@@ -105,17 +105,21 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // The durable Temporal timer between tiers is the whole point: it survives a worker restart, so
   // an escalation fires on schedule even if the process that scheduled it has since died.
   let pendingAck: { userId: string; label: string; step: number } | undefined;
+  let escalationStarted = false;
   setHandler(acknowledgeSignal, (ack) => {
+    // Nothing to acknowledge until the ladder is running. Without this an early signal would set
+    // `state.acked` and a later critical/high case would exit the ladder before tier 0 ever paged
+    // anyone — an ack for a page that never happened.
+    if (!escalationStarted) return;
     if (state.acked) return; // first ack wins; a second is a no-op, not a second row.
     state.acked = true;
     state.ackedBy = ack.userId;
     // Hand the ack to the durable recorder below; the handler itself stays side-effect-free (no
-    // activities). Resolve the tier here: an explicit step, else the highest tier reached so far —
-    // so a post-exhaustion ack pins the final tier rather than tier 0.
-    pendingAck = { userId: ack.userId, label: ack.label, step: ack.step ?? state.escalationStep ?? 0 };
+    // activities). The tier comes from WORKFLOW state, not the payload: the caller cannot record
+    // an ack against a tier that was never reached. `escalationStep` is the highest tier fired so
+    // far, so a post-exhaustion ack pins the final tier, and an ack before tier 0 fires pins 0.
+    pendingAck = { userId: ack.userId, label: ack.label, step: state.escalationStep ?? 0 };
   });
-
-  let escalationStarted = false;
 
   /**
    * Persist an acknowledgment durably (the `acknowledgments` row + a `case.acknowledged` audit
@@ -127,9 +131,25 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
    * committed insert is a no-op.
    */
   async function runAckRecorder(): Promise<void> {
-    await condition(() => pendingAck !== undefined);
-    const ack = pendingAck!;
-    await acts.recordAck({ key, userId: ack.userId, label: ack.label, step: ack.step });
+    for (;;) {
+      await condition(() => pendingAck !== undefined);
+      const ack = pendingAck!;
+      try {
+        await acts.recordAck({ key, userId: ack.userId, label: ack.label, step: ack.step });
+        state.ackError = undefined;
+        return;
+      } catch (err) {
+        // Persistence gave up after every activity retry: the `acknowledgments` row and the
+        // `case.acknowledged` audit entry do not exist, so the case is NOT acknowledged. Roll the
+        // flag back rather than leave the console and ops-metrics asserting an ack with no durable
+        // record — an unacknowledged critical case must keep showing as one — and wait for another
+        // ack, which the cleared `acked` flag now lets the signal handler accept.
+        state.acked = false;
+        state.ackedBy = undefined;
+        state.ackError = err instanceof Error ? err.message : String(err);
+        pendingAck = undefined;
+      }
+    }
   }
 
   async function runEscalationLadder(severity: string): Promise<void> {
@@ -147,14 +167,21 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       if (state.acked) return;
       // A failed send records non-delivery inside the activity and STILL advances the ladder —
       // the existing comms stance: "we tried to page the director" must be falsifiable, and a
-      // channel being down cannot pin escalation at one tier forever.
-      await acts.sendEscalationNotification({
-        key,
-        severity,
-        stepIndex: i,
-        notify: step.notify,
-        afterMinutes: step.afterMinutes,
-      });
+      // channel being down cannot pin escalation at one tier forever. The try/catch contains a
+      // tier whose activity REJECTS (its own non-delivery write failed, say) to that tier: without
+      // it the rejection unwinds the whole ladder and the remaining tiers — director, admin — are
+      // silently never paged.
+      try {
+        await acts.sendEscalationNotification({
+          key,
+          severity,
+          stepIndex: i,
+          notify: step.notify,
+          afterMinutes: step.afterMinutes,
+        });
+      } catch {
+        // Keep climbing: the next tier is a different audience and may well be reachable.
+      }
       state.escalationStep = i;
       state.escalatedAt = [...state.escalatedAt, new Date().toISOString()];
       elapsedMin = step.afterMinutes;

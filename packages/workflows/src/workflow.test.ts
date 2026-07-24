@@ -369,6 +369,27 @@ describe("escalation ladder (time-skipped)", () => {
     return { ...heparin(), genericName: `Critical ${key}`, key };
   }
 
+  it("ignores an acknowledgment for a case whose ladder never started", async () => {
+    await withWorker(async () => {
+      // Moderate severity (single NDC, no "critical" in the name): no ladder, so nobody has been
+      // paged. An ack accepted here would mark the case acknowledged for a page that never
+      // happened — and on a case that later escalates, would let it skip the ladder entirely.
+      const key = "moderate-preack";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: { ...heparin(), genericName: `Moderate ${key}`, key, ndcs: ["1"] }, sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-preack-${Date.now()}`,
+      });
+      await env.sleep("5 minutes");
+      await handle.signal(acknowledgeSignal, { userId: "user-9", label: "pharmacist-9" });
+      await env.sleep("5 minutes");
+      const st = await handle.query(stateQuery);
+      expect(st.acked).toBe(false);
+      expect(st.ackedBy).toBeUndefined();
+      expect(recordedAcks.filter((a) => a.key === key)).toHaveLength(0);
+    });
+  }, 60_000);
+
   it("escalates through every tier when no one acknowledges", async () => {
     await withWorker(async () => {
       const key = "critical-noack";
@@ -404,7 +425,7 @@ describe("escalation ladder (time-skipped)", () => {
       // Tier 0 fires immediately; ack before tier 1 (30 min) would fire.
       await env.sleep("1 minute");
       expect((await handle.query(stateQuery)).escalationStep).toBe(0);
-      await handle.signal(acknowledgeSignal, { userId: "user-1", label: "pharmacist-1", step: 0 });
+      await handle.signal(acknowledgeSignal, { userId: "user-1", label: "pharmacist-1" });
       // Long past every remaining tier: none of them may fire now.
       await env.sleep("90 minutes");
       const st = await handle.query(stateQuery);

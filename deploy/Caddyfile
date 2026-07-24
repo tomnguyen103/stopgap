@@ -38,3 +38,15 @@
 	}
 	reverse_proxy langfuse-web:3000
 }
+
+# Grafana (PHASE6 §6.4). The ops and business dashboards expose case volumes and queue depth, and
+# Grafana's own admin login is only as good as GRAFANA_ADMIN_PASSWORD — so the same basic-auth
+# layer as the Temporal UI sits in front. Without this route the provisioned dashboards are
+# unreachable in the deployed stack: no container publishes a port except Caddy.
+{$OPS_DOMAIN} {
+	encode zstd gzip
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+	reverse_proxy grafana:3000
+}

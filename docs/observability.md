@@ -11,10 +11,16 @@ whole stack come up with `docker compose up` and no secrets.
 - **Worker** — a tiny HTTP sidecar serving `/metrics`, `/healthz`, `/readyz` on `:9464`. Dev:
   host `http://localhost:9464`. Prod: compose service `worker` on `:9464`.
 - **Grafana** — provisioned datasource + two dashboards (Ops, Business KPI), no manual setup.
-- **Alertmanager** — receives fired rules; ships with a silent null receiver (wire Slack /
-  PagerDuty / email for a real deploy — see `deploy/alertmanager/alertmanager.yml`).
+- **Alertmanager** — receives fired rules. Dev (`deploy/alertmanager/alertmanager.yml`) uses a
+  silent null receiver so `docker compose up` needs no secrets. Prod
+  (`deploy/alertmanager/alertmanager.prod.yml`) routes to an on-call Slack channel and reads the
+  webhook from the file named by `ALERTMANAGER_SLACK_WEBHOOK_FILE`; compose refuses to start
+  without it, so a deployment cannot come up with alerting that pages nobody.
 
-Dev ports: Grafana `http://localhost:3002`, Prometheus `:9090`, Alertmanager `:9093`.
+Dev ports bind to loopback only — Grafana `http://127.0.0.1:3002`, Alertmanager `127.0.0.1:9093`
+(both are unauthenticated or default-credentialed, and Alertmanager can silence alerts);
+Prometheus `:9090`. In production nothing publishes a port: Grafana is reached at
+`https://$OPS_DOMAIN` through Caddy behind basic auth, and Alertmanager stays internal-only.
 
 ## Metrics
 
@@ -124,11 +130,11 @@ critical cases, so one lagging case fires it.
 
 Bring the stack up with `docker compose up`. Then:
 
-- **Dashboards render.** Open Grafana at `http://localhost:3002` (dev). Both provisioned
+- **Dashboards render.** Open Grafana at `http://127.0.0.1:3002` (dev). Both provisioned
   dashboards appear under the **Stopgap** folder: **Ops** (feed freshness, worker liveness,
   exception depth, workflow failures, critical-unacked, comms) and **Business KPI** (spend vs
   cap, ack latency, cases opened, under-escalation, §14 SLO reference). Prometheus is at
-  `:9090`, Alertmanager at `:9093`.
+  `:9090`, Alertmanager at `127.0.0.1:9093`.
 - **FeedStale fires.** Stop the feed poller (or leave a source unpolled) and wait past 45 min of
   staleness + the 5m `for:` — `stopgap_feed_staleness_seconds` climbs on the Ops dashboard and
   `FeedStale` moves to firing in Prometheus → Alerts.

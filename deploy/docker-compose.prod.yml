@@ -369,6 +369,7 @@ services:
       TEMPORAL_DOMAIN: ${TEMPORAL_DOMAIN}
       TRACES_DOMAIN: ${TRACES_DOMAIN}
       AUTH_DOMAIN: ${AUTH_DOMAIN}
+      OPS_DOMAIN: ${OPS_DOMAIN}
       BASIC_AUTH_USER: ${BASIC_AUTH_USER}
       BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
     volumes:
@@ -380,8 +381,8 @@ services:
   # Prometheus scrapes the compose-internal console (:3000/api/metrics) and worker (:9464/metrics)
   # via prometheus.prod.yml; Grafana auto-provisions the datasource + Ops/Business dashboards;
   # Alertmanager holds the alert routes. No published ports — like the console/Temporal-UI/Langfuse
-  # they sit on the internal network; a real deployment routes Grafana through Caddy behind
-  # basic-auth (add an ${OPS_DOMAIN} block to the Caddyfile) rather than exposing it directly.
+  # they sit on the internal network; Grafana is reached through Caddy at ${OPS_DOMAIN} behind the
+  # same basic-auth layer as the Temporal UI, never by publishing its port.
   prometheus:
     image: prom/prometheus:v2.55.1
     restart: unless-stopped
@@ -396,7 +397,11 @@ services:
     restart: unless-stopped
     command: ["--config.file=/etc/alertmanager/alertmanager.yml"]
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      # The PROD config, not the silent dev one, and the on-call webhook as a mounted secret.
+      # `:?` on the path: a deploy that never configured a receiver fails to start rather than
+      # running with alerting that pages nobody.
+      - ./alertmanager/alertmanager.prod.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ${ALERTMANAGER_SLACK_WEBHOOK_FILE:?set ALERTMANAGER_SLACK_WEBHOOK_FILE to a file holding the on-call Slack webhook}:/run/secrets/alertmanager_slack_webhook:ro
 
   grafana:
     image: grafana/grafana:11.3.0

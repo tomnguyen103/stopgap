@@ -96,9 +96,10 @@ const EnvSchema = z.object({
    * Port for the worker's HTTP sidecar (PHASE6 §6.4): serves `/healthz`, `/readyz` (DB + Temporal),
    * and `/metrics` (Prometheus) so the worker — which has no web surface of its own — is scrapeable
    * and health-checkable. Defaults to 9464 (a commonly-unused exporter port); the compose
-   * healthcheck and Prometheus scrape target both point here.
+   * healthcheck and Prometheus scrape target both point here. Capped at 65535: a typo above the
+   * TCP range would otherwise pass validation and kill the worker at bind time.
    */
-  WORKER_HTTP_PORT: z.coerce.number().int().positive().default(9464),
+  WORKER_HTTP_PORT: z.coerce.number().int().positive().max(65535).default(9464),
 
   /**
    * OIDC SSO / RBAC (PHASE6 §6.1). Every field defaults so the local gate and the public demo

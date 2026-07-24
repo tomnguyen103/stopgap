@@ -58,6 +58,7 @@ export {
   getEscalationPolicy,
   listEscalationPolicies,
   upsertEscalationPolicy,
+  listRoleRecipients,
   recordAcknowledgment,
   listAcknowledgments,
 } from "./escalation.js";

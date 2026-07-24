@@ -18,6 +18,9 @@ import {
   stateQuery,
 } from "./workflows.js";
 
+/** Deadline for the single readiness RPC — `/readyz` must answer, not hang. */
+const READINESS_RPC_TIMEOUT_MS = 5_000;
+
 /** Open a Temporal client against the configured address/namespace. */
 export async function makeClient(): Promise<{ client: Client; connection: Connection }> {
   const env = getEnv();
@@ -127,12 +130,18 @@ export async function acknowledgeCase(
  * Is Temporal reachable (PHASE6 §6.4 readiness)? Connects and asks for cluster system info, then
  * always closes the connection. Returns false instead of throwing so `/readyz` can report which
  * dependency is down rather than 500-ing — honest "not ready", never a faked healthy.
+ *
+ * The RPC carries its own deadline: `Connection.connect()` bounds the *connect*, but a server that
+ * accepts the connection and then wedges would leave `/readyz` hanging instead of answering
+ * `ready: false`.
  */
 export async function checkTemporal(): Promise<boolean> {
   try {
     const { connection } = await makeClient();
     try {
-      await connection.workflowService.getSystemInfo({});
+      await connection.withDeadline(Date.now() + READINESS_RPC_TIMEOUT_MS, () =>
+        connection.workflowService.getSystemInfo({}),
+      );
       return true;
     } finally {
       await connection.close();

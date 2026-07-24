@@ -15,6 +15,7 @@ import {
   recordAcknowledgment,
   syntheticUserIdForLabel,
   listOpenMonitoringCases,
+  listRoleRecipients,
   recordFeedRecords,
   resetFeedMiss,
   updateCaseStatus,
@@ -291,6 +292,12 @@ export async function getEscalationPolicy(
  * user (actorUserId = system), never a human. A non-delivery (no recipients, transport down) is
  * recorded honestly and the ladder still advances — the same falsifiability stance as `sendComms`.
  * Idempotent on the case + run + step so a Temporal activity retry cannot double-page a tier.
+ *
+ * `notify` names a ROLE, and the tier's audience is whoever holds it — otherwise every tier would
+ * land in the same pharmacy inbox and the ladder would change only its timing, not who is paged.
+ * The resolved addresses go into the audit detail so "we tried to page the director" is checkable
+ * against a concrete list, and a role nobody holds is a recorded non-delivery, not a silent
+ * fallback to the pharmacy list.
  */
 export async function sendEscalationNotification(input: {
   key: string;
@@ -302,15 +309,19 @@ export async function sendEscalationNotification(input: {
   const db = getDb();
   const workflowId = workflowIdForKey(input.key);
   const row = await getCaseByWorkflowId(db, workflowId);
-  const result = await sendEmail({
-    idempotencyKey: `${workflowId}:${currentRunId() ?? "no-run"}:escalation:${String(input.stepIndex)}`,
-    subject: `Escalation (${input.severity}) — ${input.key}: notify ${input.notify}`,
-    body:
-      `Shortage case ${input.key} (severity ${input.severity}) is unacknowledged ` +
-      `${String(input.afterMinutes)} minutes after escalation began. Escalating to ${input.notify}. ` +
-      `Acknowledge in the console to stop the ladder.`,
-    to: [],
-  });
+  const recipients = await listRoleRecipients(db, input.notify);
+  const result =
+    recipients.length > 0
+      ? await sendEmail({
+          idempotencyKey: `${workflowId}:${currentRunId() ?? "no-run"}:escalation:${String(input.stepIndex)}`,
+          subject: `Escalation (${input.severity}) — ${input.key}: notify ${input.notify}`,
+          body:
+            `Shortage case ${input.key} (severity ${input.severity}) is unacknowledged ` +
+            `${String(input.afterMinutes)} minutes after escalation began. Escalating to ${input.notify}. ` +
+            `Acknowledge in the console to stop the ladder.`,
+          to: recipients,
+        })
+      : { channel: "email" as const, delivered: false, reason: `no user holds role ${input.notify}` };
   incrementCounter(
     result.delivered ? "stopgap_comms_delivered_total" : "stopgap_comms_nondelivered_total",
     { channel: "escalation" },
@@ -324,6 +335,7 @@ export async function sendEscalationNotification(input: {
       severity: input.severity,
       step: input.stepIndex,
       notify: input.notify,
+      recipients,
       afterMinutes: input.afterMinutes,
       delivered: result.delivered,
       reason: result.reason,
