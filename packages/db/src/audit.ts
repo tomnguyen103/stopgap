@@ -79,6 +79,10 @@ export function computeAuditHash(
   if (scheme === "v2") {
     if (!hmacKey) throw new Error("computeAuditHash: v2 scheme requires an HMAC key");
     const payload = canonical({
+      // Bind the scheme literal into the keyed payload so relabeling a `v2` row to any other
+      // scheme also breaks its hash (hash-mismatch), on top of the monotonic-boundary check
+      // in `verifyChainRows` — defence in depth against a DB writer editing `scheme`.
+      scheme: "v2",
       caseId: e.caseId ?? null,
       actor: e.actor,
       action: e.action,
@@ -197,7 +201,7 @@ export interface ChainVerification {
   /** Id of the first row whose link fails, if any. */
   brokenAtId?: number;
   /** Why it failed. */
-  reason?: "prev-hash-mismatch" | "hash-mismatch" | "missing-hmac-key" | "scheme-downgrade";
+  reason?: "prev-hash-mismatch" | "hash-mismatch" | "missing-hmac-key" | "scheme-downgrade" | "unknown-scheme";
 }
 
 /**
@@ -221,7 +225,13 @@ export function verifyChainRows(rows: VerifiableRow[], hmacKey?: string): ChainV
   let prevHash = GENESIS_HASH;
   let seenV2 = false;
   for (const row of rows) {
-    const scheme: AuditScheme = row.scheme === "v2" ? "v2" : "v1";
+    // Reject an unrecognized scheme outright rather than silently coercing it to `v1`: a
+    // DB writer must not be able to smuggle a tampered row past verification by stamping it
+    // with a scheme the verifier does not know how to check.
+    if (row.scheme !== "v1" && row.scheme !== "v2") {
+      return { ok: false, brokenAtId: row.id, reason: "unknown-scheme" };
+    }
+    const scheme: AuditScheme = row.scheme;
     if (scheme === "v1" && seenV2) {
       return { ok: false, brokenAtId: row.id, reason: "scheme-downgrade" };
     }

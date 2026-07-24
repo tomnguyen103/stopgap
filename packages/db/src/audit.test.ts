@@ -93,6 +93,15 @@ describe("verifyChainRows", () => {
     expect(result.brokenAtId).toBe(1);
   });
 
+  it("rejects an unrecognized scheme instead of coercing it to v1 (unknown-scheme)", () => {
+    const rows = buildChain(sample("v1"));
+    rows[1]!.scheme = "v9";
+    const result = verifyChainRows(rows);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(2);
+    expect(result.reason).toBe("unknown-scheme");
+  });
+
   it("names the row when `detail` is tampered", () => {
     const rows = buildChain(sample("v1"));
     rows[1]!.detail = { note: "tampered" };
