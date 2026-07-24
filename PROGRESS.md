@@ -1,5 +1,8 @@
 # Stopgap — Build Progress
 
+**Phases 1–4 are merged to `main`.** Phase 5 (deploy, demo, library extraction, writeup) is
+out of scope for this run — see `PHASE5-TODO.md`.
+
 Single source of truth: `PROJECT_PLAN.md`. This file tracks phase status against the
 plan's build table (§13). Out of scope this run: Phase 5 (see `PHASE5-TODO.md`).
 
@@ -92,7 +95,8 @@ golden dataset v1; Langfuse; eval CI gate on Ollama.
 
 ## Phase 3 — Memory + shadow (weeks 4–6)
 
-**Status:** in progress — PR #3 open.
+**Status:** ✅ MERGED — [PR #3](https://github.com/tomnguyen103/stopgap/pull/3), gate green,
+live e2e verified, CodeRabbit clean after 2 rounds.
 
 Target deliverable: versioned protocol store + provenance; exception loop; shadow ledger +
 replay corpus + agreement dashboard; promotion gates.
@@ -128,7 +132,8 @@ replay corpus + agreement dashboard; promotion gates.
 
 ## Phase 4 — Product (weeks 6–8)
 
-**Status:** in progress — PR #4 open.
+**Status:** ✅ MERGED — [PR #4](https://github.com/tomnguyen103/stopgap/pull/4), gate green,
+live e2e verified, CodeRabbit clean after 3 rounds.
 
 Target deliverable: HITL review UI; KPI dashboard; comms out; MCP server; exception matrix
 doc; injection test suite; provider comparison table.
@@ -169,5 +174,24 @@ doc; injection test suite; provider comparison table.
 ## Merged-PR log
 
 <!-- append one line per merged PR: ✅ <PR title> — <what it proved> -->
+✅ Phase 4 — Product: HITL review UI, KPIs, comms, MCP server ([#4](https://github.com/tomnguyen103/stopgap/pull/4)) — pharmacist review and exception resolution driven from the console through Temporal signals, KPI dashboard against the §14 targets, Resend + EHR comms with honest non-delivery recording, stdio MCP server (reads open, review gated behind an env flag), 5-class injection suite that found and fixed a dose-injection defect, exception matrix and provider-comparison docs. 68 tests, gate clean, CodeRabbit clean after 3 rounds.
+✅ Phase 3 — Memory + shadow: protocol store, exception loop, shadow ledger ([#3](https://github.com/tomnguyen103/stopgap/pull/3)) — immutable versioned protocols with provenance, memory reuse verified live across a case recurrence, exception-resolution loop turning a pharmacist's answer into an approved rule, shadow ledger + replay corpus + per-class promotion gates with a directional under-escalation bar, `/protocols` and `/shadow` console views. Also finished Phase 2's open items: Langfuse OTel tracing and the 87-case golden dataset. CodeRabbit clean after 2 rounds.
 ✅ Phase 2 — Intelligence: agents, confidence routing, eval gate ([#2](https://github.com/tomnguyen103/stopgap/pull/2)) — Zod-validated impact/alternatives agents replacing Phase 1 mocks, confidence routing to the exception queue, prompt-injection defense, golden dataset + `pnpm eval` running live on Ollama. CodeRabbit clean after 3 rounds (escaped record delimiter, blank-alternative normalization, stricter injection assertions in the last round).
 ✅ Phase 1 — Spine: durable case engine, provider routing, live feeds ([#1](https://github.com/tomnguyen103/stopgap/pull/1)) — Temporal + Postgres + live openFDA/ASHP polling, Gemini/Ollama provider registry with failover, Next.js 15 console, `pollFeedsWorkflow` auto-opening cases (57 real cases opened live in verification), weekly-tick monitoring loop, retry-safe hash-chained audit log. 23/23 tests green, `pnpm gate` clean, CodeRabbit clean after 4 rounds.
+
+---
+
+## Final verification (2026-07-23, on `main` at Phase 4 merge)
+
+- `pnpm gate` — **green**: lint + typecheck + 68 tests + build.
+- `pnpm eval` (live Ollama, non-blocking by design) — 14/19 checks passed on the final run.
+  The failures are the documented, reproducible weaknesses, not flakes-of-the-day:
+  no-equivalent drugs (methotrexate PF, Rho(D)), one critical-care severity floor, and two
+  injection cases (direct severity override, and the closing-delimiter payload which passes
+  most runs but not all). Full-corpus runs measured 80–84%.
+- **The eval suite is deliberately not part of `pnpm gate`.** A 7B local model is not
+  deterministic enough at temperature 0 to gate a build on — the same corpus moved ~4 points
+  between identical runs — and a red build nobody believes is worse than an honest report.
+  `pnpm gate` is the hard gate; `pnpm eval` is the signal.
+- Live stack verified end to end this session: Temporal worker + Postgres + Ollama + Langfuse
+  (traces landing), console driving real approvals, MCP server answering a real client.
