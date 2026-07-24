@@ -247,7 +247,7 @@ programmatic surface is the stdio MCP server with its own ad-hoc gating.
 - [x] 6.2 Audit HMAC + anchoring + verification UI (PR #6)
 - [x] 6.6 Feed-resolution auto-detect (PR #6)
 - [x] 6.1 RBAC + OIDC SSO (PR #7)
-- [ ] 6.3 Escalation + acknowledgment
-- [ ] 6.4 Observability: metrics, alerting, SLOs
+- [x] 6.3 Escalation + acknowledgment
+- [x] 6.4 Observability: metrics, alerting, SLOs
 - [ ] 6.7 Public API + scoped keys + OpenAPI
 - [ ] 6.5 Multi-tenancy with RLS
