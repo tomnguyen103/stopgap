@@ -20,6 +20,20 @@ export async function makeClient(): Promise<{ client: Client; connection: Connec
 }
 
 /**
+ * Run one operation against a short-lived Temporal client and always close the connection.
+ * Every caller outside the worker (console server actions, MCP tools, scripts) goes through
+ * this rather than repeating the connect/finally dance and eventually forgetting the finally.
+ */
+export async function withTemporalClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
+  const { client, connection } = await makeClient();
+  try {
+    return await fn(client);
+  } finally {
+    await connection.close();
+  }
+}
+
+/**
  * Start (or return the existing) durable case workflow for a shortage. The workflow id is
  * derived from the dedup key, so re-detecting the same shortage is idempotent: the conflict
  * policy rejects a start while a case for that drug is still running, and we treat that as
@@ -51,9 +65,14 @@ export async function startCase(
   }
 }
 
-export async function submitReview(client: Client, key: string, decision: ReviewDecision): Promise<void> {
+export async function submitReview(
+  client: Client,
+  key: string,
+  decision: ReviewDecision,
+  reviewer?: string,
+): Promise<void> {
   const handle = client.workflow.getHandle(workflowIdForKey(key));
-  await handle.signal(reviewSignal, decision);
+  await handle.signal(reviewSignal, reviewer ? { ...decision, reviewer } : decision);
 }
 
 /**

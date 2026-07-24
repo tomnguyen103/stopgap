@@ -43,16 +43,27 @@ export async function getKpis(): Promise<Kpis> {
     })
     .from(cases);
 
-  // Detection-to-approval latency, per case, from the audit trail rather than case timestamps:
-  // `cases.updatedAt` moves on every later transition, so it cannot answer "how long did the
-  // pharmacist wait" after the case moves on to monitoring.
+  // Detection-to-approval latency from the audit trail rather than case timestamps:
+  // `cases.updatedAt` moves on with every later transition, so it cannot answer "how long did
+  // the pharmacist wait" once the case reaches monitoring.
+  //
+  // Correlated on run_id, not just case_id: a recurring shortage opens a new run against the
+  // same case row, so joining on the case alone pairs run 2's detection with run 1's approval
+  // and yields both duplicate and negative durations.
   const [latency] = await db.execute<{ median_hours: string | null }>(sql`
-    select percentile_cont(0.5) within group (order by extract(epoch from (approved.ts - detected.ts)) / 3600)
-             as median_hours
-    from ${auditLog} detected
-    join ${auditLog} approved
-      on approved.case_id = detected.case_id and approved.action = 'case.approved'
-    where detected.action = 'case.detected'
+    with pairs as (
+      select distinct on (detected.case_id, detected.run_id)
+             extract(epoch from (approved.ts - detected.ts)) / 3600 as hours
+      from ${auditLog} detected
+      join ${auditLog} approved
+        on approved.case_id = detected.case_id
+       and approved.run_id = detected.run_id
+       and approved.action = 'case.approved'
+       and approved.ts >= detected.ts
+      where detected.action = 'case.detected'
+      order by detected.case_id, detected.run_id, approved.ts
+    )
+    select percentile_cont(0.5) within group (order by hours) as median_hours from pairs
   `);
 
   const [review] = await db.execute<{ reviewed: string; unedited: string }>(sql`

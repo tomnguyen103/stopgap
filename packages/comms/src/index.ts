@@ -33,7 +33,11 @@ export interface CommsResult {
 /** Send the protocol to the pharmacy distribution list via Resend. */
 export async function sendEmail(message: CommsMessage): Promise<CommsResult> {
   const env = getEnv();
-  const recipients = message.to.length > 0 ? message.to : compact([env.COMMS_DEMO_INBOX]);
+  const configured = env.COMMS_PHARMACY_TO.split(",")
+    .map((address) => address.trim())
+    .filter((address) => address.length > 0);
+  const recipients =
+    message.to.length > 0 ? message.to : configured.length > 0 ? configured : compact([env.COMMS_DEMO_INBOX]);
   if (!env.RESEND_API_KEY) {
     return { channel: "email", delivered: false, reason: "RESEND_API_KEY not configured" };
   }

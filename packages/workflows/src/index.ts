@@ -1,5 +1,6 @@
 export {
   makeClient,
+  withTemporalClient,
   startCase,
   submitReview,
   resolveException,

@@ -9,6 +9,7 @@ import {
   listCasesTool,
   reviewCaseTool,
   reviewInput,
+  reviewToolEnabled,
 } from "./tools.js";
 
 /**
@@ -59,7 +60,8 @@ server.registerTool(
   {
     title: "Submit a pharmacist review decision",
     description:
-      "Approve, approve-with-edits, or reject the drafted protocol for a case waiting at the human review gate.",
+      "Approve, approve-with-edits, or reject the drafted protocol for a case waiting at the " +
+      `human review gate. ${reviewToolEnabled() ? "Enabled." : "DISABLED — set STOPGAP_MCP_ALLOW_REVIEW=1 to allow it."}`,
     inputSchema: reviewInput.shape,
   },
   async (args) => asContent(await reviewCaseTool(reviewInput.parse(args))),

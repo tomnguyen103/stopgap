@@ -14,11 +14,16 @@ export type ImpactResult = ImpactAssessment;
 /** Result of the alternatives research activity (Zod-validated, schema owned by @stopgap/agents). */
 export type ResearchResult = AlternativesResearch;
 
-/** A pharmacist's HITL decision on the drafted protocol. */
-export type ReviewDecision =
+/**
+ * A pharmacist's HITL decision on the drafted protocol. `reviewer` is a CLAIMED identity —
+ * signals are unauthenticated, so the audit trail records who the caller said they were, never
+ * an asserted-verified principal (see PHASE5-TODO for the auth work).
+ */
+export type ReviewDecision = { reviewer?: string } & (
   | { kind: "approve" }
   | { kind: "edit"; editedDraft: string }
-  | { kind: "reject"; reason: string };
+  | { kind: "reject"; reason: string }
+);
 
 /** Queryable snapshot of a running case (drives the console). */
 export interface CaseState {
@@ -36,6 +41,8 @@ export interface CaseState {
   protocolVersion?: number;
   /** Why the case parked in the exception queue, if it did. */
   exceptionReason?: string;
+  /** Whether any comms channel actually delivered — `comms_sent` only means "we tried". */
+  commsDelivered?: boolean;
 }
 
 /** Max time a case may sit unresolved before it auto-escalates to the exception queue. */

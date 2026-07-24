@@ -16,7 +16,7 @@ import type {
   ShadowRunRow,
 } from "@stopgap/db";
 import { evaluatePromotion, type PromotionDecision } from "@stopgap/shadow";
-import { getCaseState, makeClient, type CaseState } from "@stopgap/workflows";
+import { getCaseState, withTemporalClient, type CaseState } from "@stopgap/workflows";
 import { desc, eq } from "drizzle-orm";
 
 /** All cases, newest-touched first (list view). */
@@ -46,13 +46,12 @@ export async function getCaseDetail(
  * durable half rather than 500-ing on a stopped worker.
  */
 export async function getWorkflowState(key: string): Promise<CaseState | undefined> {
-  const { client, connection } = await makeClient();
+  // `makeClient` is inside the try on purpose: a stopped Temporal server throws on connect,
+  // and that is exactly the unreachable case this function promises to survive.
   try {
-    return await getCaseState(client, key);
+    return await withTemporalClient((client) => getCaseState(client, key));
   } catch {
     return undefined;
-  } finally {
-    await connection.close();
   }
 }
 

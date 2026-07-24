@@ -101,7 +101,11 @@ export async function researchAlternatives(input: CaseInput): Promise<ResearchRe
  * endpoint) is recorded in the audit trail rather than swallowed — "we told the floor" has to
  * be falsifiable.
  */
-export async function sendComms(key: string, draft: string, alternatives: string[] = []): Promise<void> {
+export async function sendComms(
+  key: string,
+  draft: string,
+  alternatives: string[] = [],
+): Promise<{ delivered: boolean }> {
   const db = getDb();
   const workflowId = workflowIdForKey(key);
   const row = await getCaseByWorkflowId(db, workflowId);
@@ -122,6 +126,10 @@ export async function sendComms(key: string, draft: string, alternatives: string
     detail: { chars: draft.length, channels: results },
     runId: currentRunId(),
   });
+  // Reported back so the case records whether anything actually went out — the `comms_sent`
+  // state means "we tried", and a case that claims delivery no transport performed would be
+  // exactly the kind of unfalsifiable assertion this system is supposed to avoid.
+  return { delivered: results.some((result) => result.delivered) };
 }
 
 /** Record a HITL decision in the audit chain (provenance for the review). */
@@ -131,9 +139,11 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
   const row = await getCaseByWorkflowId(db, workflowId);
   await appendAudit(db, {
     caseId: row?.id,
-    actor: "pharmacist",
+    // The signal is unauthenticated, so the actor is whoever the caller claimed to be. Writing
+    // a bare "pharmacist" here would put an unverifiable assertion into a tamper-evident log.
+    actor: decision.reviewer ?? "unknown-reviewer",
     action: `review.${decision.kind}`,
-    detail: { ...decision },
+    detail: { ...decision, identitySource: "workflow-signal-claim" },
     runId: currentRunId(),
   });
 }

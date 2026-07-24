@@ -32,6 +32,8 @@ const EnvSchema = z.object({
 
   RESEND_API_KEY: z.string().optional(),
   COMMS_FROM: z.string().default("stopgap@example.com"),
+  /** Comma-separated pharmacy distribution list for approved protocols. */
+  COMMS_PHARMACY_TO: z.string().default(""),
   COMMS_DEMO_INBOX: z.string().optional(),
   EHR_WEBHOOK_URL: z.string().default("http://localhost:4000/ehr/formulary-flag"),
 });

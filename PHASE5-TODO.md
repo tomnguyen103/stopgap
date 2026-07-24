@@ -18,10 +18,13 @@ deferred to Phase 5.
 - **`GEMINI_API_KEY` absent.** The Gemini provider is implemented but not exercised
   against the live API. Local gate + CI run on Ollama. Set the key and run the
   Gemini-vs-Ollama eval to produce the comparison table with real numbers.
-- **`RESEND_API_KEY` absent.** Outbound comms (Phase 4) fall back to a local file/console
-  transport. Set the key + `COMMS_DEMO_INBOX` to send real demo emails.
-- **Langfuse keys absent.** Self-hosted Langfuse is wired via OTel; without keys, traces
-  export to a local/console OTel exporter. Provision Langfuse + keys for real tracing.
+- **`RESEND_API_KEY` absent.** Outbound email records a non-delivery with the reason
+  "RESEND_API_KEY not configured" in the audit trail — it does not fall back to a fake
+  transport, because a stub reporting success would make "we told the floor" unfalsifiable.
+  Set the key plus `COMMS_PHARMACY_TO` (or `COMMS_DEMO_INBOX`) to send for real.
+- **Langfuse keys absent.** Self-hosted Langfuse is wired via OTel; without both keys tracing
+  is off entirely (no exporter, no flush timer). `docker compose --profile langfuse up -d`
+  seeds a local project and its key pair.
 - **openFDA API key absent (optional).** Polling works unauthenticated at a lower rate
   limit; add `OPENFDA_API_KEY` for higher throughput.
 - **`ASHP_AUTH_KEY` absent.** `pollAshp()` returns `[]` (see `ashpStubbed()`) so the ASHP
@@ -55,6 +58,20 @@ deferred to Phase 5.
 ## Notes
 
 - `.env.example` documents every variable. Copy to `.env` and fill before deploy.
+
+## Auth (blocks several Phase 4 claims)
+
+Stopgap has **no authentication layer**. Consequences, all recorded rather than hidden:
+
+- Console server actions and Temporal signals are unauthenticated. The reviewer identity is a
+  claim, written to the audit trail as `identitySource: workflow-signal-claim` and as the
+  actor string the caller supplied — never as an asserted-verified principal.
+- `review_case` on the MCP server is disabled unless `STOPGAP_MCP_ALLOW_REVIEW=1`, because an
+  unauthenticated client approving a clinical protocol defeats the HITL gate.
+- Per-role restrictions on which exception types a user may resolve
+  (`docs/exception-matrix.md`) need this first.
+
+Until it exists, run the console and MCP server bound to localhost only.
 
 ## Phase 3 deferrals
 

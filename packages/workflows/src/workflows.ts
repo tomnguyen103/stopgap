@@ -175,8 +175,8 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
         title: input.record.genericName,
         body: state.draft ?? "",
         alternatives: state.alternatives,
-        authoredBy: decision!.kind === "edit" ? "pharmacist" : "agent",
-        approvedBy: "pharmacist",
+        authoredBy: decision!.kind === "edit" ? (decision!.reviewer ?? "unknown-reviewer") : "agent",
+        approvedBy: decision!.reviewer ?? "unknown-reviewer",
         rationale:
           decision!.kind === "edit"
             ? "Pharmacist edit of the agent draft at review."
@@ -188,9 +188,10 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // Approved → comms out.
   state.status = "approved";
   await acts.persistStatus(key, "approved");
-  await acts.sendComms(key, state.draft ?? "", state.alternatives);
+  const comms = await acts.sendComms(key, state.draft ?? "", state.alternatives);
   state.status = "comms_sent";
-  await acts.persistStatus(key, "comms_sent");
+  state.commsDelivered = comms.delivered;
+  await acts.persistStatus(key, "comms_sent", { delivered: comms.delivered });
 
   // Monitor until the feed resolves the shortage — the long-horizon leg (weeks–months).
   // Ticks weekly (durable across worker restarts/deploys) so monitoringWeeks reflects real

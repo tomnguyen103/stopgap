@@ -7,7 +7,7 @@ import {
   listProtocolVersions,
   workflowIdForKey,
 } from "@stopgap/db";
-import { getCaseState, makeClient, submitReview } from "@stopgap/workflows";
+import { getCaseState, submitReview, withTemporalClient } from "@stopgap/workflows";
 
 /**
  * The pipeline tools an MCP client (Claude, an internal agent, a CLI) can call against a
@@ -19,8 +19,10 @@ import { getCaseState, makeClient, submitReview } from "@stopgap/workflows";
  * NOT exposed: those belong to the workflow, and an MCP client that could write a protocol
  * without a case behind it would put unreviewed text into organizational memory.
  *
- * There is no authentication here either (see PHASE5-TODO) — the server is meant to be bound
- * to localhost alongside the console until the auth layer exists.
+ * There is no authentication here (see PHASE5-TODO), so the one mutating tool is OFF unless
+ * `STOPGAP_MCP_ALLOW_REVIEW=1` is set. An unauthenticated MCP client that can approve a
+ * clinical protocol defeats the HITL gate the rest of the system is built around, and the
+ * hash-chained audit would then record the approval as a human decision.
  */
 
 export const listCasesInput = z.object({
@@ -45,8 +47,7 @@ export const caseInput = z.object({ key: z.string().min(1) });
 export async function getCaseTool(input: z.infer<typeof caseInput>) {
   const row = await getCaseByWorkflowId(getDb(), workflowIdForKey(input.key));
   if (!row) return { found: false as const };
-  const { client, connection } = await makeClient();
-  try {
+  return withTemporalClient(async (client) => {
     const live = await getCaseState(client, input.key).catch(() => undefined);
     return {
       found: true as const,
@@ -60,9 +61,7 @@ export async function getCaseTool(input: z.infer<typeof caseInput>) {
       protocolSource: live?.protocolSource,
       exceptionReason: live?.exceptionReason,
     };
-  } finally {
-    await connection.close();
-  }
+  });
 }
 
 /** The approved protocol for a drug, plus its version history — the memory lookup. */
@@ -99,12 +98,22 @@ export const reviewInput = z.object({
 });
 
 /** Submit the pharmacist decision on a case blocked at the HITL gate. */
+export function reviewToolEnabled(): boolean {
+  return process.env.STOPGAP_MCP_ALLOW_REVIEW === "1";
+}
+
 export async function reviewCaseTool(input: z.infer<typeof reviewInput>) {
-  const { client, connection } = await makeClient();
-  try {
-    await submitReview(client, input.key, input.decision);
-    return { signalled: true as const, key: input.key, kind: input.decision.kind };
-  } finally {
-    await connection.close();
+  if (!reviewToolEnabled()) {
+    return {
+      signalled: false as const,
+      reason:
+        "review_case is disabled: this MCP server has no authentication, so approving a " +
+        "clinical protocol through it is opt-in via STOPGAP_MCP_ALLOW_REVIEW=1",
+    };
   }
+  return withTemporalClient(async (client) => {
+    // Reviewer identity is a claim recorded as such — same contract as the console.
+    await submitReview(client, input.key, input.decision, "mcp-client");
+    return { signalled: true as const, key: input.key, kind: input.decision.kind };
+  });
 }
