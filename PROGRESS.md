@@ -226,7 +226,12 @@ lib; writeup; post-mortem; portfolio page + video.
   wording), so the mechanism has one implementation and one test suite. Not published to npm
   — that is a release decision, and `PUBLISHING.md` records the steps plus the
   `pnpm pack` vs `npm pack` entrypoint trap.
-- [ ] Engineering writeup + post-mortem + portfolio page (§12, §15)
+- [x] Engineering writeup ([docs/writeup.md](docs/writeup.md)) following the §15 outline,
+  post-mortem ([docs/post-mortem.md](docs/post-mortem.md)) covering the five real failures of
+  this build, and portfolio page copy ([docs/portfolio.md](docs/portfolio.md)) including a
+  "not claimed" section and the 3-minute demo-video outline. Every figure in all three is one
+  already measured and recorded in this file; the unmeasured items (Gemini comparison, live
+  deployment) are named as unmeasured rather than estimated.
 
 ---
 

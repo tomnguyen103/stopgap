@@ -12,8 +12,10 @@ open is listed here.
 - Publish `shadow-ledger` to npm and split it into its own pinned repository (§12.5). The
   library is extracted, built and consumed in-workspace; publishing is a release decision
   left to the owner (`packages/shadow-ledger/PUBLISHING.md`).
-- Engineering writeup + dev.to crosspost; published failure post-mortem; portfolio page;
-  3-min demo video (the video is also the insurance for live-demo downtime).
+- **Publishing** the writeup and post-mortem (dev.to crosspost), putting the portfolio copy
+  on tomnguyen.me, and recording the 3-minute demo video. All three documents are written
+  (`docs/writeup.md`, `docs/post-mortem.md`, `docs/portfolio.md`, the last containing the
+  video outline); pushing them to public channels is the owner's call, not an agent's.
 
 ## Done in Phase 5
 

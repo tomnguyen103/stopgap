@@ -88,6 +88,16 @@ Evals run **outside** `pnpm gate` on purpose — small local models aren't fully
 even at temperature 0, so a hard build gate on live-model output would train everyone to
 ignore red. `pnpm gate` stays deterministic; `pnpm eval` reports the real signal.
 
+## Writeups
+
+- [Engineering writeup](docs/writeup.md) — the three patterns (durable spine, shadow mode,
+  self-writing SOPs), with the measured numbers behind each.
+- [Post-mortem](docs/post-mortem.md) — what actually broke: a deployment-only workflow-naming
+  bug, a table nothing ever wrote to, a case dropped when the model went away, an audit chain
+  that forked.
+- [Portfolio page copy](docs/portfolio.md) — problem, before/after, what is measured and what
+  is explicitly not claimed.
+
 ## `shadow-ledger`
 
 The shadow-mode harness is extracted as a standalone, dependency-free library in
