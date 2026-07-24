@@ -35,8 +35,10 @@ export {
   approveProtocolVersion,
   draftProtocolVersion,
   getApprovedProtocol,
+  listProtocols,
   listProtocolVersions,
   type DraftProtocolInput,
+  type ProtocolSummary,
 } from "./protocols.js";
 export {
   upsertUserByOidc,
@@ -71,8 +73,25 @@ export {
 } from "./shadow.js";
 export { getLlmSpend, recordLlmSpend, utcDay, type DailySpend } from "./spend.js";
 export { countDemoRunsSince, reserveDemoRun } from "./demo-runs.js";
+export {
+  API_SCOPES,
+  findActiveApiKeyByPlaintext,
+  generateApiKey,
+  hashApiKey,
+  isApiScope,
+  issueApiKey,
+  listApiKeys,
+  reserveApiKeyRequest,
+  revokeApiKey,
+  touchApiKeyUsed,
+  type ApiScope,
+  type IssueApiKeyInput,
+} from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export type {
+  ApiKeyRow,
+  NewApiKeyRow,
+  ApiKeyRequestRow,
   DemoRunRow,
   LlmSpendRow,
   EscalationPolicyRow,

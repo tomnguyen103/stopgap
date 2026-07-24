@@ -13,8 +13,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@stopgap/core": "workspace:*",
-    "@stopgap/db": "workspace:*",
-    "@stopgap/workflows": "workspace:*",
     "zod": "^3.24.0"
   },
   "devDependencies": {

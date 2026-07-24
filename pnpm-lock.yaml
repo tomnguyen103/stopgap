@@ -74,6 +74,9 @@ importers:
       zod:
         specifier: ^3.24.0
         version: 3.25.76
+      zod-openapi:
+        specifier: ^4.2.4
+        version: 4.2.4(zod@3.25.76)
     devDependencies:
       '@types/react':
         specifier: ^19.0.0
@@ -166,12 +169,6 @@ importers:
       '@stopgap/core':
         specifier: workspace:*
         version: link:../core
-      '@stopgap/db':
-        specifier: workspace:*
-        version: link:../db
-      '@stopgap/workflows':
-        specifier: workspace:*
-        version: link:../workflows
       zod:
         specifier: ^3.24.0
         version: 3.25.76
@@ -3186,6 +3183,12 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  zod-openapi@4.2.4:
+    resolution: {integrity: sha512-tsrQpbpqFCXqVXUzi3TPwFhuMtLN3oNZobOtYnK6/5VkXsNdnIgyNr4r8no4wmYluaxzN3F7iS+8xCW8BmMQ8g==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.21.4
+
   zod-to-json-schema@3.25.2:
     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
     peerDependencies:
@@ -5815,6 +5818,10 @@ snapshots:
       yargs-parser: 21.1.1
 
   yocto-queue@0.1.0: {}
+
+  zod-openapi@4.2.4(zod@3.25.76):
+    dependencies:
+      zod: 3.25.76
 
   zod-to-json-schema@3.25.2(zod@3.25.76):
     dependencies:

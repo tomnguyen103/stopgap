@@ -47,6 +47,49 @@ export async function getApprovedProtocol(
   return version ? { protocol, version } : undefined;
 }
 
+/** One row of the protocol index: what a caller needs to decide which protocol to fetch in full. */
+export interface ProtocolSummary {
+  key: string;
+  title: string;
+  drugClass: string | null;
+  /** The live version number, or null when every version is still a draft. */
+  approvedVersion: number | null;
+  updatedAt: Date;
+}
+
+/**
+ * The protocol index, most recently updated first (PHASE6 §6.7).
+ *
+ * Exists because `getApprovedProtocol`/`listProtocolVersions` are both addressed BY key: without a
+ * list, an integrator can only read protocols whose dedup keys they already know, which makes
+ * "what guidance does this organization have?" unanswerable through the API — the console's own
+ * protocols page could answer it and a client could not.
+ *
+ * The left join is safe to read as at-most-one row per protocol: `approveProtocolVersion` supersedes
+ * the previous approved version inside the transaction that approves the next one, so a second
+ * approved row for one protocol is a state that function guarantees cannot exist. If that invariant
+ * ever broke, this list would fan out — which is the correct, visible failure, rather than silently
+ * picking one of two rows that both claim to be live.
+ */
+export async function listProtocols(limit = 50): Promise<ProtocolSummary[]> {
+  const db = getDb();
+  return db
+    .select({
+      key: protocols.key,
+      title: protocols.title,
+      drugClass: protocols.drugClass,
+      approvedVersion: protocolVersions.version,
+      updatedAt: protocols.updatedAt,
+    })
+    .from(protocols)
+    .leftJoin(
+      protocolVersions,
+      and(eq(protocolVersions.protocolId, protocols.id), eq(protocolVersions.state, "approved")),
+    )
+    .orderBy(desc(protocols.updatedAt))
+    .limit(limit);
+}
+
 /** Every version of a protocol, newest first — the provenance/history view. */
 export async function listProtocolVersions(key: string): Promise<ProtocolVersionRow[]> {
   const db = getDb();

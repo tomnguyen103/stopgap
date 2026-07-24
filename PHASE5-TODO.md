@@ -93,8 +93,11 @@ Stopgap has **no authentication layer**. Consequences, all recorded rather than 
 - Console server actions and Temporal signals are unauthenticated. The reviewer identity is a
   claim, written to the audit trail as `identitySource: workflow-signal-claim` and as the
   actor string the caller supplied — never as an asserted-verified principal.
-- `review_case` on the MCP server is disabled unless `STOPGAP_MCP_ALLOW_REVIEW=1`, because an
-  unauthenticated client approving a clinical protocol defeats the HITL gate.
+- `review_case` on the MCP server was disabled unless `STOPGAP_MCP_ALLOW_REVIEW=1`, because an
+  unauthenticated client approving a clinical protocol defeats the HITL gate. **Closed in Phase 6
+  §6.7:** the env gate is gone; the MCP server now reaches Stopgap through the public REST API with
+  a scoped API key, so review requires a key an administrator issued with `protocols:write` — and
+  the decision lands in the audit chain attributed to that key and its issuer.
 - Per-role restrictions on which exception types a user may resolve
   (`docs/exception-matrix.md`) need this first.
 

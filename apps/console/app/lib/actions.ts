@@ -9,6 +9,9 @@ import {
   assignRole,
   getCaseByWorkflowId,
   getDb,
+  isApiScope,
+  issueApiKey,
+  revokeApiKey,
   revokeRole,
   setUserDisabled,
 } from "@stopgap/db";
@@ -198,6 +201,65 @@ export async function setUserDisabledAction(userId: unknown, disabled: unknown):
     await recordPrivilegedAudit(principal, action, { targetUserId: uid }, `${action}.${uid}`);
   }
   revalidatePath("/admin/users");
+}
+
+const issueApiKeySchema = z.object({
+  name: z.string().min(1).max(120),
+  scopes: z.array(z.string().refine(isApiScope, "unknown scope")).min(1),
+  rateLimitPerHour: z.number().int().min(1).max(100_000),
+});
+
+/**
+ * Issue an API key (admin only, PHASE6 §6.7).
+ *
+ * Returns the PLAINTEXT — the only time it ever exists outside the caller's client. The page shows
+ * it once with a "you will not see this again" note, because the database holds only its SHA-256
+ * hash and there is no recovery path, only revoke-and-reissue. That is the intended trade: a DB
+ * read cannot mint a usable credential.
+ *
+ * The plaintext is deliberately absent from the audit detail and from every log line here. An
+ * audit chain that recorded the secret would turn the tamper-evident record — the thing operators
+ * export and hand to auditors — into a credential store. What IS recorded is everything needed to
+ * revoke: the key's id, name, scopes, and limit.
+ */
+export async function issueApiKeyAction(
+  input: unknown,
+): Promise<{ id: string; name: string; keyPrefix: string; plaintext: string }> {
+  assertMutationAllowed("Issuing an API key");
+  const principal = await requireRole("manage_api_keys");
+  const parsed = issueApiKeySchema.parse(input);
+  const { row, plaintext } = await issueApiKey({
+    name: parsed.name,
+    scopes: parsed.scopes,
+    rateLimitPerHour: parsed.rateLimitPerHour,
+    createdByUserId: principal.userId,
+  });
+  await recordPrivilegedAudit(
+    principal,
+    "api_key.issued",
+    {
+      apiKeyId: row.id,
+      name: row.name,
+      keyPrefix: row.keyPrefix,
+      scopes: parsed.scopes,
+      rateLimitPerHour: row.rateLimitPerHour,
+    },
+    `api_key.issued.${row.id}`,
+  );
+  revalidatePath("/admin/api-keys");
+  return { id: row.id, name: row.name, keyPrefix: row.keyPrefix, plaintext };
+}
+
+/** Revoke an API key (admin only). Soft — the row stays so audit entries naming it still resolve. */
+export async function revokeApiKeyAction(id: unknown): Promise<void> {
+  assertMutationAllowed("Revoking an API key");
+  const principal = await requireRole("manage_api_keys");
+  const keyId = z.string().uuid().parse(id);
+  // Only audit a real revocation — revokeApiKey is a no-op on an already-revoked key.
+  if (await revokeApiKey(keyId)) {
+    await recordPrivilegedAudit(principal, "api_key.revoked", { apiKeyId: keyId }, `api_key.revoked.${keyId}`);
+  }
+  revalidatePath("/admin/api-keys");
 }
 
 /**

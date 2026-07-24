@@ -53,24 +53,28 @@ describe("isActionAllowed matrix (role × action)", () => {
       resolve_exception: false,
       approve_protocol_version: false,
       manage_users: false,
+      manage_api_keys: false,
     },
     pharmacist: {
       review_case: true,
       resolve_exception: true,
       approve_protocol_version: false,
       manage_users: false,
+      manage_api_keys: false,
     },
     pharmacy_director: {
       review_case: true,
       resolve_exception: true,
       approve_protocol_version: true,
       manage_users: false,
+      manage_api_keys: false,
     },
     admin: {
       review_case: true,
       resolve_exception: true,
       approve_protocol_version: true,
       manage_users: true,
+      manage_api_keys: true,
     },
   };
 

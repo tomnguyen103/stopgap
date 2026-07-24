@@ -26,6 +26,7 @@ export const CONSOLE_ACTIONS = [
   "resolve_exception",
   "approve_protocol_version",
   "manage_users",
+  "manage_api_keys",
 ] as const;
 export type ConsoleAction = (typeof CONSOLE_ACTIONS)[number];
 
@@ -33,14 +34,21 @@ export type ConsoleAction = (typeof CONSOLE_ACTIONS)[number];
  * Minimum role per action. The plan's matrix, stated once:
  *  - pharmacist resolves exceptions and reviews cases (approve/edit/reject) and acknowledges;
  *  - pharmacy_director additionally approves/supersedes protocol versions;
- *  - admin additionally manages users;
+ *  - admin additionally manages users and issues/revokes API keys;
  *  - viewer holds none of these (read-only) — and is what the public demo maps a visitor to.
+ *
+ * `manage_api_keys` is `admin` (PHASE6 §6.7) and could not be lower: a key is a standing
+ * credential that carries scopes, so anyone who can issue one can hand out any capability the
+ * scope set covers — including `protocols:write`. Letting a pharmacy_director mint keys would let
+ * them delegate write access they hold to an integration nobody else approved, which is privilege
+ * escalation by a slower route.
  */
 export const ACTION_MIN_ROLE: Record<ConsoleAction, Role> = {
   review_case: "pharmacist",
   resolve_exception: "pharmacist",
   approve_protocol_version: "pharmacy_director",
   manage_users: "admin",
+  manage_api_keys: "admin",
 };
 
 /** Does `have` meet or exceed `min` in the role rank? */
