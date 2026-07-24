@@ -29,7 +29,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "prepublishOnly": "node -e \"if(!(process.env.npm_config_user_agent||'').startsWith('pnpm'))throw new Error('publish with pnpm, not npm — see PUBLISHING.md (npm ignores publishConfig main/types/exports)')\""
   },
   "devDependencies": {
     "typescript": "^5.7.0",

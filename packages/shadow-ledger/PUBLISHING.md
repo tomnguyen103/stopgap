@@ -3,10 +3,19 @@
 Not published to npm yet — the package builds, packs, and is consumed by `@stopgap/shadow`
 in this workspace; releasing it under the `shadow-ledger` name is the owner's call.
 
-**Use `pnpm publish` / `pnpm pack`, never `npm pack`.** Workspace consumers import the TS
-source, so `main`/`types`/`exports` point at `src/`; the `dist/` entrypoints live in
-`publishConfig` and pnpm swaps them in at pack time. `npm pack` does not do that swap, and
-the resulting tarball points at files it does not ship.
+**Use `pnpm publish` / `pnpm pack`, never `npm publish` / `npm pack`.** This is deliberate,
+not an oversight. Workspace consumers (`@stopgap/shadow`) import the TS source, and the local
+gate runs `typecheck` before `build`, so the on-disk `main`/`types`/`exports` must point at
+`src/` or in-repo typechecking breaks before any `dist/` exists. The shippable `dist/`
+entrypoints live in `publishConfig`, which **pnpm** swaps into the manifest at pack/publish
+time.
+
+npm does **not** honor `publishConfig` overrides of `main`/`types`/`exports` (only `registry`,
+`tag`, `access`). Publishing this package with the npm CLI therefore produces a manifest whose
+entrypoints point at `src/`, which `files` does not ship — a broken tarball. The repo pins
+pnpm via `packageManager` + corepack; keep publishing on pnpm. If this package is ever split
+into its own repo, that repo can instead point `main`/`types`/`exports` straight at `dist` and
+drop the `publishConfig` dance, since it will have no source-consuming workspace sibling.
 
 ```bash
 pnpm --filter shadow-ledger build
