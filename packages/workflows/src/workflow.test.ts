@@ -50,7 +50,7 @@ const mockActivities: typeof activities = {
       : /low alt confidence/i.test(input.record.genericName)
         ? { alternatives: ["alt-a"], draft: "draft protocol", confidence: 0.2 }
         : { alternatives: ["alt-a", "alt-b"], draft: "draft protocol", confidence: 0.9 },
-  sendComms: async () => {},
+  sendComms: async () => ({ delivered: true }),
   recordDecision: async () => {},
   pollAndOpenCases: async () => ({ polled: 0, opened: 0 }),
   // Memory hit only for the drug whose name says so, so every other case exercises the
@@ -210,7 +210,11 @@ describe("organizational memory (time-skipped)", () => {
         workflowId: `wf-writeback-${Date.now()}`,
       });
       await env.sleep("1 hour");
-      await handle.signal(reviewSignal, { kind: "edit", editedDraft: "pharmacist text" });
+      await handle.signal(reviewSignal, {
+        kind: "edit",
+        editedDraft: "pharmacist text",
+        reviewer: "pharmacist-1",
+      });
       await env.sleep("1 hour");
       await handle.signal(resolvedSignal);
       await handle.result();
@@ -218,7 +222,9 @@ describe("organizational memory (time-skipped)", () => {
       const written = recordedProtocols.slice(before);
       expect(written).toHaveLength(1);
       expect(written[0]?.body).toBe("pharmacist text");
-      expect(written[0]?.authoredBy).toBe("pharmacist");
+      // The claimed reviewer identity, not a hardcoded "pharmacist" the audit couldn't back up.
+      expect(written[0]?.authoredBy).toBe("pharmacist-1");
+      expect(written[0]?.approvedBy).toBe("pharmacist-1");
     });
   }, 60_000);
 

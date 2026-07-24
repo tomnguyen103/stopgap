@@ -16,6 +16,7 @@ import type {
   ShadowRunRow,
 } from "@stopgap/db";
 import { evaluatePromotion, type PromotionDecision } from "@stopgap/shadow";
+import { getCaseState, withTemporalClient, type CaseState } from "@stopgap/workflows";
 import { desc, eq } from "drizzle-orm";
 
 /** All cases, newest-touched first (list view). */
@@ -36,6 +37,22 @@ export async function getCaseDetail(
     .where(eq(schema.auditLog.caseId, row.id))
     .orderBy(desc(schema.auditLog.id));
   return { case: row, audit };
+}
+
+/**
+ * Live workflow state for a case — the draft text and proposed alternatives live in the
+ * running workflow, not in Postgres (the DB mirrors status transitions, not agent output).
+ * Returns undefined when the workflow is gone or unreachable so the page still renders the
+ * durable half rather than 500-ing on a stopped worker.
+ */
+export async function getWorkflowState(key: string): Promise<CaseState | undefined> {
+  // `makeClient` is inside the try on purpose: a stopped Temporal server throws on connect,
+  // and that is exactly the unreachable case this function promises to survive.
+  try {
+    return await withTemporalClient((client) => getCaseState(client, key));
+  } catch {
+    return undefined;
+  }
 }
 
 /** Shadow-mode aggregates per drug class, with the promotion stage each has earned. */

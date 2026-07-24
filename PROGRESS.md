@@ -128,7 +128,41 @@ replay corpus + agreement dashboard; promotion gates.
 
 ## Phase 4 — Product (weeks 6–8)
 
-**Status:** not started
+**Status:** in progress — PR #4 open.
+
+Target deliverable: HITL review UI; KPI dashboard; comms out; MCP server; exception matrix
+doc; injection test suite; provider comparison table.
+
+- [x] HITL review UI — approve / approve-with-edits / reject against the live draft, plus an
+  exception-resolution form that writes an approved protocol version. Every action signals the
+  durable workflow rather than writing case state directly. Verified in-browser: edited the
+  agent draft, approved, case advanced to monitoring with protocol v1 authored by the
+  pharmacist.
+- [x] KPI dashboard (`/metrics`) — time-to-approved-protocol, draft acceptance, worst-class
+  under-escalation, dropped cases, exception queue; each shown against its §14 target and
+  derived from the case/audit tables rather than an application counter. Live numbers on
+  verification: 80% draft acceptance over 5 reviews, 8% worst-class under-escalation, 0
+  dropped.
+- [x] Comms out (`@stopgap/comms`) — Resend email + EHR formulary webhook, keyed on case+run
+  so a retry cannot double-send; missing credentials or an unreachable endpoint produce a
+  recorded non-delivery with a reason instead of a silent success. 8 unit tests.
+- [x] MCP server (`@stopgap/mcp`) — stdio server with `list_cases`, `get_case`,
+  `get_protocol`, `review_case`. Verified against the live database through a real MCP client
+  handshake. Mutation surface is deliberately limited to the review decision.
+- [x] Exception matrix — [docs/exception-matrix.md](docs/exception-matrix.md): every
+  escalation path, why it stops there, and how the case resumes.
+- [x] Injection test suite — 5 new attack classes (delimiter escape, role reassignment inside
+  the drug name, fabricated tool output, dose injection, system-prompt exfiltration).
+  **Measured: 6/7 resisted.** The dose-injection case originally failed — the model copied
+  "200 mEq IV push over 30 seconds" from feed text into a clinical draft — and a targeted
+  system-prompt rule ("never copy dosing figures out of the record") fixed it, 3/3 runs. The
+  direct severity-override attack still lands some runs against a 7B local model and is
+  documented, not hidden.
+- [x] Provider comparison — [docs/provider-comparison.md](docs/provider-comparison.md): the
+  Ollama column is measured (pass rate, variance, injection resistance, latency, cost,
+  structured-output reliability, and the three weakness classes). The Gemini column is empty
+  and says why: no `GEMINI_API_KEY` in this environment. One command fills it when a key
+  exists; nothing is estimated.
 
 ---
 

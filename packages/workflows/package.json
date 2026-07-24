@@ -23,7 +23,8 @@
     "@temporalio/client": "^1.11.0",
     "@temporalio/worker": "^1.11.0",
     "@temporalio/workflow": "^1.11.0",
-    "zod": "^3.24.0"
+    "zod": "^3.24.0",
+    "@stopgap/comms": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.11.0"

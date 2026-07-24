@@ -2,8 +2,14 @@ import { getEnv } from "@stopgap/core/env";
 import type { ShortageRecord } from "@stopgap/core";
 import { workflowIdForKey } from "@stopgap/db";
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
-import type { CaseState, ReviewDecision } from "./shared.js";
-import { resolvedSignal, reviewSignal, shortageCaseWorkflow, stateQuery } from "./workflows.js";
+import type { CaseState, ExceptionResolution, ReviewDecision } from "./shared.js";
+import {
+  exceptionResolvedSignal,
+  resolvedSignal,
+  reviewSignal,
+  shortageCaseWorkflow,
+  stateQuery,
+} from "./workflows.js";
 
 /** Open a Temporal client against the configured address/namespace. */
 export async function makeClient(): Promise<{ client: Client; connection: Connection }> {
@@ -11,6 +17,20 @@ export async function makeClient(): Promise<{ client: Client; connection: Connec
   const connection = await Connection.connect({ address: env.TEMPORAL_ADDRESS });
   const client = new Client({ connection, namespace: env.TEMPORAL_NAMESPACE });
   return { client, connection };
+}
+
+/**
+ * Run one operation against a short-lived Temporal client and always close the connection.
+ * Every caller outside the worker (console server actions, MCP tools, scripts) goes through
+ * this rather than repeating the connect/finally dance and eventually forgetting the finally.
+ */
+export async function withTemporalClient<T>(fn: (client: Client) => Promise<T>): Promise<T> {
+  const { client, connection } = await makeClient();
+  try {
+    return await fn(client);
+  } finally {
+    await connection.close();
+  }
 }
 
 /**
@@ -45,9 +65,27 @@ export async function startCase(
   }
 }
 
-export async function submitReview(client: Client, key: string, decision: ReviewDecision): Promise<void> {
+export async function submitReview(
+  client: Client,
+  key: string,
+  decision: ReviewDecision,
+  reviewer?: string,
+): Promise<void> {
   const handle = client.workflow.getHandle(workflowIdForKey(key));
-  await handle.signal(reviewSignal, decision);
+  await handle.signal(reviewSignal, reviewer ? { ...decision, reviewer } : decision);
+}
+
+/**
+ * Resolve an exception-queue case: the pharmacist's guidance becomes an approved protocol
+ * version and the case continues from where it parked (PROJECT_PLAN §3B).
+ */
+export async function resolveException(
+  client: Client,
+  key: string,
+  resolution: ExceptionResolution,
+): Promise<void> {
+  const handle = client.workflow.getHandle(workflowIdForKey(key));
+  await handle.signal(exceptionResolvedSignal, resolution);
 }
 
 export async function markResolved(client: Client, key: string): Promise<void> {

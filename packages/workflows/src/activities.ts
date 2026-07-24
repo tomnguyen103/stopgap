@@ -11,6 +11,7 @@ import {
   upsertCaseForRecord,
   workflowIdForKey,
 } from "@stopgap/db";
+import { sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, startCase } from "./client.js";
@@ -93,18 +94,42 @@ export async function researchAlternatives(input: CaseInput): Promise<ResearchRe
   return agents.researchAlternatives(input.record);
 }
 
-/** Mock outbound comms (Phase 4 → Resend + EHR webhook). Records the intent in the audit log. */
-export async function sendComms(key: string, draft: string): Promise<void> {
+/**
+ * Outbound comms: email the approved protocol to the pharmacy list and flag the substitution
+ * in the EHR (PROJECT_PLAN §5). Both channels are keyed on the case + run so an activity
+ * retry cannot page the pharmacy twice, and a non-delivery (no credentials, unreachable
+ * endpoint) is recorded in the audit trail rather than swallowed — "we told the floor" has to
+ * be falsifiable.
+ */
+export async function sendComms(
+  key: string,
+  draft: string,
+  alternatives: string[] = [],
+): Promise<{ delivered: boolean }> {
   const db = getDb();
   const workflowId = workflowIdForKey(key);
   const row = await getCaseByWorkflowId(db, workflowId);
+  const idempotencyKey = `${workflowId}:${currentRunId() ?? "no-run"}:comms`;
+  const results = await Promise.all([
+    sendEmail({
+      idempotencyKey: `${idempotencyKey}:email`,
+      subject: `Drug shortage protocol: ${key}`,
+      body: draft,
+      to: [],
+    }),
+    sendEhrFlag({ idempotencyKey: `${idempotencyKey}:ehr`, key, alternatives, body: draft }),
+  ]);
   await appendAudit(db, {
     caseId: row?.id,
     actor: "system",
     action: "comms.sent",
-    detail: { channel: "mock", chars: draft.length },
+    detail: { chars: draft.length, channels: results },
     runId: currentRunId(),
   });
+  // Reported back so the case records whether anything actually went out — the `comms_sent`
+  // state means "we tried", and a case that claims delivery no transport performed would be
+  // exactly the kind of unfalsifiable assertion this system is supposed to avoid.
+  return { delivered: results.some((result) => result.delivered) };
 }
 
 /** Record a HITL decision in the audit chain (provenance for the review). */
@@ -114,9 +139,11 @@ export async function recordDecision(key: string, decision: ReviewDecision): Pro
   const row = await getCaseByWorkflowId(db, workflowId);
   await appendAudit(db, {
     caseId: row?.id,
-    actor: "pharmacist",
+    // The signal is unauthenticated, so the actor is whoever the caller claimed to be. Writing
+    // a bare "pharmacist" here would put an unverifiable assertion into a tamper-evident log.
+    actor: decision.reviewer ?? "unknown-reviewer",
     action: `review.${decision.kind}`,
-    detail: { ...decision },
+    detail: { ...decision, identitySource: "workflow-signal-claim" },
     runId: currentRunId(),
   });
 }

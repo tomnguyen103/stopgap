@@ -19,6 +19,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <Link href="/">Cases</Link>
             <Link href="/protocols">Protocols</Link>
             <Link href="/shadow">Shadow</Link>
+            <Link href="/metrics">KPIs</Link>
           </nav>
         </header>
         <main className="wrap">{children}</main>
