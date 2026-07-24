@@ -1,12 +1,35 @@
 export * as schema from "./schema.js";
 export { getDb, closeDb, type Db } from "./client.js";
-export { appendAudit, verifyAuditChain, GENESIS_HASH, type AuditEntry } from "./audit.js";
+export {
+  appendAudit,
+  verifyAuditChain,
+  verifyChainRows,
+  computeAuditHash,
+  GENESIS_HASH,
+  type AuditEntry,
+  type AuditScheme,
+  type VerifiableRow,
+  type ChainVerification,
+} from "./audit.js";
+export {
+  anchorAuditChain,
+  listAnchors,
+  verifyAnchors,
+  readAnchorFile,
+  buildTimestampRequest,
+  type AnchorVerification,
+} from "./anchors.js";
 export {
   upsertCaseForRecord,
   getCaseByWorkflowId,
   updateCaseStatus,
   listCases,
+  listOpenMonitoringCases,
+  bumpFeedMiss,
+  resetFeedMiss,
   workflowIdForKey,
+  MONITORING_STATUSES,
+  type OpenMonitoringCase,
 } from "./cases.js";
 export {
   approveProtocolVersion,
@@ -32,6 +55,7 @@ export type {
   CaseRow,
   NewCaseRow,
   AuditRow,
+  AuditAnchorRow,
   FeedRecordRow,
   ProtocolRow,
   ProtocolVersionRow,

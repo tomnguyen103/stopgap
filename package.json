@@ -17,6 +17,7 @@
     "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "db:generate": "pnpm --filter @stopgap/db generate",
     "db:migrate": "pnpm --filter @stopgap/db migrate",
+    "verify-audit": "pnpm --filter @stopgap/db verify-audit",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "worker": "pnpm --filter @stopgap/workflows worker",

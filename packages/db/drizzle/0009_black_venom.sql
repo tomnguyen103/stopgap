@@ -1,0 +1,1 @@
+ALTER TABLE "cases" ADD COLUMN "last_feed_poll_run" text;

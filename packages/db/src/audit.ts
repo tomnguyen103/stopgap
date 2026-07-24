@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { getEnv } from "@stopgap/core/env";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { auditLog } from "./schema.js";
@@ -14,6 +15,9 @@ function canonical(value: unknown): string {
 
 /** Genesis hash for an empty chain. */
 export const GENESIS_HASH = "0".repeat(64);
+
+/** Hashing scheme of a row: `v1` bare SHA-256, `v2` keyed HMAC-SHA-256 (PHASE6 §6.2). */
+export type AuditScheme = "v1" | "v2";
 
 export interface AuditEntry {
   caseId?: string;
@@ -36,19 +40,62 @@ export interface AuditEntry {
   eventKey?: string;
 }
 
+/** The subset of a row that is actually hashed. */
+interface HashablePayload {
+  caseId?: string;
+  actor: string;
+  action: string;
+  detail: Record<string, unknown>;
+  /** v2-only: hashed under HMAC so `ts` cannot be backdated. Ignored by v1. */
+  ts?: string;
+  /** v2-only: hashed so the idempotency metadata cannot be rewritten. Ignored by v1. */
+  runId?: string;
+  /** v2-only: hashed so the idempotency metadata cannot be rewritten. Ignored by v1. */
+  eventKey?: string;
+}
+
 /**
- * `runId` is deliberately NOT hashed. It is idempotency metadata, not a claim about what
- * happened, and leaving it out keeps the chain formula stable — entries written before the
- * column existed still verify against entries written after it.
+ * Recompute a single row's hash under its scheme.
+ *
+ * `v1` hashes `{caseId,actor,action,detail}` with bare SHA-256 — byte-identical to the
+ * pre-PHASE6 chain so rows written before HMAC existed still verify. It deliberately omits
+ * `ts`/`runId`/`eventKey`; that is a known weakness of `v1` (a DB-write attacker could
+ * backdate `ts`), which is exactly why `v2` exists and must not be weakened to match `v1`.
+ *
+ * `v2` HMACs a WIDER payload under `AUDIT_HMAC_KEY` — the same fields PLUS `ts`, `runId`, and
+ * `eventKey` — so an attacker with only DB write access can neither recompute a valid hash
+ * (the key is not in the database) NOR silently backdate the timestamp or rewrite the
+ * idempotency metadata of a keyed row (CWE-354).
+ *
+ * Exported so tests (and any external verifier) can construct a known-good chain without a
+ * live database; the byte layout is part of the audit contract.
  */
-function hashEntry(
+export function computeAuditHash(
+  scheme: AuditScheme,
   prevHash: string,
-  e: { caseId?: string; actor: string; action: string; detail: Record<string, unknown> },
+  e: HashablePayload,
+  hmacKey?: string,
 ): string {
-  return createHash("sha256")
-    .update(prevHash)
-    .update(canonical({ caseId: e.caseId ?? null, actor: e.actor, action: e.action, detail: e.detail }))
-    .digest("hex");
+  if (scheme === "v2") {
+    if (!hmacKey) throw new Error("computeAuditHash: v2 scheme requires an HMAC key");
+    const payload = canonical({
+      // Bind the scheme literal into the keyed payload so relabeling a `v2` row to any other
+      // scheme also breaks its hash (hash-mismatch), on top of the monotonic-boundary check
+      // in `verifyChainRows` — defence in depth against a DB writer editing `scheme`.
+      scheme: "v2",
+      caseId: e.caseId ?? null,
+      actor: e.actor,
+      action: e.action,
+      detail: e.detail,
+      ts: e.ts ?? null,
+      runId: e.runId ?? null,
+      eventKey: e.eventKey ?? null,
+    });
+    return createHmac("sha256", hmacKey).update(prevHash).update(payload).digest("hex");
+  }
+  // v1: keep the original narrow payload byte-for-byte.
+  const payload = canonical({ caseId: e.caseId ?? null, actor: e.actor, action: e.action, detail: e.detail });
+  return createHash("sha256").update(prevHash).update(payload).digest("hex");
 }
 
 /**
@@ -66,8 +113,14 @@ function hashEntry(
  * insert already committed (e.g. the worker crashed before acking) finds the existing row and
  * no-ops instead of double-appending. A later run for the same drug is a different runId and
  * appends its own entries.
+ *
+ * The scheme is chosen from the environment: `AUDIT_HMAC_KEY` present → `v2` (keyed), absent
+ * → `v1` (bare). A deployment that turns the key on writes `v2` from then on while its old
+ * `v1` rows keep verifying — honest non-configuration, never a silent downgrade.
  */
 export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: string }> {
+  const hmacKey = getEnv().AUDIT_HMAC_KEY;
+  const scheme: AuditScheme = hmacKey ? "v2" : "v1";
   return db.transaction(async (tx) => {
     // Bound the wait: a stalled lock holder must not back up every appendAudit caller across
     // all cases (single global chain lock) and exhaust the connection pool.
@@ -92,41 +145,142 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
     const [last] = await tx.select({ hash: auditLog.hash }).from(auditLog).orderBy(desc(auditLog.id)).limit(1);
     const prevHash = last?.hash ?? GENESIS_HASH;
     const detail = entry.detail ?? {};
-    const hash = hashEntry(prevHash, {
-      actor: entry.actor,
-      action: entry.action,
-      detail,
-      caseId: entry.caseId,
-    });
+    const runId = entry.runId ?? "";
+    const eventKey = entry.eventKey ?? entry.action;
+    // Set `ts` explicitly (not the column default) so the value we HASH for a v2 row is the
+    // exact value we PERSIST — otherwise re-verification would recompute against a different
+    // timestamp and every keyed row would fail.
+    const ts = new Date();
+    const hash = computeAuditHash(
+      scheme,
+      prevHash,
+      { actor: entry.actor, action: entry.action, detail, caseId: entry.caseId, ts: ts.toISOString(), runId, eventKey },
+      hmacKey,
+    );
     await tx.insert(auditLog).values({
       caseId: entry.caseId,
       actor: entry.actor,
       action: entry.action,
       detail,
+      ts,
       prevHash,
       hash,
-      runId: entry.runId ?? "",
-      eventKey: entry.eventKey ?? entry.action,
+      runId,
+      eventKey,
+      scheme,
     });
     return { hash };
   });
 }
 
-/** Recompute the chain from genesis and report the first broken link, if any. */
-export async function verifyAuditChain(db: Db): Promise<{ ok: boolean; brokenAtId?: number }> {
-  const rows = await db.select().from(auditLog).orderBy(auditLog.id);
+/** One row as `verifyChainRows` needs it — the hashed fields plus id/scheme. */
+export interface VerifiableRow {
+  id: number;
+  caseId: string | null;
+  actor: string;
+  action: string;
+  detail: Record<string, unknown>;
+  prevHash: string;
+  hash: string;
+  scheme: string;
+  /** Hashed for v2 rows; `Date` (from the DB) or ISO string (from a test). Ignored for v1. */
+  ts: Date | string;
+  /** Hashed for v2 rows. Ignored for v1. */
+  runId: string;
+  /** Hashed for v2 rows. Ignored for v1. */
+  eventKey: string;
+}
+
+/** Normalize a timestamp to the ISO string the writer hashed. */
+function tsToIso(ts: Date | string): string {
+  return typeof ts === "string" ? ts : ts.toISOString();
+}
+
+export interface ChainVerification {
+  ok: boolean;
+  /** Id of the first row whose link fails, if any. */
+  brokenAtId?: number;
+  /** Why it failed. */
+  reason?: "prev-hash-mismatch" | "hash-mismatch" | "missing-hmac-key" | "scheme-downgrade" | "unknown-scheme";
+}
+
+/**
+ * Pure chain verifier: recompute every row from genesis and report the first broken link.
+ * Takes the rows (sorted by id) and the HMAC key rather than a database handle, so it is
+ * unit-testable without Postgres and reusable by the CLI, the console, and the anchor check.
+ *
+ * A `v2` row with no key available FAILS at that row (`missing-hmac-key`) rather than being
+ * skipped — that is what makes "recomputing the chain without AUDIT_HMAC_KEY cannot produce
+ * valid rows" (§6.2 acceptance) true: an attacker who drops the key cannot make verification
+ * pass by pretending the keyed rows are plain SHA-256.
+ *
+ * The `scheme` column is DB-controlled, so it cannot be trusted on its own: an attacker with
+ * write access could tamper a `v2` row, relabel it `v1`, recompute its hash with keyless
+ * SHA-256, and re-chain the tail — verification would pass with no key at all. We close that
+ * by enforcing a MONOTONIC scheme: the chain may open with a `v1` prefix (rows written before
+ * HMAC was enabled, which must still verify), but once any `v2` row appears every later row
+ * must be `v2`. A `v1` row after the boundary is a downgrade attack → `scheme-downgrade`.
+ */
+export function verifyChainRows(rows: VerifiableRow[], hmacKey?: string): ChainVerification {
   let prevHash = GENESIS_HASH;
+  let seenV2 = false;
   for (const row of rows) {
-    const expected = hashEntry(prevHash, {
-      actor: row.actor,
-      action: row.action,
-      detail: row.detail,
-      caseId: row.caseId ?? undefined,
-    });
-    if (row.prevHash !== prevHash || row.hash !== expected) {
-      return { ok: false, brokenAtId: row.id };
+    // Reject an unrecognized scheme outright rather than silently coercing it to `v1`: a
+    // DB writer must not be able to smuggle a tampered row past verification by stamping it
+    // with a scheme the verifier does not know how to check.
+    if (row.scheme !== "v1" && row.scheme !== "v2") {
+      return { ok: false, brokenAtId: row.id, reason: "unknown-scheme" };
+    }
+    const scheme: AuditScheme = row.scheme;
+    if (scheme === "v1" && seenV2) {
+      return { ok: false, brokenAtId: row.id, reason: "scheme-downgrade" };
+    }
+    if (scheme === "v2") seenV2 = true;
+    if (scheme === "v2" && !hmacKey) {
+      return { ok: false, brokenAtId: row.id, reason: "missing-hmac-key" };
+    }
+    if (row.prevHash !== prevHash) {
+      return { ok: false, brokenAtId: row.id, reason: "prev-hash-mismatch" };
+    }
+    const expected = computeAuditHash(
+      scheme,
+      prevHash,
+      {
+        caseId: row.caseId ?? undefined,
+        actor: row.actor,
+        action: row.action,
+        detail: row.detail,
+        ts: tsToIso(row.ts),
+        runId: row.runId,
+        eventKey: row.eventKey,
+      },
+      hmacKey,
+    );
+    if (row.hash !== expected) {
+      return { ok: false, brokenAtId: row.id, reason: "hash-mismatch" };
     }
     prevHash = row.hash;
   }
   return { ok: true };
+}
+
+/** Recompute the chain from genesis and report the first broken link, if any. */
+export async function verifyAuditChain(db: Db): Promise<ChainVerification> {
+  const rows = await db
+    .select({
+      id: auditLog.id,
+      caseId: auditLog.caseId,
+      actor: auditLog.actor,
+      action: auditLog.action,
+      detail: auditLog.detail,
+      prevHash: auditLog.prevHash,
+      hash: auditLog.hash,
+      scheme: auditLog.scheme,
+      ts: auditLog.ts,
+      runId: auditLog.runId,
+      eventKey: auditLog.eventKey,
+    })
+    .from(auditLog)
+    .orderBy(auditLog.id);
+  return verifyChainRows(rows, getEnv().AUDIT_HMAC_KEY);
 }

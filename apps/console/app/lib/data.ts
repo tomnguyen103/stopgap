@@ -7,9 +7,13 @@ import {
   listShadowRuns,
   schema,
   shadowStatsByClass,
+  verifyAnchors,
+  verifyAuditChain,
 } from "@stopgap/db";
 import type {
+  AnchorVerification,
   AuditRow,
+  ChainVerification,
   FeedFreshness,
   CaseRow,
   ProtocolRow,
@@ -60,6 +64,20 @@ export async function getWorkflowState(key: string): Promise<CaseState | undefin
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Audit-chain integrity for the verification page (PHASE6 §6.2): the overall chain result
+ * (green, or the first broken row id) plus every stored external anchor with whether its
+ * pinned head still matches the live chain. Read-only — safe in demo mode as a viewer.
+ */
+export async function getAuditIntegrity(): Promise<{
+  chain: ChainVerification;
+  anchors: AnchorVerification[];
+}> {
+  const db = getDb();
+  const [chain, anchors] = await Promise.all([verifyAuditChain(db), verifyAnchors(db)]);
+  return { chain, anchors };
 }
 
 /** Shadow-mode aggregates per drug class, with the promotion stage each has earned. */
