@@ -117,6 +117,9 @@ const mockActivities: typeof activities = {
     return { delivered };
   },
   recordAck: async (input) => {
+    // A key saying "ackfails" models durable ack persistence that never succeeds — the activity
+    // rejects on every attempt, so the workflow sees a terminal failure after its retries.
+    if (/ackfails/i.test(input.key)) throw new Error("acknowledgments table unreachable");
     recordedAcks.push(input);
   },
 };
@@ -386,6 +389,32 @@ describe("escalation ladder (time-skipped)", () => {
       const st = await handle.query(stateQuery);
       expect(st.acked).toBe(false);
       expect(st.ackedBy).toBeUndefined();
+      expect(recordedAcks.filter((a) => a.key === key)).toHaveLength(0);
+    });
+  }, 60_000);
+
+  it("resumes the ladder when an acknowledgment cannot be persisted", async () => {
+    await withWorker(async () => {
+      // An ack the DB never accepts must not quietly bury the remaining tiers: the case is not
+      // acknowledged (no row, no audit entry), so the director and admin still have to be paged.
+      const key = "critical-ackfails";
+      const handle = await env.client.workflow.start(shortageCaseWorkflow, {
+        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-esc-ackfails-${Date.now()}`,
+      });
+      await env.sleep("1 minute");
+      expect((await handle.query(stateQuery)).escalationStep).toBe(0);
+      await handle.signal(acknowledgeSignal, { userId: "user-7", label: "pharmacist-7" });
+      await env.sleep("90 minutes");
+
+      const st = await handle.query(stateQuery);
+      expect(st.acked).toBe(false);
+      expect(st.ackedBy).toBeUndefined();
+      expect(st.ackError).toBeDefined();
+      // The ladder resumed rather than dying on the rolled-back flag.
+      expect(st.escalationStep).toBe(2);
+      expect(escalationNotifications.filter((n) => n.key === key).map((f) => f.stepIndex)).toEqual([0, 1, 2]);
       expect(recordedAcks.filter((a) => a.key === key)).toHaveLength(0);
     });
   }, 60_000);

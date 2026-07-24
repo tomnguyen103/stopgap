@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { acknowledgeCase } from "../../lib/actions";
+import { formatUtc } from "../../lib/format";
 
 /**
  * The per-case escalation timeline + acknowledge control (PHASE6 §6.3). Shows the ladder as it
@@ -18,27 +19,23 @@ export interface AckRow {
   ackedByLabel: string;
 }
 
-/**
- * UTC, not locale: this is a client component, so a locale/timezone-dependent string would render
- * one way on the server and another in the browser and trip React's hydration check. Matches the
- * audit page's format.
- */
-function formatUtc(ts: string): string {
-  return new Date(ts).toISOString().replace("T", " ").slice(0, 19) + " UTC";
-}
 
 export function EscalationPanel({
   workflowId,
   escalationStep,
   escalatedAt,
+  escalationSendFailures,
   acked,
+  ackError,
   acks,
   canAck,
 }: {
   workflowId: string;
   escalationStep: number | undefined;
   escalatedAt: string[];
+  escalationSendFailures: number[];
   acked: boolean;
+  ackError: string | undefined;
   acks: AckRow[];
   canAck: boolean;
 }) {
@@ -58,10 +55,23 @@ export function EscalationPanel({
             ? `Notified through tier ${String(escalationStep ?? 0)} — awaiting acknowledgment.`
             : "Escalation pending."}
       </p>
+      {/* An ack whose durable write failed rolled back to unacknowledged; say why, or the ack just
+          appears to have vanished. */}
+      {ackError ? (
+        <p className="match-bad">
+          Last acknowledgment could not be recorded and did not take effect: {ackError}
+        </p>
+      ) : null}
       <ol className="audit">
         {escalatedAt.map((ts, i) => (
           <li key={`notified-${String(i)}`}>
             <b>tier {i} notified</b> · {formatUtc(ts)}
+          </li>
+        ))}
+        {/* A tier whose send activity failed outright: recorded, never presented as "notified". */}
+        {escalationSendFailures.map((i) => (
+          <li key={`sendfail-${String(i)}`} className="match-bad">
+            <b>tier {i} send failed</b> · nobody was paged for this tier
           </li>
         ))}
         {acks.map((a) => (

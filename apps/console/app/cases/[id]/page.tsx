@@ -103,7 +103,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         workflowId={c.workflowId}
         escalationStep={live?.escalationStep}
         escalatedAt={live?.escalatedAt ?? []}
+        escalationSendFailures={live?.escalationSendFailures ?? []}
         acked={live?.acked ?? acks.length > 0}
+        ackError={live?.ackError}
         acks={acks.map((a) => ({
           step: a.step,
           ackAt: a.ackAt.toISOString(),

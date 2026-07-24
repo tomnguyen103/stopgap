@@ -81,6 +81,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     monitoringWeeks: 0,
     resolved: false,
     escalatedAt: [],
+    escalationSendFailures: [],
     acked: false,
   };
   setHandler(stateQuery, () => state);
@@ -106,6 +107,8 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // an escalation fires on schedule even if the process that scheduled it has since died.
   let pendingAck: { userId: string; label: string; step: number } | undefined;
   let escalationStarted = false;
+  /** Set once `recordAck` has COMMITTED. The ladder stops for a durable ack, never a pending one. */
+  let ackPersisted = false;
   setHandler(acknowledgeSignal, (ack) => {
     // Nothing to acknowledge until the ladder is running. Without this an early signal would set
     // `state.acked` and a later critical/high case would exit the ladder before tier 0 ever paged
@@ -137,6 +140,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       try {
         await acts.recordAck({ key, userId: ack.userId, label: ack.label, step: ack.step });
         state.ackError = undefined;
+        ackPersisted = true;
         return;
       } catch (err) {
         // Persistence gave up after every activity retry: the `acknowledgments` row and the
@@ -162,9 +166,14 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       // Wait out this tier's delay, cut short the moment a human acks. `condition` returns true on
       // ack (stop the ladder), false on timeout (fire this tier).
       if (waitMin > 0) await condition(() => state.acked, waitMin * 60_000);
-      // Ack persistence is the recorder's job (it outlives this loop); the ladder just stops
-      // climbing the moment a human acks.
-      if (state.acked) return;
+      if (state.acked) {
+        // An ack stops the ladder only once it is DURABLE. While the recorder is still retrying,
+        // hold here rather than page — but if persistence ultimately fails, the recorder rolls
+        // `acked` back and the ladder must RESUME, or a failed write would silently bury the
+        // director and admin tiers for a case nobody has actually acknowledged.
+        await condition(() => ackPersisted || !state.acked);
+        if (ackPersisted) return;
+      }
       // A failed send records non-delivery inside the activity and STILL advances the ladder —
       // the existing comms stance: "we tried to page the director" must be falsifiable, and a
       // channel being down cannot pin escalation at one tier forever. The try/catch contains a
@@ -179,11 +188,15 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
           notify: step.notify,
           afterMinutes: step.afterMinutes,
         });
+        state.escalatedAt = [...state.escalatedAt, new Date().toISOString()];
       } catch {
-        // Keep climbing: the next tier is a different audience and may well be reachable.
+        // Keep climbing — the next tier is a different audience and may well be reachable — but
+        // RECORD the skipped tier instead of appending to `escalatedAt`. A rejecting activity
+        // wrote no non-delivery row and bumped no counter, so claiming "tier i notified" here
+        // would be exactly the faked success this codebase refuses.
+        state.escalationSendFailures = [...state.escalationSendFailures, i];
       }
       state.escalationStep = i;
-      state.escalatedAt = [...state.escalatedAt, new Date().toISOString()];
       elapsedMin = step.afterMinutes;
     }
     // Ladder exhausted with no ack: stop at "escalated/unacked" (the case is NOT failed — everyone

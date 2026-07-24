@@ -69,6 +69,13 @@ export interface CaseState {
    */
   escalationStep?: number;
   escalatedAt: string[];
+  /**
+   * Tiers whose notification activity REJECTED outright (its own non-delivery write failed, say).
+   * The ladder keeps climbing past them, so without this the tier would vanish from the record
+   * while progress looked normal — the faked success this codebase refuses. A tier that merely
+   * resolved `delivered: false` is NOT here: the activity already recorded that honestly.
+   */
+  escalationSendFailures: number[];
   acked: boolean;
   /** The acknowledging user's `users.id` (never a claimed string). */
   ackedBy?: string;
