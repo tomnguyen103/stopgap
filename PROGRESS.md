@@ -219,7 +219,13 @@ lib; writeup; post-mortem; portfolio page + video.
   started from the deployed console died with "no such function is exported by the workflow
   bundle". Workflows are now started by name (`SHORTAGE_CASE_WORKFLOW`). Neither dev mode nor
   the unit tests could have surfaced this; only a production build could.
-- [ ] Extract `shadow-ledger` as a standalone open-source library (§12 artifact 5)
+- [x] Extracted `shadow-ledger` as a standalone, dependency-free, storage-agnostic library
+  (§12 artifact 5): ordinal scale + agreement scoring + cohort aggregation + evidence-based
+  promotion gates, MIT licensed, with its own README and 14 tests. `@stopgap/shadow` is now a
+  thin Stopgap-shaped adapter over it (severity scale, "auto-draft" stage name, pharmacist
+  wording), so the mechanism has one implementation and one test suite. Not published to npm
+  — that is a release decision, and `PUBLISHING.md` records the steps plus the
+  `pnpm pack` vs `npm pack` entrypoint trap.
 - [ ] Engineering writeup + post-mortem + portfolio page (§12, §15)
 
 ---

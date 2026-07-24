@@ -88,6 +88,14 @@ Evals run **outside** `pnpm gate` on purpose — small local models aren't fully
 even at temperature 0, so a hard build gate on live-model output would train everyone to
 ignore red. `pnpm gate` stays deterministic; `pnpm eval` reports the real signal.
 
+## `shadow-ledger`
+
+The shadow-mode harness is extracted as a standalone, dependency-free library in
+[`packages/shadow-ledger`](packages/shadow-ledger): an ordinal scale, agreement scoring
+against a human baseline, per-cohort aggregation, and promotion gates that grant autonomy
+from measured agreement rather than from a demo that went well. `@stopgap/shadow` is a thin
+adapter over it that keeps the clinical vocabulary.
+
 ## Deployment & demo mode
 
 A single-VPS `docker compose` stack lives in [`deploy/`](deploy) — console, worker, Temporal

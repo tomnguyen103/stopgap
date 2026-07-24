@@ -10,6 +10,7 @@
  */
 
 import type { Severity } from "@stopgap/core";
+import { createScale, scoreAgreement as scoreOrdinal, type AgreementScore as LibScore } from "shadow-ledger";
 
 export interface ShadowProposal {
   severity: Severity;
@@ -36,17 +37,24 @@ export interface AgreementScore {
   alternativeExistenceAgreed: boolean;
 }
 
-const SEVERITY_RANK: Severity[] = ["none", "low", "moderate", "high", "critical"];
+/**
+ * The scoring itself now lives in the extracted `shadow-ledger` library (PROJECT_PLAN §12.5);
+ * this module is the Stopgap-shaped adapter over it. Keeping the adapter means the domain
+ * vocabulary stays domain vocabulary — a pharmacist reads "severity under-called", not
+ * "level under-called" — while the mechanism has one implementation and one test suite.
+ */
+export const SEVERITY_SCALE = createScale<Severity>(["none", "low", "moderate", "high", "critical"]);
 
 export function scoreAgreement(proposal: ShadowProposal, baseline: ShadowBaseline): AgreementScore {
-  const severityAgreed = proposal.severity === baseline.severity;
-  const severityUnderCalled =
-    SEVERITY_RANK.indexOf(proposal.severity) < SEVERITY_RANK.indexOf(baseline.severity);
-  const alternativeExistenceAgreed = proposal.alternatives.length > 0 === baseline.hasAlternative;
+  const score: LibScore = scoreOrdinal(
+    SEVERITY_SCALE,
+    { level: proposal.severity, hasOutcome: proposal.alternatives.length > 0 },
+    { level: baseline.severity, hasOutcome: baseline.hasAlternative },
+  );
   return {
-    agreement: (Number(severityAgreed) + Number(alternativeExistenceAgreed)) / 2,
-    severityAgreed,
-    severityUnderCalled,
-    alternativeExistenceAgreed,
+    agreement: score.agreement,
+    severityAgreed: score.levelAgreed,
+    severityUnderCalled: score.levelUnderCalled,
+    alternativeExistenceAgreed: score.outcomeAgreed,
   };
 }

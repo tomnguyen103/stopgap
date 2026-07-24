@@ -1,4 +1,9 @@
 import type { ShadowClassStats } from "@stopgap/db";
+import {
+  evaluatePromotion as evaluateGates,
+  type CohortStats,
+  type Gates,
+} from "shadow-ledger";
 
 /**
  * Per-drug-class promotion gates (PROJECT_PLAN §3A: shadow → suggest → auto-draft).
@@ -47,42 +52,46 @@ export const PROMOTION_GATES: Record<Exclude<PromotionStage, "shadow">, Promotio
   },
 };
 
+/**
+ * The gate arithmetic lives in the extracted `shadow-ledger` library (PROJECT_PLAN §12.5).
+ * This module keeps Stopgap's vocabulary — "auto-draft" says what the stage actually buys
+ * here, and "under-escalation" is the word a pharmacist uses — and translates.
+ */
+const LIB_GATES: Gates = {
+  suggest: {
+    minRuns: PROMOTION_GATES.suggest.minRuns,
+    minMeanAgreement: PROMOTION_GATES.suggest.minMeanAgreement,
+    minLevelAgreementRate: PROMOTION_GATES.suggest.minSeverityAgreementRate,
+    maxUnderCallRate: PROMOTION_GATES.suggest.maxUnderEscalationRate,
+  },
+  autonomous: {
+    minRuns: PROMOTION_GATES["auto-draft"].minRuns,
+    minMeanAgreement: PROMOTION_GATES["auto-draft"].minMeanAgreement,
+    minLevelAgreementRate: PROMOTION_GATES["auto-draft"].minSeverityAgreementRate,
+    maxUnderCallRate: PROMOTION_GATES["auto-draft"].maxUnderEscalationRate,
+  },
+};
+
 export interface PromotionDecision {
   stage: PromotionStage;
   /** Why the class did not advance further — shown in the dashboard, not just logged. */
   blockedBy: string[];
 }
 
-function unmet(stats: ShadowClassStats, thresholds: PromotionThresholds): string[] {
-  const reasons: string[] = [];
-  if (stats.runs < thresholds.minRuns) {
-    reasons.push(`needs ${thresholds.minRuns} scored runs (has ${stats.runs})`);
-  }
-  if (stats.meanAgreement < thresholds.minMeanAgreement) {
-    reasons.push(
-      `needs mean agreement ${thresholds.minMeanAgreement} (has ${stats.meanAgreement.toFixed(2)})`,
-    );
-  }
-  if (stats.severityAgreementRate < thresholds.minSeverityAgreementRate) {
-    reasons.push(
-      `needs severity agreement ${thresholds.minSeverityAgreementRate} (has ${stats.severityAgreementRate.toFixed(2)})`,
-    );
-  }
-  if (stats.underEscalationRate > thresholds.maxUnderEscalationRate) {
-    reasons.push(
-      `needs under-escalation at or below ${thresholds.maxUnderEscalationRate} (has ${stats.underEscalationRate.toFixed(2)})`,
-    );
-  }
-  return reasons;
-}
-
 /** The stage a drug class has earned from its shadow-ledger aggregates. */
 export function evaluatePromotion(stats: ShadowClassStats): PromotionDecision {
-  const suggestBlockers = unmet(stats, PROMOTION_GATES.suggest);
-  if (suggestBlockers.length > 0) return { stage: "shadow", blockedBy: suggestBlockers };
-
-  const autoDraftBlockers = unmet(stats, PROMOTION_GATES["auto-draft"]);
-  if (autoDraftBlockers.length > 0) return { stage: "suggest", blockedBy: autoDraftBlockers };
-
-  return { stage: "auto-draft", blockedBy: [] };
+  const cohort: CohortStats = {
+    runs: stats.runs,
+    meanAgreement: stats.meanAgreement,
+    levelAgreementRate: stats.severityAgreementRate,
+    underCallRate: stats.underEscalationRate,
+  };
+  const decision = evaluateGates(cohort, LIB_GATES);
+  return {
+    stage: decision.stage === "autonomous" ? "auto-draft" : decision.stage,
+    // The library says "level"/"under-call"; the dashboard this feeds is read by pharmacists.
+    blockedBy: decision.blockedBy.map((reason: string) =>
+      reason.replace("level agreement", "severity agreement").replace("under-call rate", "under-escalation rate"),
+    ),
+  };
 }
