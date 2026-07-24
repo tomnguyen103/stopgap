@@ -177,6 +177,28 @@ describe("with STOPGAP_API_KEY set", () => {
     expect(JSON.parse(lastCall().init.body as string)).toEqual({ kind: "reject", reason: "dose is wrong" });
   });
 
+  it("surfaces an unreachable console as a structured failure, not an unhandled rejection", async () => {
+    // No Response at all — a stopped console, a wrong base URL, a dead network. Without the catch
+    // in `callApi` this rejects and the MCP client shows the model an opaque transport string.
+    fetchMock.mockRejectedValue(new Error("fetch failed"));
+    const result = (await listCasesTool(listCasesInput.parse({ limit: 5 }))) as {
+      ok: false;
+      status: number;
+      error: string;
+      message: string;
+    };
+    expect(result).toMatchObject({ ok: false, error: "request_failed" });
+    // `status: 0` — no HTTP exchange happened, so no status code may be claimed.
+    expect(result.status).toBe(0);
+    expect(result.message).toContain("http://console.test");
+  });
+
+  it("bounds the call with an abort signal so an unresponsive console cannot hang the tool", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ cases: [] }));
+    await listCasesTool(listCasesInput.parse({ limit: 5 }));
+    expect(lastCall().init.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("surfaces a scope refusal as a structured failure, not a thrown transport error", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ error: "forbidden", message: 'this API key does not carry the "protocols:write" scope' }, 403),

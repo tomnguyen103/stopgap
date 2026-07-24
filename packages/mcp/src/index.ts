@@ -5,10 +5,12 @@ export {
   getProtocolTool,
   getShadowStatsTool,
   resolveExceptionTool,
+  reviewCaseTool,
   listCasesInput,
   caseInput,
   shadowStatsInput,
   resolveExceptionInput,
+  reviewCaseInput,
   type ApiFailure,
   type NotConfigured,
 } from "./tools.js";

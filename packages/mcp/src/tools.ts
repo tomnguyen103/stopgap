@@ -42,6 +42,13 @@ const NOT_CONFIGURED_MESSAGE =
   "The key's plaintext is shown once at issue time. No key means no access: there is deliberately " +
   "no direct-database fallback.";
 
+/**
+ * How long a single API call may hang before it is abandoned. Ten seconds: long enough for a cold
+ * Next.js route to compile in dev, short enough that a wedged console surfaces as an error the
+ * model can report rather than a tool call that never returns.
+ */
+const REQUEST_TIMEOUT_MS = 10_000;
+
 /** The shape every tool returns when the API refused or failed the request. */
 export interface ApiFailure {
   ok: false;
@@ -74,14 +81,39 @@ async function callApi(
   const env = getEnv();
   if (!env.STOPGAP_API_KEY) return notConfigured();
 
-  const response = await fetch(new URL(path, env.STOPGAP_API_BASE_URL), {
-    method: init?.method ?? "GET",
-    headers: {
-      authorization: `Bearer ${env.STOPGAP_API_KEY}`,
-      ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
-    },
-    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
-  });
+  // The non-2xx path below is not the only way this call fails. A stopped console, a wrong
+  // STOPGAP_API_BASE_URL, or a hung connection never produces a Response at all — and an
+  // unhandled throw here reaches the MCP client as an opaque transport string, the exact outcome
+  // the contract above promises to avoid. The timeout matters for the same reason: an MCP client
+  // has no way to cancel a tool call, so an unresponsive console would hang the session forever
+  // rather than telling the model something it can act on.
+  let response: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    response = await fetch(new URL(path, env.STOPGAP_API_BASE_URL), {
+      method: init?.method ?? "GET",
+      headers: {
+        authorization: `Bearer ${env.STOPGAP_API_KEY}`,
+        ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    // `status: 0` — no HTTP exchange happened, so claiming any status code would be a fabrication.
+    return {
+      ok: false,
+      status: 0,
+      error: "request_failed",
+      message:
+        err instanceof Error
+          ? `could not reach the Stopgap API at ${env.STOPGAP_API_BASE_URL}: ${err.message}`
+          : `could not reach the Stopgap API at ${env.STOPGAP_API_BASE_URL}`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 
   const payload: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {

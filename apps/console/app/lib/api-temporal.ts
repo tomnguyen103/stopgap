@@ -19,10 +19,15 @@ import { jsonError } from "./api-response";
  * integration's logs needs to know which component to go look at, and "the write failed" does not
  * tell them.
  *
- * NO FAKE SUCCESS. The failure path returns a refusal, never a 202. A route that swallowed the
- * error and reported the write as accepted would tell a pharmacy's integration that clinical
- * guidance had been recorded when the signal never landed — worse than any error code, because the
- * caller stops retrying.
+ * NO FAKE SUCCESS — AND NO FAKE FAILURE EITHER. The failure path returns a refusal, never a 202: a
+ * route that swallowed the error and reported the write as accepted would tell a pharmacy's
+ * integration that clinical guidance had been recorded when the signal never landed. But the
+ * message must not overcorrect into the opposite lie. A transport error is AMBIGUOUS: the signal
+ * may have reached Temporal and been applied before the response was lost. Telling the caller
+ * "nothing was recorded" would be a claim this process cannot verify, and it invites a blind retry
+ * that double-applies a clinical decision. So the message reports the outcome as UNKNOWN and tells
+ * the caller to re-read the case before retrying — the honest state, and the only one that leads
+ * to a safe next action.
  *
  * The underlying error is deliberately not echoed into the body: it is a gRPC transport string that
  * can carry internal addresses, and it is already available to the operator in the server logs.
@@ -39,9 +44,10 @@ export async function signalTemporalOr503<T>(
       response: jsonError(
         503,
         "conflict",
-        "the write was NOT applied: Stopgap could not reach Temporal to signal the case's durable " +
-          "workflow (the worker may be stopped, or this case's workflow may have already completed). " +
-          "Nothing was recorded — retry once the workflow engine is available.",
+        "outcome unknown: Stopgap could not reach Temporal to signal the case's durable workflow " +
+          "(the worker may be stopped, or this case's workflow may have already completed). The " +
+          "signal may or may not have been applied before the connection failed — re-read the case " +
+          "to establish its current state before retrying.",
         { "Retry-After": "30" },
       ),
     };

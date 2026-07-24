@@ -81,7 +81,18 @@ export async function authenticateApiRequest(
     return { ok: false, response: unauthorized() };
   }
 
-  const key = await findActiveApiKeyByPlaintext(token);
+  // The key store IS Postgres, so an outage here is not an authentication failure — it is this
+  // gate being unable to reach a verdict. Left unhandled it throws past `ApiAuthResult` and Next
+  // answers 500 with an HTML page, breaking the envelope every other path upholds. It must also
+  // never degrade to 401: telling an integrator their credential is invalid when the truth is
+  // "the database is down" sends them to rotate a key that was fine, and a 401 is not retryable
+  // while this condition is. 503, naming the store, is the honest answer.
+  let key: ApiKeyRow | undefined;
+  try {
+    key = await findActiveApiKeyByPlaintext(token);
+  } catch (err) {
+    return { ok: false, response: storeUnavailable("verify the API key", err) };
+  }
   if (!key) {
     return { ok: false, response: unauthorized() };
   }
@@ -97,7 +108,15 @@ export async function authenticateApiRequest(
     };
   }
 
-  const reservation = await reserveApiKeyRequest(key.id, new Date(Date.now() - RATE_WINDOW_MS), key.rateLimitPerHour);
+  // Same reasoning as the lookup, with one addition: a reservation that cannot be recorded must
+  // NOT fall open. Admitting the request because the counter is unreachable would turn a database
+  // blip into an unmetered window — the one moment the limit exists to cover.
+  let reservation: { allowed: boolean; recent: number };
+  try {
+    reservation = await reserveApiKeyRequest(key.id, new Date(Date.now() - RATE_WINDOW_MS), key.rateLimitPerHour);
+  } catch (err) {
+    return { ok: false, response: storeUnavailable("record this request against the key's rate limit", err) };
+  }
   if (!reservation.allowed) {
     return {
       ok: false,
@@ -118,6 +137,21 @@ export async function authenticateApiRequest(
 
 function unauthorized(): Response {
   return jsonError(401, "unauthorized", UNAUTHENTICATED_MESSAGE, { "WWW-Authenticate": "Bearer" });
+}
+
+/**
+ * 503 for a key store this gate could not reach. The underlying error is logged, not echoed: a
+ * driver error can carry connection strings and internal hostnames, and an unauthenticated caller
+ * triggers this path, so the body says only WHICH step failed.
+ */
+function storeUnavailable(what: string, err: unknown): Response {
+  console.error(`[api] key store unavailable while attempting to ${what}`, err);
+  return jsonError(
+    503,
+    "conflict",
+    `could not ${what}: the credential store is unavailable. This is not a problem with your key — retry shortly.`,
+    { "Retry-After": "30" },
+  );
 }
 
 /**

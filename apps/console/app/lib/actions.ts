@@ -234,18 +234,32 @@ export async function issueApiKeyAction(
     rateLimitPerHour: parsed.rateLimitPerHour,
     createdByUserId: principal.userId,
   });
-  await recordPrivilegedAudit(
-    principal,
-    "api_key.issued",
-    {
-      apiKeyId: row.id,
-      name: row.name,
-      keyPrefix: row.keyPrefix,
-      scopes: parsed.scopes,
-      rateLimitPerHour: row.rateLimitPerHour,
-    },
-    `api_key.issued.${row.id}`,
-  );
+  // COMPENSATE IF THE AUDIT APPEND FAILS. The key row is committed by the time we get here, and the
+  // plaintext is about to be thrown away with the request — so a failed audit would leave a LIVE
+  // credential that nobody holds and no chain entry explains: an orphan the admin page shows but
+  // cannot account for. Revoking it makes the failure clean, because a revoked key authenticates
+  // nothing. This is a compensating action rather than one transaction on purpose: `appendAudit`
+  // takes its own advisory lock to serialize the hash chain, and nesting that inside the issue
+  // transaction would let a slow chain append hold an unrelated write open.
+  try {
+    await recordPrivilegedAudit(
+      principal,
+      "api_key.issued",
+      {
+        apiKeyId: row.id,
+        name: row.name,
+        keyPrefix: row.keyPrefix,
+        scopes: parsed.scopes,
+        rateLimitPerHour: row.rateLimitPerHour,
+      },
+      `api_key.issued.${row.id}`,
+    );
+  } catch (err) {
+    // Best-effort: if this also fails the key is still unusable to anyone but this request, which
+    // is ending without returning the plaintext. Rethrow the ORIGINAL failure either way.
+    await revokeApiKey(row.id).catch(() => undefined);
+    throw err;
+  }
   revalidatePath("/admin/api-keys");
   return { id: row.id, name: row.name, keyPrefix: row.keyPrefix, plaintext };
 }
@@ -256,6 +270,13 @@ export async function revokeApiKeyAction(id: unknown): Promise<void> {
   const principal = await requireRole("manage_api_keys");
   const keyId = z.string().uuid().parse(id);
   // Only audit a real revocation — revokeApiKey is a no-op on an already-revoked key.
+  //
+  // Revoke first, audit second, and deliberately NO compensation if the audit throws: unlike
+  // issuance, the uncompensated state here is the SAFE one. A revoked key with no chain entry is a
+  // credential that can no longer act; undoing the revocation to keep the pair consistent would
+  // re-arm a key an admin has already decided to kill. The action still throws, so the operator
+  // sees the failure and can re-run it — the second run is a no-op that appends nothing, which is
+  // why the audit gap is worth recording here rather than papering over.
   if (await revokeApiKey(keyId)) {
     await recordPrivilegedAudit(principal, "api_key.revoked", { apiKeyId: keyId }, `api_key.revoked.${keyId}`);
   }

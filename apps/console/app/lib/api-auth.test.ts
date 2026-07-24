@@ -165,6 +165,32 @@ describe("rate limiting", () => {
   });
 });
 
+describe("key store outage", () => {
+  it("503s — never 401 — when the key LOOKUP throws, so a DB blip is not read as a bad credential", async () => {
+    findActiveApiKeyByPlaintext.mockRejectedValue(new Error("connection terminated unexpectedly"));
+    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_any" }), "cases:read");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(503);
+    expect(result.response.headers.get("Retry-After")).toBe("30");
+    const body = await result.response.json();
+    expect(body.error).toBe("conflict");
+    // The driver error must not reach the caller: it can carry connection strings, and this path
+    // is reachable unauthenticated.
+    expect(body.message).not.toContain("connection terminated");
+  });
+
+  it("503s and FAILS CLOSED when the rate reservation throws — an unrecordable request is refused", async () => {
+    findActiveApiKeyByPlaintext.mockResolvedValue(keyRow(["cases:read"]));
+    reserveApiKeyRequest.mockRejectedValue(new Error("deadlock detected"));
+    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_ok" }), "cases:read");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.response.status).toBe(503);
+    expect(touchApiKeyUsed).not.toHaveBeenCalled();
+  });
+});
+
 describe("audit attribution", () => {
   it("labels the acting principal as the KEY, not the human who issued it", () => {
     expect(apiKeyActorLabel(keyRow(["cases:read"]))).toBe("api-key:epic-integration");
