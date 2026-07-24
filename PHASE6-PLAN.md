@@ -171,6 +171,27 @@ app-layer bug cannot leak cross-tenant.
 - Failed cross-tenant query demonstrable in psql with the policy SQL shown.
 - Two seeded orgs run side by side; cases, protocols, shadow, audit fully disjoint.
 
+**Open question (deferred).** The "org picker" shipped as an ADMIN-ONLY active-org switch, because
+one IdP subject = one `users` row = one org makes ordinary users single-org by construction; a
+genuine multi-org *pharmacist* needs a `user_organizations` join table with per-org role grants,
+which this PR does not build.
+
+**Open question (deferred).** `escalation_policies` stays GLOBAL — one severity ladder shared by
+every organization. So an admin in org A editing the `critical` ladder changes who gets paged in
+org B, silently and with no cross-tenant record of it. Making it per-org means widening
+`escalation_policies_severity_uq` to `(org_id, severity)`, seeding a default ladder for every new
+org (including at org-creation time), and deciding what happens to a tenant that has none.
+
+**Open question (deferred).** Prometheus metrics are DEPLOYMENT-WIDE aggregates with no `org`
+label. Per-org series were built and removed: `/api/metrics` is exempt from the auth middleware so
+Prometheus can scrape it, so labelling by tenant slug would let anyone who can reach the console —
+including any one tenant's users — enumerate every hospital on the deployment and read each one's
+case volume, exception backlog and oldest unacknowledged critical case. The cost is that
+`stopgap_critical_case_unacked_seconds > 3600` names the deployment rather than the facility.
+Restoring per-org series requires an AUTHENTICATED scrape (a dedicated scrape credential, or the
+gauges served from a route behind the existing session/API-key gates) — deliberately not solved by
+inventing a token scheme inside this PR.
+
 **Estimate:** 5–8 days.
 
 ## 6.6 Feed-resolution auto-detect

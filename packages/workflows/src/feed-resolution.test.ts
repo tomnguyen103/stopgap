@@ -14,6 +14,9 @@ const POLL_TS = "2026-07-24T00:00:00.000Z";
 function monitoringCase(over: Partial<OpenMonitoringCase> = {}): OpenMonitoringCase {
   return {
     caseId: over.caseId ?? "case-1",
+    // The id the case ROW carries — what the poll's resolution signal is addressed to (PHASE6
+    // §6.5). Spelled in the org-qualified format a case opened after pass 2 would have.
+    workflowId: over.workflowId ?? "org-aaaaaaaa-0000-0000-0000-0000000000a1-case-heparin-sodium",
     key: over.key ?? "heparin sodium",
     source: over.source ?? "openfda",
     sourceId: over.sourceId ?? "0338-0431-03:Current",

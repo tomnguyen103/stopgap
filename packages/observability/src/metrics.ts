@@ -1,5 +1,34 @@
 import { getEnv } from "@stopgap/core/env";
-import { getDb, getLlmSpend, getOpsMetrics } from "@stopgap/db";
+import { getDb, getLlmSpend, getOpsMetrics, withBypassDb } from "@stopgap/db";
+
+/**
+ * THE SCRAPE IS DEPLOYMENT-WIDE, AND DELIBERATELY CARRIES NO `org` LABEL (PHASE6 §6.5).
+ *
+ * A scrape has no session, no request and no key, so there is nothing to derive an org from. The
+ * tempting answer — emit every case-derived gauge once per organization, labelled with the tenant's
+ * slug — was written and then removed, because of WHERE these gauges are served from. The console's
+ * `/api/metrics` route is exempted from the auth middleware so Prometheus can reach it, i.e. it is
+ * readable by anyone who can reach the console, including any single tenant's users. Per-org series
+ * would publish, to that audience, the list of every hospital on the deployment plus each one's case
+ * volume, exception backlog and oldest unacknowledged critical case. That is a tenant-enumeration
+ * leak dressed as observability, and it is not something §6.5 asked for.
+ *
+ * So the gauges are aggregates over the whole deployment, exactly as they were before multi-tenancy,
+ * and they are computed as ONE aggregate query rather than by summing per-org results — an average
+ * of per-tenant average ack latencies is not the deployment's average ack latency.
+ *
+ * WHAT IS LOST, STATED RATHER THAN PAPERED OVER: `stopgap_critical_case_unacked_seconds > 3600` now
+ * names the deployment, not the facility, so an operator still has to open the console to find which
+ * hospital is behind. Restoring per-org series needs an AUTHENTICATED scrape endpoint (a scrape
+ * credential, or serving them from a route behind the existing session/API-key gates); that is
+ * recorded as an open question under §6.5 in PHASE6-PLAN.md rather than solved by inventing a token
+ * scheme here.
+ *
+ * `withBypassDb` is what lets one query see every tenant's rows: the aggregates run on the
+ * maintenance connection. On a deployment where that is not configured and the app role is (rightly)
+ * subject to the policies, these numbers come back as zeros — which is why `client.ts` warns loudly
+ * at pool creation and `/api/readyz` reports `rlsEnforced`.
+ */
 
 /**
  * Prometheus metrics (PHASE6 §6.4), hand-rolled rather than pulled from a heavy exporter lib.
@@ -137,8 +166,12 @@ export function resetCounters(): void {
  * cached counter. Used by BOTH the console `/api/metrics` route and the worker sidecar.
  */
 export async function collectGaugeFamilies(): Promise<MetricFamily[]> {
-  // Independent queries, so one scrape costs one round trip's latency rather than two.
-  const [ops, spend] = await Promise.all([getOpsMetrics(), getLlmSpend(getDb())]);
+  // Independent queries, so one scrape costs the slowest of them rather than their sum. The ops
+  // aggregate passes `undefined` for the org: deployment-wide, on the maintenance connection.
+  const [ops, spend] = await Promise.all([
+    withBypassDb((db) => getOpsMetrics(undefined, db)),
+    getLlmSpend(getDb()),
+  ]);
   // Unset cap → 0, so a dashboard/alert can distinguish "no cap configured" from "cap not yet
   // reached" (the SpendOver80PctCap alert guards on cap > 0 for exactly this reason).
   const capUsd = getEnv().LLM_DAILY_USD_CAP ?? 0;
@@ -146,19 +179,19 @@ export async function collectGaugeFamilies(): Promise<MetricFamily[]> {
   return [
     {
       name: "stopgap_cases_opened_today",
-      help: "Cases opened on the current UTC day.",
+      help: "Cases opened on the current UTC day, across the deployment.",
       type: "gauge",
       samples: [{ value: ops.casesOpenedToday }],
     },
     {
       name: "stopgap_exception_queue_depth",
-      help: "Cases parked in the exception queue awaiting a human.",
+      help: "Cases parked in the exception queue awaiting a human, across the deployment.",
       type: "gauge",
       samples: [{ value: ops.exceptionQueueDepth }],
     },
     {
       name: "stopgap_feed_staleness_seconds",
-      help: "Seconds since a source's newest stored feed record.",
+      help: "Seconds since a source's newest stored feed record (deployment-wide: feeds are shared).",
       type: "gauge",
       samples: ops.feedStaleness.map((f) => ({ value: f.secondsStale, labels: { source: f.source } })),
     },
@@ -176,19 +209,21 @@ export async function collectGaugeFamilies(): Promise<MetricFamily[]> {
     },
     {
       name: "stopgap_ack_latency_seconds",
-      help: "Average seconds from case open to first acknowledgment (absent when nothing acked).",
+      help: "Average seconds from case open to first acknowledgment across the deployment (no sample when nothing has been acked).",
       type: "gauge",
+      // Nothing acked anywhere emits NO sample rather than a zero: "nobody has acked anything yet"
+      // and "everyone acks instantly" must not render as the same number.
       samples: ops.ackLatencySeconds === undefined ? [] : [{ value: ops.ackLatencySeconds }],
     },
     {
       name: "stopgap_critical_case_unacked_seconds",
-      help: "Age in seconds of the oldest unacknowledged critical case (0 when none).",
+      help: "Age in seconds of the oldest unacknowledged critical case across the deployment (0 when none).",
       type: "gauge",
       samples: [{ value: ops.criticalUnacked.maxAgeSeconds }],
     },
     {
       name: "stopgap_critical_case_unacked_count",
-      help: "Open critical cases with no acknowledgment.",
+      help: "Open critical cases with no acknowledgment, across the deployment.",
       type: "gauge",
       samples: [{ value: ops.criticalUnacked.count }],
     },

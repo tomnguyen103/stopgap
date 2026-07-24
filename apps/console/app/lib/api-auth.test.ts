@@ -13,14 +13,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+/**
+ * The org the fixture key is issued INTO (PHASE6 §6.5). Deliberately NOT the seed org: the point of
+ * these assertions is that a REST request scopes to the key's tenant, and a fixture using the seed
+ * org would pass identically if the code had kept a hardcoded default.
+ */
+const KEY_ORG_ID = "dddddddd-0000-0000-0000-0000000000dd";
+
 const findActiveApiKeyByPlaintext = vi.fn();
 const reserveApiKeyRequest = vi.fn(async (..._a: unknown[]) => ({ allowed: true, recent: 1 }));
 const touchApiKeyUsed = vi.fn(async (..._a: unknown[]) => undefined);
 const appendAudit = vi.fn(async (..._a: unknown[]) => ({ hash: "h" }));
 
+/** Orgs `withOrgDb` was opened for, in order — the tenant-scoping assertions read this. */
+const scopedOrgIds: string[] = [];
+
 vi.mock("@stopgap/db", () => ({
   appendAudit: (...a: unknown[]) => appendAudit(...a),
-  getDb: () => ({}),
+  // The production scoping wrapper, stubbed to RECORD the org it was opened for. That is what
+  // makes "a REST request scopes to the KEY's org" assertable without a live database.
+  withOrgDb: (orgId: string, fn: (db: unknown) => Promise<unknown>) => {
+    scopedOrgIds.push(orgId);
+    return fn({});
+  },
   findActiveApiKeyByPlaintext: (...a: unknown[]) => findActiveApiKeyByPlaintext(...a),
   reserveApiKeyRequest: (...a: unknown[]) => reserveApiKeyRequest(...a),
   touchApiKeyUsed: (...a: unknown[]) => touchApiKeyUsed(...a),
@@ -35,13 +50,15 @@ vi.mock("@stopgap/demo", () => ({
   DemoReadOnlyError,
 }));
 
-const { authenticateApiRequest, apiKeyActorLabel } = await import("./api-auth");
+const { authenticateApiRequest, apiKeyActorLabel, recordApiAudit } = await import("./api-auth");
 
 const ISSUER_ID = "44444444-4444-4444-4444-444444444444";
 
 function keyRow(scopes: string[], patch: Record<string, unknown> = {}) {
   return {
     id: "55555555-5555-5555-5555-555555555555",
+    // `api_keys.org_id` is NOT NULL (PHASE6 §6.5): a key is always issued into exactly one tenant.
+    orgId: KEY_ORG_ID,
     name: "epic-integration",
     keyHash: "deadbeef",
     // A real prefix: the namespace PLUS random characters, which is what `generateApiKey` mints.
@@ -65,6 +82,8 @@ beforeEach(() => {
   reserveApiKeyRequest.mockReset();
   reserveApiKeyRequest.mockResolvedValue({ allowed: true, recent: 1 });
   touchApiKeyUsed.mockClear();
+  appendAudit.mockClear();
+  scopedOrgIds.length = 0;
 });
 
 describe("authentication", () => {
@@ -129,7 +148,7 @@ describe("scope enforcement", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.key).toBe(row);
-    expect(touchApiKeyUsed).toHaveBeenCalledWith(row.id);
+    expect(touchApiKeyUsed).toHaveBeenCalledWith(row.orgId, row.id, {});
   });
 
   it("ignores an unrecognized scope stored on the key rather than honouring it", async () => {
@@ -194,5 +213,60 @@ describe("key store outage", () => {
 describe("audit attribution", () => {
   it("labels the acting principal as the KEY, not the human who issued it", () => {
     expect(apiKeyActorLabel(keyRow(["cases:read"]))).toBe("api-key:epic-integration");
+  });
+});
+
+/**
+ * CROSS-TENANT COVERAGE AT THE APPLICATION LAYER (PHASE6 §6.5), with no Postgres involved.
+ *
+ * The RLS suite (`packages/db/src/rls.e2e.test.ts`) proves the database refuses a cross-tenant row.
+ * These assert the layer ABOVE it: that the application never ASKS for one. `withOrgDb` is stubbed
+ * to record the org it was opened for, so a route that scoped to an ambient default — or to
+ * anything a client could influence — shows up here as the wrong id.
+ */
+describe("tenant scoping (PHASE6 §6.5)", () => {
+  it("opens every transaction in the KEY's org, not an ambient default", async () => {
+    const row = keyRow(["cases:read"]);
+    findActiveApiKeyByPlaintext.mockResolvedValue(row);
+    await authenticateApiRequest(request({ authorization: "Bearer sk_live_ok" }), "cases:read");
+    // The last-used stamp is the only DB write this gate performs, and it named the key's org.
+    expect(scopedOrgIds).toEqual([KEY_ORG_ID]);
+    expect(scopedOrgIds).not.toContain("00000000-0000-0000-0000-0000000000a1");
+  });
+
+  it("writes the API audit entry into the KEY's org", async () => {
+    const row = keyRow(["protocols:write"]);
+    await recordApiAudit(
+      row as never,
+      "protocols:write",
+      "POST /api/v1/cases/{key}/review",
+      "case.reviewed.api",
+      { caseKey: "heparin" },
+      "case.reviewed.api.x",
+    );
+    expect(scopedOrgIds).toEqual([KEY_ORG_ID]);
+    expect(appendAudit).toHaveBeenCalledWith({}, expect.objectContaining({ orgId: KEY_ORG_ID }));
+  });
+
+  it("takes the org from the CREDENTIAL — a client-supplied org in the request changes nothing", async () => {
+    const row = keyRow(["cases:read"]);
+    findActiveApiKeyByPlaintext.mockResolvedValue(row);
+    // A caller trying every plausible spelling of "act as another tenant". None of them is read:
+    // the REST layer has no org parameter at all, which is why this cannot be forgotten in one
+    // route the way a validated parameter could be.
+    const hostile = new Request(
+      "https://console.test/api/v1/cases?orgId=00000000-0000-0000-0000-0000000000a1&org=stopgap",
+      {
+        headers: {
+          authorization: "Bearer sk_live_ok",
+          "x-org-id": "00000000-0000-0000-0000-0000000000a1",
+        },
+      },
+    );
+    const result = await authenticateApiRequest(hostile, "cases:read");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.key.orgId).toBe(KEY_ORG_ID);
+    expect(scopedOrgIds).toEqual([KEY_ORG_ID]);
   });
 });

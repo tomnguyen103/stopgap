@@ -5,13 +5,17 @@ import {
   anchorAuditChain as runAuditAnchor,
   appendAudit,
   approveProtocolVersion,
+  assertMaintenanceRoleBypassesRls,
   bumpFeedMiss,
   draftProtocolVersion,
   getApprovedProtocol,
-  getCaseByWorkflowId,
+  getCaseByKey,
+  getCasesByKeys,
   getDb,
   getEscalationPolicy as readEscalationPolicy,
   getSyntheticUser,
+  isUserInOrg,
+  listOrganizations,
   recordAcknowledgment,
   syntheticUserIdForLabel,
   listOpenMonitoringCases,
@@ -20,7 +24,9 @@ import {
   resetFeedMiss,
   updateCaseStatus,
   upsertCaseForRecord,
+  withBypassDb,
   workflowIdForKey,
+  withOrgDb,
   type EscalationStep,
 } from "@stopgap/db";
 import { sendEhrFlag, sendEmail } from "@stopgap/comms";
@@ -37,6 +43,24 @@ import type {
   ResearchResult,
   ReviewDecision,
 } from "./shared.js";
+
+/**
+ * TENANT SCOPING IN THE WORKER (PHASE6 §6.5).
+ *
+ * A worker has no session and no HTTP request, so there is nothing ambient to derive an org from.
+ * Every case activity therefore takes `orgId` as an ARGUMENT, threaded from the workflow input
+ * (`CaseInput.orgId`) that was fixed when the case was opened. The two consequences worth naming:
+ *
+ *  - the org cannot drift over a case's multi-week life — a redeploy cannot make week 6's audit
+ *    entry land in a different hospital's chain from week 1's;
+ *  - every DB call runs inside `withOrgDb(orgId, ...)`, so `app.current_org` is set for the
+ *    transaction and the RLS policies are actually exercised in production rather than merely
+ *    installed. A bug that lost the org here produces an empty result, not another tenant's data.
+ *
+ * The two activities that are genuinely deployment-wide — the feed poll (one external feed, N
+ * tenants) and audit anchoring — say so at their own definitions and use `withBypassDb` only to
+ * ENUMERATE organizations, never to touch tenant rows.
+ */
 
 /**
  * Activities are the only place workflows touch the outside world (DB, feeds, LLMs). The
@@ -58,47 +82,58 @@ function currentRunId(): string | undefined {
 
 /** Persist a newly detected case and open the audit chain. Idempotent (upsert). */
 export async function recordDetected(input: CaseInput): Promise<void> {
-  const db = getDb();
-  const row = await upsertCaseForRecord(db, input.record);
-  await appendAudit(db, {
-    caseId: row.id,
-    actor: "system",
-    actorUserId: getSyntheticUser("system"),
-    action: "case.detected",
-    detail: { key: input.record.key, sources: input.sources },
-    runId: currentRunId(),
+  await withOrgDb(input.orgId, async (db) => {
+    const row = await upsertCaseForRecord(db, input.orgId, input.record);
+    await appendAudit(db, {
+      orgId: input.orgId,
+      caseId: row.id,
+      actor: "system",
+      actorUserId: getSyntheticUser("system"),
+      action: "case.detected",
+      detail: { key: input.record.key, sources: input.sources },
+      runId: currentRunId(),
+    });
   });
 }
 
 /** Mirror the workflow's status transition to Postgres + audit log. */
 export async function persistStatus(
+  orgId: string,
   key: string,
   status: CaseStatus,
   detail: Record<string, unknown> = {},
 ): Promise<void> {
-  const db = getDb();
-  const workflowId = workflowIdForKey(key);
-  const row = await getCaseByWorkflowId(db, workflowId);
-  await updateCaseStatus(db, workflowId, status, {
-    severity: detail.severity as Severity | undefined,
-    lastNote: detail.note as string | undefined,
-    closedAt: status === "closed" ? new Date() : undefined,
-  });
-  const statusActor = (detail.actor as string) ?? "system";
-  await appendAudit(db, {
-    caseId: row?.id,
-    actor: statusActor,
-    actorUserId: (detail.actorUserId as string | undefined) ?? syntheticUserIdForLabel(statusActor),
-    action: `case.${status}`,
-    detail,
-    runId: currentRunId(),
-    // The monitoring loop persists `case.monitoring` every completed week, so the week
-    // number has to be part of the idempotency key — otherwise week 2 onwards look like
-    // retries of week 1 and never reach the audit trail.
-    eventKey:
-      detail.monitoringWeeks === undefined
-        ? `case.${status}`
-        : `case.${status}.week-${String(detail.monitoringWeeks)}`,
+  await withOrgDb(orgId, async (db) => {
+    // BY KEY, not by a recomputed workflow id (PHASE6 §6.5). `workflowIdForKey` now returns the
+    // org-qualified format, but a case opened before that change still stores `case-<key>`; looking
+    // it up by id would miss every such row, and the status update would silently write nothing
+    // while the audit entry lost its `caseId`. The `(org_id, key)` index answers the question
+    // regardless of which era the row was written in, and the row carries the id Temporal knows.
+    const row = await getCaseByKey(db, orgId, key);
+    if (row) {
+      await updateCaseStatus(db, orgId, row.workflowId, status, {
+        severity: detail.severity as Severity | undefined,
+        lastNote: detail.note as string | undefined,
+        closedAt: status === "closed" ? new Date() : undefined,
+      });
+    }
+    const statusActor = (detail.actor as string) ?? "system";
+    await appendAudit(db, {
+      orgId,
+      caseId: row?.id,
+      actor: statusActor,
+      actorUserId: (detail.actorUserId as string | undefined) ?? syntheticUserIdForLabel(statusActor),
+      action: `case.${status}`,
+      detail,
+      runId: currentRunId(),
+      // The monitoring loop persists `case.monitoring` every completed week, so the week
+      // number has to be part of the idempotency key — otherwise week 2 onwards look like
+      // retries of week 1 and never reach the audit trail.
+      eventKey:
+        detail.monitoringWeeks === undefined
+          ? `case.${status}`
+          : `case.${status}.week-${String(detail.monitoringWeeks)}`,
+    });
   });
 }
 
@@ -132,13 +167,15 @@ export async function researchAlternatives(input: CaseInput): Promise<ResearchRe
  * be falsifiable.
  */
 export async function sendComms(
+  orgId: string,
   key: string,
   draft: string,
   alternatives: string[] = [],
 ): Promise<{ delivered: boolean }> {
-  const db = getDb();
-  const workflowId = workflowIdForKey(key);
-  const row = await getCaseByWorkflowId(db, workflowId);
+  const row = await withOrgDb(orgId, (db) => getCaseByKey(db, orgId, key));
+  // The case row's own workflow id, so a pre-migration case keeps the idempotency key it has
+  // always had and a retry after this deploy is still recognised as a retry.
+  const workflowId = row?.workflowId ?? workflowIdForKey(orgId, key);
   const idempotencyKey = `${workflowId}:${currentRunId() ?? "no-run"}:comms`;
   const results = await Promise.all([
     sendEmail({
@@ -149,14 +186,17 @@ export async function sendComms(
     }),
     sendEhrFlag({ idempotencyKey: `${idempotencyKey}:ehr`, key, alternatives, body: draft }),
   ]);
-  await appendAudit(db, {
-    caseId: row?.id,
-    actor: "system",
-    actorUserId: getSyntheticUser("system"),
-    action: "comms.sent",
-    detail: { chars: draft.length, channels: results },
-    runId: currentRunId(),
-  });
+  await withOrgDb(orgId, (db) =>
+    appendAudit(db, {
+      orgId,
+      caseId: row?.id,
+      actor: "system",
+      actorUserId: getSyntheticUser("system"),
+      action: "comms.sent",
+      detail: { chars: draft.length, channels: results },
+      runId: currentRunId(),
+    }),
+  );
   // Per-channel delivery/non-delivery counters for the ops dashboard (PHASE6 §6.4). Honest either
   // way: a non-delivery (no credentials, unreachable endpoint) increments the non-delivered series.
   for (const result of results) {
@@ -171,43 +211,100 @@ export async function sendComms(
   return { delivered: results.some((result) => result.delivered) };
 }
 
-/** Record a HITL decision in the audit chain (provenance for the review). */
-export async function recordDecision(key: string, decision: ReviewDecision): Promise<void> {
-  const db = getDb();
-  const workflowId = workflowIdForKey(key);
-  const row = await getCaseByWorkflowId(db, workflowId);
-  await appendAudit(db, {
-    caseId: row?.id,
-    // The `actor` text stays the claimed label (kept stable — it is what the chain hashes).
-    // `actorUserId`, when the console threaded an authenticated session through the signal, is
-    // the machine-checkable principal; a CLI/MCP signal without one leaves it NULL, honestly.
-    actor: decision.reviewer ?? "unknown-reviewer",
-    actorUserId: decision.reviewerUserId,
-    action: `review.${decision.kind}`,
-    detail: {
-      ...decision,
-      identitySource: decision.reviewerUserId ? "authenticated-session" : "workflow-signal-claim",
-    },
-    runId: currentRunId(),
+/**
+ * Record a HITL decision in the audit chain (provenance for the review).
+ *
+ * THE REVIEWER'S `users.id` IS VALIDATED AGAINST THE ORG BEFORE IT IS WRITTEN (PHASE6 §6.5), and
+ * that is a stated decision rather than an oversight either way.
+ *
+ * `actorUserId` arrives on the workflow SIGNAL payload, so it is whatever the signaller sent. The
+ * foreign key to `users` does not constrain it to this tenant, and — the part that is easy to miss
+ * — PostgreSQL performs referential-integrity checks with row security DISABLED, so the FK happily
+ * resolves a `users.id` belonging to another organization even on a fully scoped connection. Left
+ * unchecked, an audit row in org A can name a clinician in org B. Under `v4` that pair is hashed,
+ * which makes the claim tamper-EVIDENT (it cannot be altered later) but not tamper-PROOF (it can be
+ * written wrong in the first place), and a tamper-evident record of a false statement is still a
+ * false statement.
+ *
+ * The choice made here is to REFUSE the id and keep the event, not to reject the whole signal. The
+ * decision itself is real clinical work that already happened in the workflow; dropping the audit
+ * row to punish a bad identity claim would lose the more important half. So a foreign or unknown id
+ * is recorded as `identitySource: "rejected-foreign-user-id"` with `actorUserId` left NULL and the
+ * rejected value preserved in the detail — the chain then says "someone claimed to be this user and
+ * we could not corroborate it", which is the honest content of the situation.
+ */
+export async function recordDecision(
+  orgId: string,
+  key: string,
+  decision: ReviewDecision,
+): Promise<void> {
+  await withOrgDb(orgId, async (db) => {
+    const row = await getCaseByKey(db, orgId, key);
+    // Resolved on the ORG-SCOPED handle, so RLS is doing the work and the predicate is only the
+    // visible-and-explicit half of it: a user in another tenant is not merely filtered out here,
+    // it is invisible to this connection.
+    const claimedUserId = decision.reviewerUserId;
+    const reviewerInOrg =
+      claimedUserId !== undefined && (await isUserInOrg(db, orgId, claimedUserId))
+        ? claimedUserId
+        : undefined;
+    await appendAudit(db, {
+      orgId,
+      caseId: row?.id,
+      // The `actor` text stays the claimed label (kept stable — it is what the chain hashes).
+      // `actorUserId` is the machine-checkable principal, and it is now only written when it
+      // actually checks out; a CLI/MCP signal without one leaves it NULL, honestly, as before.
+      actor: decision.reviewer ?? "unknown-reviewer",
+      actorUserId: reviewerInOrg,
+      action: `review.${decision.kind}`,
+      detail: {
+        ...decision,
+        identitySource:
+          claimedUserId === undefined
+            ? "workflow-signal-claim"
+            : reviewerInOrg
+              ? "authenticated-session"
+              : "rejected-foreign-user-id",
+      },
+      runId: currentRunId(),
+    });
   });
 }
 
 /**
- * Poll openFDA + ASHP, merge duplicates across feeds, and open a durable case for every
- * current shortage not already tracked (PROJECT_PLAN §4: "poll → new shortage auto-opens a
- * case"). Idempotent: `startCase`'s `REJECT_DUPLICATE` policy makes an already-open case a
- * no-op here. Runs on a Temporal Schedule (see `scripts/start-schedule.ts`), so this activity
- * itself opens a client connection per invocation rather than holding one across the worker.
+ * Poll openFDA + ASHP, merge duplicates across feeds, and open a durable case PER ORGANIZATION for
+ * every current shortage not already tracked (PROJECT_PLAN §4: "poll → new shortage auto-opens a
+ * case"). Idempotent: `startCase`'s conflict policy makes an already-open case a no-op here. Runs
+ * on a Temporal Schedule (see `scripts/start-schedule.ts`), so this activity itself opens a client
+ * connection per invocation rather than holding one across the worker.
+ *
+ * THE ONE ACTIVITY WITH NO SESSION AND NO CASE (PHASE6 §6.5). Every other activity is handed an
+ * org by the workflow that started it; the schedule is handed nothing. The org therefore comes from
+ * ENUMERATION: `listOrganizations()` through `withBypassDb`, then a full pass of the poll's work
+ * inside `withOrgDb(org.id, ...)` for each one.
+ *
+ * That shape follows from what the feed IS. One openFDA snapshot is a single physical fact about
+ * the drug supply — identical for every hospital, which is exactly why `feed_records` is a GLOBAL
+ * table and why the HTTP fetch happens ONCE, outside the loop, rather than N times. What is
+ * per-tenant is the CONSEQUENCE of that fact: each hospital gets its own case for the shortage,
+ * because a case is that hospital's clinical work, its own protocol history, and its own audit
+ * chain. Fetching once and acting N times is the only division that keeps both halves honest.
+ *
+ * `withBypassDb` is used ONLY to list organizations and to write the global `feed_records` — never
+ * to read or write a tenant row. The registry is the one table that cannot be org-scoped (a session
+ * must resolve its own org before `app.current_org` can be set), and this is precisely the
+ * deployment-wide job it exists for.
  */
 export async function pollAndOpenCases(): Promise<{ polled: number; opened: number; resolved: number }> {
-  const db = getDb();
   const [openFda, ashp] = await Promise.all([pollOpenFda(), pollAshp()]);
   const fetched = [...openFda, ...ashp];
   // Persist what the feeds returned before deciding what to do with it: `feed_records` is the
   // provenance trail behind every case, and the only thing that can answer "when did this
   // deployment last hear from openFDA" (the console's freshness panel). Resolved records are
-  // stored too — a shortage dropping off the feed is information.
-  await recordFeedRecords(db, fetched, contentHash);
+  // stored too — a shortage dropping off the feed is information. Written ONCE for the whole
+  // deployment: per-org copies would multiply this write by the tenant count to store N
+  // byte-identical rows and would break the `(source, source_id)` dedup contract.
+  await withBypassDb((db) => recordFeedRecords(db, fetched, contentHash));
   // One merge for both jobs: opening cases for `current` shortages, and — the §6.6 half —
   // resolving monitoring cases whose key the feed now lists `resolved` or no longer lists.
   const merged = mergeRecords(fetched);
@@ -215,60 +312,104 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
   const currentKeys = new Set(current.map((r) => r.key));
   const resolvedKeys = new Set(merged.filter((r) => r.status === "resolved").map((r) => r.key));
 
+  const orgs = await withBypassDb(() => listOrganizations());
+  const pollTimestamp = new Date().toISOString();
+  // The run token behind the retry-idempotent miss counter. `currentRunId()` differs per
+  // poll execution (so distinct polls increment) and is stable across retries of the same
+  // execution (so a retry is a no-op); the ISO-timestamp fallback keeps it deterministic if
+  // ever called outside a Temporal activity context.
+  const pollRun = currentRunId() ?? pollTimestamp;
+
   const { client, connection } = await makeClient();
   try {
     let opened = 0;
-    for (const record of current) {
-      const { started } = await startCase(client, record, record.sources);
-      if (started) opened += 1;
-    }
-
-    // Feed-resolution auto-detect (PHASE6 §6.6): close the lifecycle loop the deferred finding
-    // flagged — the system opened cases but never noticed a shortage ended. Diff open
-    // monitoring cases against this poll's keys; the pure `diffResolutions` owns the
-    // counting so a single feed flap can never resolve a live case.
-    const openCases = await listOpenMonitoringCases(db);
-    const pollTimestamp = new Date().toISOString();
-    // The run token behind the retry-idempotent miss counter. `currentRunId()` differs per
-    // poll execution (so distinct polls increment) and is stable across retries of the same
-    // execution (so a retry is a no-op); the ISO-timestamp fallback keeps it deterministic if
-    // ever called outside a Temporal activity context.
-    const pollRun = currentRunId() ?? pollTimestamp;
-    const diff = diffResolutions(
-      openCases,
-      { currentKeys, resolvedKeys },
-      getEnv().FEED_RESOLVE_MISS_THRESHOLD,
-      pollTimestamp,
-    );
-    for (const caseId of diff.toReset) await resetFeedMiss(db, caseId);
-    for (const caseId of diff.toBump) await bumpFeedMiss(db, caseId, pollRun);
-    for (const evidence of diff.toResolve) {
-      // Signal the durable workflow (it owns the state machine), record the evidence in the
-      // tamper-evident chain, then clear the counter. `runId` is the poll's run id so a retry
-      // within one poll dedups on the idempotency key while a later recurrence's resolution
-      // (a different poll run) still lands its own entry instead of colliding with the first.
-      await markResolved(client, evidence.key);
-      await appendAudit(db, {
-        caseId: evidence.caseId,
-        actor: "system",
-        actorUserId: getSyntheticUser("system"),
-        action: "case.feed_resolved",
-        detail: {
-          reason: evidence.reason,
-          source: evidence.source,
-          lastSeenSourceId: evidence.lastSeenSourceId,
-          consecutiveMisses: evidence.consecutiveMisses,
-          missPollTimestamps: evidence.missPollTimestamps,
-        },
-        runId: currentRunId(),
-        eventKey: "case.feed_resolved",
+    let resolved = 0;
+    const currentKeyList = current.map((r) => r.key);
+    for (const org of orgs) {
+      // ONE database scope per organization, not one per (organization, shortage) (PHASE6 §6.5).
+      // The previous shape opened a `withOrgDb` — a transaction, and a checkout from a `max: 10`
+      // pool — for every single record, so a hundred shortages across fifty tenants was five
+      // thousand transactions in one poll. Both reads this org needs are taken up front, in one
+      // scope: the existing cases for the keys in this snapshot, and the open monitoring cases.
+      //
+      // The Temporal calls stay OUTSIDE that scope on purpose. Holding a database transaction open
+      // across a `startCase` RPC would pin a pooled connection for the duration of a network round
+      // trip per record, which is the same starvation problem in a different shape — a transaction
+      // is for the database work, not for the whole iteration.
+      const { existingWorkflowIds, openCases } = await withOrgDb(org.id, async (db) => {
+        const rows = await getCasesByKeys(db, org.id, currentKeyList);
+        return {
+          existingWorkflowIds: new Map(rows.map((r) => [r.key, r.workflowId])),
+          openCases: await listOpenMonitoringCases(db, org.id),
+        };
       });
-      await resetFeedMiss(db, evidence.caseId);
+
+      for (const record of current) {
+        // An existing case row's stored workflow id wins over a freshly computed one: a case
+        // opened before the org-qualified format still answers to `case-<key>`, and starting a
+        // NEW execution for it would leave one drug with two workflows and a case row tracking
+        // only the older of them.
+        const { started } = await startCase(
+          client,
+          org.id,
+          record,
+          record.sources,
+          existingWorkflowIds.get(record.key),
+        );
+        if (started) opened += 1;
+      }
+
+      // Feed-resolution auto-detect (PHASE6 §6.6): close the lifecycle loop the deferred finding
+      // flagged — the system opened cases but never noticed a shortage ended. Diff open
+      // monitoring cases against this poll's keys; the pure `diffResolutions` owns the counting so
+      // a single feed flap can never resolve a live case. Per org, because a hospital's cases are
+      // its own: org A's heparin case must not be resolved by counting org B's misses.
+      const diff = diffResolutions(
+        openCases,
+        { currentKeys, resolvedKeys },
+        getEnv().FEED_RESOLVE_MISS_THRESHOLD,
+        pollTimestamp,
+      );
+      await withOrgDb(org.id, async (db) => {
+        for (const caseId of diff.toReset) await resetFeedMiss(db, org.id, caseId);
+        for (const caseId of diff.toBump) await bumpFeedMiss(db, org.id, caseId, pollRun);
+      });
+      for (const evidence of diff.toResolve) {
+        // Signal the durable workflow (it owns the state machine), record the evidence in the
+        // tamper-evident chain, then clear the counter. The signal is addressed to the id the CASE
+        // ROW carries, so a pre-migration case is still reachable. `runId` is the poll's run id so
+        // a retry within one poll dedups on the idempotency key while a later recurrence's
+        // resolution (a different poll run) still lands its own entry.
+        await markResolved(client, evidence.workflowId);
+        await withOrgDb(org.id, async (db) => {
+          await appendAudit(db, {
+            orgId: org.id,
+            caseId: evidence.caseId,
+            actor: "system",
+            actorUserId: getSyntheticUser("system"),
+            action: "case.feed_resolved",
+            detail: {
+              reason: evidence.reason,
+              source: evidence.source,
+              lastSeenSourceId: evidence.lastSeenSourceId,
+              consecutiveMisses: evidence.consecutiveMisses,
+              missPollTimestamps: evidence.missPollTimestamps,
+            },
+            runId: currentRunId(),
+            eventKey: "case.feed_resolved",
+          });
+          await resetFeedMiss(db, org.id, evidence.caseId);
+        });
+      }
+      resolved += diff.toResolve.length;
     }
     // A completed poll is a liveness signal for the scheduler (PHASE6 §6.4): the FeedStale alert's
     // runbook checks this counter to tell "the feed went quiet" from "the poller stopped running".
     incrementCounter("stopgap_feed_poll_success_total");
-    return { polled: current.length, opened, resolved: diff.toResolve.length };
+    // `polled` is the deployment's view of the feed (one snapshot), while `opened`/`resolved` are
+    // summed across tenants — a poll that opens the same drug for two hospitals really did do two
+    // units of work, and reporting one would understate it.
+    return { polled: current.length, opened, resolved };
   } finally {
     await connection.close();
   }
@@ -278,6 +419,12 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
  * Read a severity's escalation ladder for the workflow (PHASE6 §6.3). Returns the plain steps
  * array (serializable across the activity boundary) or null when no ladder is configured for the
  * severity — the workflow then simply runs no escalation.
+ *
+ * NO `orgId` (PHASE6 §6.5). `escalation_policies` is a GLOBAL table: every org shares one ladder
+ * per severity today, which `schema.ts` and `docs/multi-tenancy.md` both record as a deliberate
+ * deferral rather than an oversight — making it per-org means widening
+ * `escalation_policies_severity_uq` to `(org_id, severity)` and seeding a ladder for every new org,
+ * and that is a change with its own migration, not a parameter added here.
  */
 export async function getEscalationPolicy(
   severity: string,
@@ -300,16 +447,22 @@ export async function getEscalationPolicy(
  * fallback to the pharmacy list.
  */
 export async function sendEscalationNotification(input: {
+  orgId: string;
   key: string;
   severity: string;
   stepIndex: number;
   notify: string;
   afterMinutes: number;
 }): Promise<{ delivered: boolean }> {
-  const db = getDb();
-  const workflowId = workflowIdForKey(input.key);
-  const row = await getCaseByWorkflowId(db, workflowId);
-  const recipients = await listRoleRecipients(db, input.notify);
+  const { orgId } = input;
+  // The recipients are resolved WITHIN the org: `listRoleRecipients` reads `users`, so paging
+  // "whoever holds pharmacy_director" must mean this hospital's director. Un-scoped, the ladder
+  // would mail another tenant's staff about a shortage in a building they do not work in.
+  const { row, recipients } = await withOrgDb(orgId, async (db) => ({
+    row: await getCaseByKey(db, orgId, input.key),
+    recipients: await listRoleRecipients(db, orgId, input.notify),
+  }));
+  const workflowId = row?.workflowId ?? workflowIdForKey(orgId, input.key);
   const result =
     recipients.length > 0
       ? await sendEmail({
@@ -326,24 +479,27 @@ export async function sendEscalationNotification(input: {
     result.delivered ? "stopgap_comms_delivered_total" : "stopgap_comms_nondelivered_total",
     { channel: "escalation" },
   );
-  await appendAudit(db, {
-    caseId: row?.id,
-    actor: "system",
-    actorUserId: getSyntheticUser("system"),
-    action: "escalation.notified",
-    detail: {
-      severity: input.severity,
-      step: input.stepIndex,
-      notify: input.notify,
-      recipients,
-      afterMinutes: input.afterMinutes,
-      delivered: result.delivered,
-      reason: result.reason,
-    },
-    runId: currentRunId(),
-    // Keyed by step so each tier appends once per run; a retry of the same tier is a no-op.
-    eventKey: `escalation.notified.step-${String(input.stepIndex)}`,
-  });
+  await withOrgDb(orgId, (db) =>
+    appendAudit(db, {
+      orgId,
+      caseId: row?.id,
+      actor: "system",
+      actorUserId: getSyntheticUser("system"),
+      action: "escalation.notified",
+      detail: {
+        severity: input.severity,
+        step: input.stepIndex,
+        notify: input.notify,
+        recipients,
+        afterMinutes: input.afterMinutes,
+        delivered: result.delivered,
+        reason: result.reason,
+      },
+      runId: currentRunId(),
+      // Keyed by step so each tier appends once per run; a retry of the same tier is a no-op.
+      eventKey: `escalation.notified.step-${String(input.stepIndex)}`,
+    }),
+  );
   return { delivered: result.delivered };
 }
 
@@ -354,43 +510,65 @@ export async function sendEscalationNotification(input: {
  * "who saw this" is machine-checkable, never a claimed string. Idempotent on `(case, step)`.
  */
 export async function recordAck(input: {
+  orgId: string;
   key: string;
   userId: string;
   label: string;
   step: number;
 }): Promise<void> {
-  const db = getDb();
-  const row = await getCaseByWorkflowId(db, workflowIdForKey(input.key));
-  if (!row) return;
-  const inserted = await recordAcknowledgment(db, {
-    caseId: row.id,
-    userId: input.userId,
-    step: input.step,
-  });
-  if (!inserted) return; // already acknowledged at this tier — no second audit claim.
-  await appendAudit(db, {
-    caseId: row.id,
-    actor: input.label,
-    actorUserId: input.userId,
-    action: "case.acknowledged",
-    detail: { step: input.step, identitySource: "authenticated-session" },
-    runId: currentRunId(),
-    eventKey: `case.acknowledged.step-${String(input.step)}`,
+  const { orgId } = input;
+  await withOrgDb(orgId, async (db) => {
+    const row = await getCaseByKey(db, orgId, input.key);
+    if (!row) return;
+    const inserted = await recordAcknowledgment(db, {
+      orgId,
+      caseId: row.id,
+      userId: input.userId,
+      step: input.step,
+    });
+    if (!inserted) return; // already acknowledged at this tier — no second audit claim.
+    await appendAudit(db, {
+      orgId,
+      caseId: row.id,
+      actor: input.label,
+      actorUserId: input.userId,
+      action: "case.acknowledged",
+      detail: { step: input.step, identitySource: "authenticated-session" },
+      runId: currentRunId(),
+      eventKey: `case.acknowledged.step-${String(input.step)}`,
+    });
   });
 }
 
 /**
- * Take one external anchor of the audit chain head (PHASE6 §6.2). Runs on its own hourly
- * Temporal schedule (see `scripts/start-schedule.ts`). A no-op on an empty chain — nothing to
- * pin yet — so an anchor never claims to have anchored something that does not exist.
+ * Take one external anchor of EVERY organization's chain head (PHASE6 §6.2, per-org since §6.5
+ * pass 2). Runs on its own hourly Temporal schedule (see `scripts/start-schedule.ts`). An org with
+ * an empty chain contributes nothing — an anchor never claims to have pinned something that does
+ * not exist — so a fresh deployment honestly returns an empty list rather than a fabricated row.
+ *
+ * Deployment-wide by design, and the only activity besides the feed poll that is: the chain is
+ * per-tenant but the INTEGRITY GUARANTEE is not something a tenant may opt out of. It therefore
+ * runs through `withBypassDb`, which uses the maintenance pool (`DATABASE_URL_MAINTENANCE`).
+ *
+ * IT REFUSES TO RUN ON A CONNECTION THE POLICIES APPLY TO, rather than degrading. On such a
+ * connection every per-org head query returns zero rows, so this activity would return an empty
+ * list, Temporal would record a successful hourly anchor, and tamper-evidence would quietly stop
+ * accumulating with nothing anywhere reporting a problem. "Anchored nothing" and "there was nothing
+ * to anchor" are indistinguishable in the return value, which is exactly why the distinction is
+ * enforced before the work starts instead of inferred from it afterwards.
  */
-export async function anchorAuditChain(): Promise<{
-  maxAuditId: number;
-  headHash: string;
-  sink: string;
-} | null> {
-  const row = await runAuditAnchor(getDb());
-  return row ? { maxAuditId: row.maxAuditId, headHash: row.headHash, sink: row.sink } : null;
+export async function anchorAuditChain(): Promise<
+  { orgId: string; maxAuditId: number; headHash: string; sink: string }[]
+> {
+  await assertMaintenanceRoleBypassesRls("anchorAuditChain");
+  const orgs = await withBypassDb(() => listOrganizations());
+  const rows = await withBypassDb((db) => runAuditAnchor(db, orgs.map((o) => o.id)));
+  return rows.map((row) => ({
+    orgId: row.orgId,
+    maxAuditId: row.maxAuditId,
+    headHash: row.headHash,
+    sink: row.sink,
+  }));
 }
 
 /**
@@ -399,8 +577,14 @@ export async function anchorAuditChain(): Promise<{
  * this drug, so the case reuses it instead of paying for a fresh research call and asking a
  * human to re-approve text they already wrote.
  */
-export async function lookupProtocol(key: string): Promise<ProtocolMemoryHit | undefined> {
-  const found = await getApprovedProtocol(key);
+export async function lookupProtocol(
+  orgId: string,
+  key: string,
+): Promise<ProtocolMemoryHit | undefined> {
+  // Organizational memory is exactly that — ONE organization's. A protocol another hospital's
+  // pharmacist approved is not guidance this hospital has adopted, and reusing it would put text
+  // nobody here signed off on in front of a clinician.
+  const found = await withOrgDb(orgId, (db) => getApprovedProtocol(orgId, key, db));
   if (!found) return undefined;
   return {
     versionId: found.version.id,
@@ -416,63 +600,71 @@ export async function lookupProtocol(key: string): Promise<ProtocolMemoryHit | u
  * case, author, approver, rationale) is recorded on the version row.
  */
 export async function recordProtocolVersion(input: RecordProtocolInput): Promise<void> {
-  const db = getDb();
-  const row = await getCaseByWorkflowId(db, workflowIdForKey(input.key));
-  // Idempotent under retry: an activity whose insert committed before the worker crashed
-  // would otherwise write a second identical version and supersede the one it just approved.
-  // The retry still re-appends the audit entry (itself idempotent) — a crash between the
-  // approval commit and the audit append would otherwise leave an approved protocol version
-  // with no record of who approved it.
-  // Resolve the machine-checkable ids here (the activity, which may touch the DB) rather than in
-  // the deterministic workflow (which must never import @stopgap/db). An explicit id from an
-  // authenticated session wins; otherwise a `system`/`agent` label maps to its synthetic user,
-  // and a human label with no threaded session stays NULL.
-  const authoredByUserId = input.authoredByUserId ?? syntheticUserIdForLabel(input.authoredBy);
-  const approvedByUserId = input.approvedByUserId ?? syntheticUserIdForLabel(input.approvedBy);
-  const current = await getApprovedProtocol(input.key);
-  if (current && current.version.body === input.body) {
+  const { orgId } = input;
+  await withOrgDb(orgId, async (db) => {
+    const row = await getCaseByKey(db, orgId, input.key);
+    // Idempotent under retry: an activity whose insert committed before the worker crashed
+    // would otherwise write a second identical version and supersede the one it just approved.
+    // The retry still re-appends the audit entry (itself idempotent) — a crash between the
+    // approval commit and the audit append would otherwise leave an approved protocol version
+    // with no record of who approved it.
+    // Resolve the machine-checkable ids here (the activity, which may touch the DB) rather than in
+    // the deterministic workflow (which must never import @stopgap/db). An explicit id from an
+    // authenticated session wins; otherwise a `system`/`agent` label maps to its synthetic user,
+    // and a human label with no threaded session stays NULL.
+    const authoredByUserId = input.authoredByUserId ?? syntheticUserIdForLabel(input.authoredBy);
+    const approvedByUserId = input.approvedByUserId ?? syntheticUserIdForLabel(input.approvedBy);
+    const current = await getApprovedProtocol(orgId, input.key, db);
+    if (current && current.version.body === input.body) {
+      await appendAudit(db, {
+        orgId,
+        caseId: row?.id,
+        actor: input.approvedBy,
+        actorUserId: approvedByUserId,
+        action: "protocol.version_approved",
+        detail: {
+          key: input.key,
+          version: current.version.version,
+          authoredBy: input.authoredBy,
+          identitySource: input.approvedByUserId ? "authenticated-session" : "workflow-signal-claim",
+        },
+        runId: currentRunId(),
+        eventKey: `protocol.version_approved.v${String(current.version.version)}`,
+      });
+      return;
+    }
+    const drafted = await draftProtocolVersion(
+      {
+        orgId,
+        key: input.key,
+        title: input.title,
+        body: input.body,
+        alternatives: input.alternatives,
+        sourceCaseId: row?.id ?? null,
+        authoredBy: input.authoredBy,
+        authoredByUserId: authoredByUserId ?? null,
+        rationale: input.rationale ?? null,
+      },
+      db,
+    );
+    await approveProtocolVersion(orgId, drafted.id, input.approvedBy, approvedByUserId ?? null, db);
     await appendAudit(db, {
+      orgId,
       caseId: row?.id,
       actor: input.approvedBy,
+      // Real `users.id` when the console approved through an authenticated session (PHASE6 §6.1);
+      // the free-text `approvedBy`/`authoredBy` stay recorded as the human labels. A CLI signal
+      // without a session leaves the FK NULL rather than faking a principal.
       actorUserId: approvedByUserId,
       action: "protocol.version_approved",
       detail: {
         key: input.key,
-        version: current.version.version,
+        version: drafted.version,
         authoredBy: input.authoredBy,
         identitySource: input.approvedByUserId ? "authenticated-session" : "workflow-signal-claim",
       },
       runId: currentRunId(),
-      eventKey: `protocol.version_approved.v${String(current.version.version)}`,
+      eventKey: `protocol.version_approved.v${String(drafted.version)}`,
     });
-    return;
-  }
-  const drafted = await draftProtocolVersion({
-    key: input.key,
-    title: input.title,
-    body: input.body,
-    alternatives: input.alternatives,
-    sourceCaseId: row?.id ?? null,
-    authoredBy: input.authoredBy,
-    authoredByUserId: authoredByUserId ?? null,
-    rationale: input.rationale ?? null,
-  });
-  await approveProtocolVersion(drafted.id, input.approvedBy, approvedByUserId ?? null);
-  await appendAudit(db, {
-    caseId: row?.id,
-    actor: input.approvedBy,
-    // Real `users.id` when the console approved through an authenticated session (PHASE6 §6.1);
-    // the free-text `approvedBy`/`authoredBy` stay recorded as the human labels. A CLI signal
-    // without a session leaves the FK NULL rather than faking a principal.
-    actorUserId: approvedByUserId,
-    action: "protocol.version_approved",
-    detail: {
-      key: input.key,
-      version: drafted.version,
-      authoredBy: input.authoredBy,
-      identitySource: input.approvedByUserId ? "authenticated-session" : "workflow-signal-claim",
-    },
-    runId: currentRunId(),
-    eventKey: `protocol.version_approved.v${String(drafted.version)}`,
   });
 }

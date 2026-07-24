@@ -1,4 +1,4 @@
-import { count, gte, sql } from "drizzle-orm";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { demoRuns } from "./schema.js";
 
@@ -10,8 +10,11 @@ const DEMO_RUN_LOCK = 428_017;
  * a process-local counter means the limit survives a restart and holds across replicas.
  */
 
-export async function countDemoRunsSince(db: Db, since: Date): Promise<number> {
-  const [row] = await db.select({ n: count() }).from(demoRuns).where(gte(demoRuns.startedAt, since));
+export async function countDemoRunsSince(db: Db, orgId: string, since: Date): Promise<number> {
+  const [row] = await db
+    .select({ n: count() })
+    .from(demoRuns)
+    .where(and(eq(demoRuns.orgId, orgId), gte(demoRuns.startedAt, since)));
   return row?.n ?? 0;
 }
 
@@ -26,6 +29,7 @@ export async function countDemoRunsSince(db: Db, since: Date): Promise<number> {
  */
 export async function reserveDemoRun(
   db: Db,
+  orgId: string,
   key: string,
   since: Date,
   limit: number,
@@ -34,14 +38,16 @@ export async function reserveDemoRun(
     // A transaction-scoped advisory lock serializes reservations. Row locks can't: the race
     // is two callers both inserting NEW rows, and FOR UPDATE over existing rows does not block
     // a phantom insert. The lock releases on commit/rollback. (Same tool as the audit chain.)
-    await tx.execute(sql`select pg_advisory_xact_lock(${DEMO_RUN_LOCK})`);
+    // Keyed per org (PHASE6 §6.5), like the audit chain lock: one org's demo traffic must not
+    // serialize another's, and the rows they contend over are disjoint anyway.
+    await tx.execute(sql`select pg_advisory_xact_lock(${DEMO_RUN_LOCK}, hashtext(${orgId}))`);
     const [row] = await tx
       .select({ n: count() })
       .from(demoRuns)
-      .where(gte(demoRuns.startedAt, since));
+      .where(and(eq(demoRuns.orgId, orgId), gte(demoRuns.startedAt, since)));
     const recent = row?.n ?? 0;
     if (recent >= limit) return { allowed: false, recent };
-    await tx.insert(demoRuns).values({ key });
+    await tx.insert(demoRuns).values({ orgId, key });
     return { allowed: true, recent: recent + 1 };
   });
 }

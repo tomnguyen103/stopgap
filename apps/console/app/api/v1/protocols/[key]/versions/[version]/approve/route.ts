@@ -1,8 +1,16 @@
-import { approveProtocolVersion, listProtocolVersions } from "@stopgap/db";
+import { approveProtocolVersion, listProtocolVersions, withOrgDb } from "@stopgap/db";
 import { authenticateApiRequest, demoGateOr403, recordApiAudit } from "../../../../../../../lib/api-auth";
 import { jsonError, jsonOk, parseJsonBodyOr400, parseOr400 } from "../../../../../../../lib/api-response";
 import { approvedSchema, approveVersionSchema } from "../../../../../../../lib/api-schemas";
 import { z } from "zod";
+
+/**
+ * TENANT SCOPE (PHASE6 §6.5): the KEY's org, `auth.key.orgId`, and never anything from the request.
+ * A key is issued into one organization and can never act outside it — see `lib/api-auth.ts` for
+ * why deriving the tenant from the credential rather than from a parameter is what makes the public
+ * API tenant-safe. `withOrgDb` sets `app.current_org` for the transaction, so RLS backs the
+ * explicit filters rather than merely coexisting with them.
+ */
 
 /**
  * `POST /api/v1/protocols/{key}/versions/{version}/approve` (PHASE6 §6.7) — scope
@@ -58,17 +66,24 @@ export async function POST(
   const body = await parseJsonBodyOr400(request, approveVersionSchema);
   if (!body.ok) return body.response;
 
-  const target = (await listProtocolVersions(key)).find((v) => v.version === parsedVersion.data);
+  const orgId = auth.key.orgId;
+  const target = (await withOrgDb(orgId, (db) => listProtocolVersions(orgId, key, db))).find(
+    (v) => v.version === parsedVersion.data,
+  );
   if (!target) return jsonError(404, "not_found", `no version ${parsedVersion.data} of protocol "${key}"`);
 
   const { key: apiKey } = auth;
   let row: Awaited<ReturnType<typeof approveProtocolVersion>>["row"];
   let changed: boolean;
   try {
-    ({ row, changed } = await approveProtocolVersion(
-      target.id,
-      `api-key:${apiKey.name}`,
-      apiKey.createdByUserId ?? undefined,
+    ({ row, changed } = await withOrgDb(orgId, (db) =>
+      approveProtocolVersion(
+        orgId,
+        target.id,
+        `api-key:${apiKey.name}`,
+        apiKey.createdByUserId ?? undefined,
+        db,
+      ),
     ));
   } catch (err) {
     if (err instanceof Error && err.message.includes("is superseded and cannot be approved")) {

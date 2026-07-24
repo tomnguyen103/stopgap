@@ -1,16 +1,43 @@
 import type { ShortageRecord } from "@stopgap/core";
 import {
+  SECOND_ORG_ID,
+  SEED_ORG_ID,
   appendAudit,
   approveProtocolVersion,
   draftProtocolVersion,
-  getCaseByWorkflowId,
-  getDb,
+  getCaseByKey,
   listProtocolVersions,
   updateCaseStatus,
   upsertCaseForRecord,
-  workflowIdForKey,
+  withOrgDb,
 } from "@stopgap/db";
 import { DEMO_SOURCE_ID_PREFIX } from "./scenario.js";
+
+/**
+ * The tenants the demo fills (PHASE6 §6.5 acceptance: "two seeded orgs run side by side; cases,
+ * protocols, shadow, audit fully disjoint").
+ *
+ * Both org ROWS are created by migration 0014, not here, because this seeder refuses to run outside
+ * `STOPGAP_DEMO_MODE=on` — its cases are fiction and must never sit beside real shortages. An empty
+ * organization is not fiction, so it belongs in the migration; the CONTENT belongs here.
+ *
+ * Each org gets its own subset of the case catalogue rather than a copy of all three, and that is
+ * deliberate: two tenants holding identical rows would demonstrate nothing. Different case sets
+ * mean switching the active org visibly changes the whole console — which is what an isolation
+ * demo has to show — and each org's audit chain runs from its own genesis, so verification of one
+ * says nothing about the other.
+ */
+const SEEDED_ORGS: readonly { orgId: string; caseKeys: readonly string[] }[] = [
+  {
+    orgId: SEED_ORG_ID,
+    caseKeys: ["demo-seed-cefazolin", "demo-seed-heparin", "demo-seed-immune-globulin"],
+  },
+  // Deliberately overlapping on heparin and disjoint elsewhere: the shared key proves the two
+  // tenants can hold a case for the SAME drug without colliding (the `(org_id, key)` and
+  // `(org_id, workflow_id)` indexes, and the org-qualified Temporal id), while the differing keys
+  // make the isolation visible at a glance.
+  { orgId: SECOND_ORG_ID, caseKeys: ["demo-seed-heparin"] },
+];
 
 /**
  * Nightly demo re-seed (PROJECT_PLAN §11): three cases parked at believable points in their
@@ -113,13 +140,39 @@ export interface SeedResult {
 
 /** Idempotent: safe to run nightly (and safe to run twice in a row). */
 export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> {
-  const db = getDb();
+  let cases = 0;
   let protocolsWritten = 0;
   let reseeded = false;
 
-  for (const seed of SEED_CASES) {
-    const workflowId = workflowIdForKey(seed.key);
-    const existing = await getCaseByWorkflowId(db, workflowId);
+  for (const org of SEEDED_ORGS) {
+    // One scope per org, not one for the whole run: `withOrgDb` sets `app.current_org` for its
+    // transaction, so seeding two tenants inside a single scope would have the second org's
+    // inserts refused by the first org's RLS policy — the seeder proving the isolation it is
+    // meant to demonstrate, by failing.
+    const result = await withOrgDb(org.orgId, (db) =>
+      seedOneOrg(db, org.orgId, org.caseKeys, now),
+    );
+    cases += result.cases;
+    protocolsWritten += result.protocolsWritten;
+    reseeded ||= result.reseeded;
+  }
+
+  return { cases, protocolsWritten, reseeded };
+}
+
+/** The per-tenant half of the seed, run inside that tenant's `withOrgDb` scope. */
+async function seedOneOrg(
+  db: Parameters<Parameters<typeof withOrgDb>[1]>[0],
+  orgId: string,
+  caseKeys: readonly string[],
+  now: Date,
+): Promise<SeedResult> {
+  let protocolsWritten = 0;
+  let reseeded = false;
+  const seeds = SEED_CASES.filter((c) => caseKeys.includes(c.key));
+
+  for (const seed of seeds) {
+    const existing = await getCaseByKey(db, orgId, seed.key);
     reseeded ||= Boolean(existing);
 
     const record: ShortageRecord = {
@@ -132,15 +185,18 @@ export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> 
       rxcuis: [],
       note: seed.lastNote,
     };
-    const row = await upsertCaseForRecord(db, record);
+    const row = await upsertCaseForRecord(db, orgId, record);
 
-    await updateCaseStatus(db, workflowId, seed.status, {
+    // The row's OWN workflow id, never a recomputed one: a case seeded before the org-qualified
+    // format still carries `case-<key>`, and updating by a recomputed id would match nothing.
+    await updateCaseStatus(db, orgId, row.workflowId, seed.status, {
       severity: seed.severity,
       lastNote: seed.lastNote,
       openedAt: new Date(now.getTime() - seed.ageDays * DAY_MS),
     });
 
     await appendAudit(db, {
+      orgId,
       caseId: row.id,
       actor: "demo-seed",
       action: "demo.seeded",
@@ -151,25 +207,31 @@ export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> 
     });
 
     if (seed.protocol) {
-      const versions = await listProtocolVersions(seed.key);
+      const versions = await listProtocolVersions(orgId, seed.key, db);
       if (versions.length === 0) {
-        const version = await draftProtocolVersion({
-          key: seed.key,
-          title: seed.protocol.title,
-          drugClass: seed.protocol.drugClass,
-          body: seed.protocol.body,
-          alternatives: seed.protocol.alternatives,
-          sourceCaseId: row.id,
-          authoredBy: seed.protocol.authoredBy,
-          rationale: seed.protocol.rationale,
-        });
-        if (seed.protocol.approve) await approveProtocolVersion(version.id, "pharmacist-demo");
+        const version = await draftProtocolVersion(
+          {
+            orgId,
+            key: seed.key,
+            title: seed.protocol.title,
+            drugClass: seed.protocol.drugClass,
+            body: seed.protocol.body,
+            alternatives: seed.protocol.alternatives,
+            sourceCaseId: row.id,
+            authoredBy: seed.protocol.authoredBy,
+            rationale: seed.protocol.rationale,
+          },
+          db,
+        );
+        if (seed.protocol.approve) {
+          await approveProtocolVersion(orgId, version.id, "pharmacist-demo", null, db);
+        }
         protocolsWritten += 1;
       }
     }
   }
 
-  return { cases: SEED_CASES.length, protocolsWritten, reseeded };
+  return { cases: seeds.length, protocolsWritten, reseeded };
 }
 
 /** The keys the seeder owns, so the console can label them honestly. */

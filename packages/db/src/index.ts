@@ -1,5 +1,15 @@
 export * as schema from "./schema.js";
-export { getDb, closeDb, pingDb, type Db } from "./client.js";
+export {
+  getDb,
+  getMaintenanceDb,
+  closeDb,
+  pingDb,
+  checkAppRoleRls,
+  checkMaintenanceRoleRls,
+  assertMaintenanceRoleBypassesRls,
+  type Db,
+  type RoleRlsStatus,
+} from "./client.js";
 export {
   appendAudit,
   verifyAuditChain,
@@ -21,6 +31,8 @@ export {
 } from "./anchors.js";
 export {
   upsertCaseForRecord,
+  getCaseByKey,
+  getCasesByKeys,
   getCaseByWorkflowId,
   updateCaseStatus,
   listCases,
@@ -44,6 +56,8 @@ export {
   upsertUserByOidc,
   getUserByOidc,
   getUserRoles,
+  getRolesForUsers,
+  isUserInOrg,
   getSyntheticUser,
   syntheticUserIdForLabel,
   assignRole,
@@ -54,6 +68,17 @@ export {
   type SyntheticUser,
   type UpsertUserInput,
 } from "./users.js";
+export {
+  SEED_ORG_ID,
+  SEED_ORG_SLUG,
+  SECOND_ORG_ID,
+  SECOND_ORG_SLUG,
+  SECOND_ORG_NAME,
+  createOrganization,
+  getOrganization,
+  listOrganizations,
+} from "./orgs.js";
+export { withOrgDb, withBypassDb } from "./org-context.js";
 export { getKpis, type Kpis } from "./metrics.js";
 export { getOpsMetrics, type OpsMetrics } from "./ops-metrics.js";
 export {
@@ -89,6 +114,8 @@ export {
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export type {
+  OrganizationRow,
+  NewOrganizationRow,
   ApiKeyRow,
   NewApiKeyRow,
   ApiKeyRequestRow,

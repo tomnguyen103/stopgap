@@ -1,19 +1,28 @@
-import { desc, eq, sql } from "drizzle-orm";
-import { getDb } from "./client.js";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { getDb, type Db } from "./client.js";
 import { shadowRuns } from "./schema.js";
 import type { NewShadowRunRow, ShadowRunRow } from "./schema.js";
 
-/** Persistence for the shadow ledger (PROJECT_PLAN §3A). Scoring lives in `@stopgap/shadow`. */
+/**
+ * Persistence for the shadow ledger (PROJECT_PLAN §3A). Scoring lives in `@stopgap/shadow`.
+ *
+ * Org-scoped per PHASE6 §6.5 (see the ORG SCOPING note in `cases.ts`). `recordShadowRun` needs no
+ * new parameter: `orgId` is a NOT NULL column on `shadowRuns`, so it is already part of
+ * `NewShadowRunRow` and the type checker refuses a run with no tenant.
+ */
 
-export async function recordShadowRun(run: NewShadowRunRow): Promise<ShadowRunRow> {
-  const db = getDb();
+export async function recordShadowRun(run: NewShadowRunRow, db: Db = getDb()): Promise<ShadowRunRow> {
   const [row] = await db.insert(shadowRuns).values(run).returning();
   return row!;
 }
 
-export async function listShadowRuns(limit = 100): Promise<ShadowRunRow[]> {
-  const db = getDb();
-  return db.select().from(shadowRuns).orderBy(desc(shadowRuns.ranAt)).limit(limit);
+export async function listShadowRuns(orgId: string, limit = 100, db: Db = getDb()): Promise<ShadowRunRow[]> {
+  return db
+    .select()
+    .from(shadowRuns)
+    .where(eq(shadowRuns.orgId, orgId))
+    .orderBy(desc(shadowRuns.ranAt))
+    .limit(limit);
 }
 
 export interface ShadowClassStats {
@@ -33,8 +42,7 @@ export interface ShadowClassStats {
  * Per-drug-class aggregates — the input to the promotion gates. Aggregating in SQL rather
  * than in Node keeps the dashboard query O(classes) instead of pulling the whole ledger.
  */
-export async function shadowStatsByClass(): Promise<ShadowClassStats[]> {
-  const db = getDb();
+export async function shadowStatsByClass(orgId: string, db: Db = getDb()): Promise<ShadowClassStats[]> {
   const rows = await db
     .select({
       drugClass: shadowRuns.drugClass,
@@ -46,6 +54,7 @@ export async function shadowStatsByClass(): Promise<ShadowClassStats[]> {
       totalUsdCost: sql<string>`sum(${shadowRuns.usdCost})`,
     })
     .from(shadowRuns)
+    .where(eq(shadowRuns.orgId, orgId))
     .groupBy(shadowRuns.drugClass);
 
   return rows.map((row) => {
@@ -63,12 +72,16 @@ export async function shadowStatsByClass(): Promise<ShadowClassStats[]> {
 }
 
 /** Runs for one drug class, newest first — the disagreement-triage view. */
-export async function listShadowRunsForClass(drugClass: string, limit = 100): Promise<ShadowRunRow[]> {
-  const db = getDb();
+export async function listShadowRunsForClass(
+  orgId: string,
+  drugClass: string,
+  limit = 100,
+  db: Db = getDb(),
+): Promise<ShadowRunRow[]> {
   return db
     .select()
     .from(shadowRuns)
-    .where(eq(shadowRuns.drugClass, drugClass))
+    .where(and(eq(shadowRuns.orgId, orgId), eq(shadowRuns.drugClass, drugClass)))
     .orderBy(desc(shadowRuns.ranAt))
     .limit(limit);
 }

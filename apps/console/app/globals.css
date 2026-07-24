@@ -94,3 +94,20 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
 .sub-tight { margin: 0; }
 .sub-note { margin: 10px 0 0; }
 .feed-line { display: block; }
+
+/*
+  PHASE6 §6.5 — the admin active-org badge. Deliberately the loudest thing in the header: it only
+  renders while an admin is acting inside a tenant that is not their own, and the whole point is
+  that it cannot be mistaken for chrome. Warning-coloured rather than accent-coloured, because
+  "you are writing into another hospital's records" is a caution, not a navigation aid.
+*/
+.active-org-badge {
+  margin-left: 16px; display: inline-flex; align-items: baseline; gap: 8px;
+  padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--high); background: #2a1e12; color: var(--high);
+  font-size: 12px; white-space: nowrap;
+}
+.active-org-badge:hover { background: #35260f; }
+.active-org-badge__label { text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
+.active-org-badge__name { color: var(--text); font-weight: 600; }
+.active-org-badge__slug { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }

@@ -1,8 +1,22 @@
 import { isRole, type Role } from "@stopgap/core";
-import { getUserRoles, upsertUserByOidc } from "@stopgap/db";
+import { SEED_ORG_ID, getUserRoles, upsertUserByOidc, withOrgDb } from "@stopgap/db";
 import NextAuth, { type NextAuthResult } from "next-auth";
 import { authConfig } from "./auth.config";
 import { isSignInAllowed } from "./app/lib/sign-in-guard";
+
+/**
+ * The tenant a brand-new IdP subject is PROVISIONED into (PHASE6 §6.5).
+ *
+ * Only ever applied on INSERT — `upsertUserByOidc` never rewrites an existing user's org — so this
+ * is the answer to "someone signed in who has no `users` row yet; whose staff are they?", and the
+ * only defensible default in a deployment that has not been told otherwise is the org every
+ * pre-multi-tenancy row was backfilled into. It is deliberately NOT a guess about intent: moving a
+ * person to another hospital is an admin operation with its own confirmation, not a side effect of
+ * a first login. A health system running two facilities off one IdP wants a per-realm or
+ * per-claim mapping here; that is a real feature with real failure modes (a mistyped claim
+ * silently provisioning a clinician into the wrong hospital) and it is not in this PR.
+ */
+const DEFAULT_PROVISIONING_ORG_ID = SEED_ORG_ID;
 
 /**
  * Roles a caller holds come from EITHER source, unioned: locally-granted roles in `user_roles`
@@ -42,12 +56,22 @@ const nextAuth = NextAuth({
       // once per login rather than on every token refresh.
       if (account && profile?.sub) {
         const user = await upsertUserByOidc({
+          orgId: DEFAULT_PROVISIONING_ORG_ID,
           oidcSubject: profile.sub,
           email: typeof profile.email === "string" ? profile.email : null,
           displayName: typeof profile.name === "string" ? profile.name : null,
         });
         token.userId = user.id;
-        const dbRoles = await getUserRoles(user.id);
+        // The user ROW's org, not the provisioning default: a returning user keeps the tenant they
+        // were created in (or were moved to by an admin), and reading it back from the upsert
+        // result is what makes that true rather than merely intended.
+        token.orgId = user.orgId;
+        // Scoped to the org the upsert just returned (PHASE6 §6.5). A role grant is scoped
+        // transitively through `users`, so reading it needs a connection that can see this user's
+        // row — and by this point the org IS known, which is what the unscoped bootstrap read
+        // above was for. Reading roles unscoped would have been the one place a grant could be
+        // resolved without any tenant in the picture.
+        const dbRoles = await withOrgDb(user.orgId, (db) => getUserRoles(db, user.orgId, user.id));
         token.roles = Array.from(new Set([...dbRoles, ...realmRolesFrom(profile)]));
         if (typeof profile.email === "string") token.email = profile.email;
         if (typeof profile.name === "string") token.name = profile.name;
@@ -59,6 +83,11 @@ const nextAuth = NextAuth({
       // have a real principal. Roles are re-validated defensively (a stale token is not trusted
       // to carry a role the app no longer knows).
       if (typeof token.userId === "string") session.user.id = token.userId;
+      // Surfaced on the session so `resolvePrincipal` can scope every query without a DB round
+      // trip. A token minted before this field existed has no org; the empty string is a value the
+      // uuid check in `withOrgDb` rejects outright, so a stale token fails loudly at the first
+      // scoped query instead of silently defaulting to some other tenant's data.
+      session.user.orgId = typeof token.orgId === "string" ? token.orgId : "";
       session.user.roles = Array.isArray(token.roles)
         ? (token.roles.filter((r): r is Role => typeof r === "string" && isRole(r)))
         : [];

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, count, desc, eq, gte, isNull, lt, sql } from "drizzle-orm";
-import { getDb } from "./client.js";
+import { getDb, type Db } from "./client.js";
+import { withBypassDb } from "./org-context.js";
 import { apiKeyRequests, apiKeys, type ApiKeyRow } from "./schema.js";
 
 /**
@@ -77,6 +78,8 @@ export function generateApiKey(): { plaintext: string; keyHash: string; keyPrefi
 }
 
 export interface IssueApiKeyInput {
+  /** The tenant this key acts as (PHASE6 §6.5) — see `apiKeys.orgId` in `schema.ts`. */
+  orgId: string;
   name: string;
   scopes: ApiScope[];
   rateLimitPerHour: number;
@@ -89,12 +92,15 @@ export interface IssueApiKeyInput {
  * this function exactly once — the caller shows it to the issuing admin and drops it. Nothing in
  * this module ever logs it.
  */
-export async function issueApiKey(input: IssueApiKeyInput): Promise<{ row: ApiKeyRow; plaintext: string }> {
+export async function issueApiKey(
+  input: IssueApiKeyInput,
+  db: Db = getDb(),
+): Promise<{ row: ApiKeyRow; plaintext: string }> {
   const { plaintext, keyHash, keyPrefix } = generateApiKey();
-  const db = getDb();
   const [row] = await db
     .insert(apiKeys)
     .values({
+      orgId: input.orgId,
       name: input.name,
       keyHash,
       keyPrefix,
@@ -112,9 +118,8 @@ export async function issueApiKey(input: IssueApiKeyInput): Promise<{ row: ApiKe
  * hiding revoked keys would make "did we already revoke that integration's key?" unanswerable
  * from the page that is supposed to answer it.
  */
-export async function listApiKeys(): Promise<ApiKeyRow[]> {
-  const db = getDb();
-  return db.select().from(apiKeys).orderBy(desc(apiKeys.createdAt));
+export async function listApiKeys(orgId: string, db: Db = getDb()): Promise<ApiKeyRow[]> {
+  return db.select().from(apiKeys).where(eq(apiKeys.orgId, orgId)).orderBy(desc(apiKeys.createdAt));
 }
 
 /**
@@ -123,12 +128,14 @@ export async function listApiKeys(): Promise<ApiKeyRow[]> {
  * second revoke returns `false` and the caller skips an audit entry claiming a revocation that
  * did not happen (same no-op-returns-false stance as `setUserDisabled`).
  */
-export async function revokeApiKey(id: string): Promise<boolean> {
-  const db = getDb();
+export async function revokeApiKey(orgId: string, id: string, db: Db = getDb()): Promise<boolean> {
   const changed = await db
     .update(apiKeys)
     .set({ revokedAt: new Date() })
-    .where(and(eq(apiKeys.id, id), isNull(apiKeys.revokedAt)))
+    // The org predicate is what stops one tenant's admin from revoking another tenant's
+    // credential by guessing its uuid — a denial-of-service that RLS would also block, but that
+    // must fail as a visible no-op here rather than depending on the backstop alone.
+    .where(and(eq(apiKeys.orgId, orgId), eq(apiKeys.id, id), isNull(apiKeys.revokedAt)))
     .returning({ id: apiKeys.id });
   return changed.length > 0;
 }
@@ -142,25 +149,46 @@ export async function revokeApiKey(id: string): Promise<boolean> {
  * cannot steer without already knowing the key), not on how many leading characters they guessed
  * right. `revokedAt IS NULL` is part of the query rather than a post-check so a revoked key can
  * never be returned by a caller that forgets to test the field.
+ *
+ * Takes NO `orgId` (PHASE6 §6.5), for the same reason `getUserByOidc` does not: an inbound HTTP
+ * request presents a secret and nothing else, so the key's `orgId` is the ANSWER — the value the
+ * REST layer then opens its `withOrgDb` scope with. This is why `api_keys_key_hash_uq` stays
+ * deployment-wide; a per-org unique index could not serve a lookup that has no org yet.
+ *
+ * It therefore runs through `withBypassDb` — one of exactly TWO sanctioned cross-tenant reads in
+ * the application (the other is `getUserByOidc`), named so a reviewer can grep for them rather than
+ * having to notice a missing `withOrgDb`. The blast radius is bounded by the QUERY, not by trust:
+ * the predicate is an exact match on a 256-bit secret's SHA-256 plus `revoked_at IS NULL`, and the
+ * read is `.limit(1)`, so the most this can ever return is the ONE row belonging to the credential
+ * the caller already presented. "Unscoped" here means "not yet scoped" — the org it returns is
+ * precisely what the REST layer opens its `withOrgDb` scope with.
  */
 export async function findActiveApiKeyByPlaintext(plaintext: string): Promise<ApiKeyRow | undefined> {
-  const db = getDb();
-  const [row] = await db
-    .select()
-    .from(apiKeys)
-    .where(and(eq(apiKeys.keyHash, hashApiKey(plaintext)), isNull(apiKeys.revokedAt)))
-    .limit(1);
-  return row;
+  return withBypassDb(async (db) => {
+    const [row] = await db
+      .select()
+      .from(apiKeys)
+      .where(and(eq(apiKeys.keyHash, hashApiKey(plaintext)), isNull(apiKeys.revokedAt)))
+      .limit(1);
+    return row;
+  });
 }
 
 /**
  * Stamp `lastUsedAt`. Best-effort by design: this is operational metadata ("is this integration
  * still alive?"), and a failed write here must never turn an otherwise-authorized request into an
  * error. The authoritative record of what the key did is the audit chain, not this column.
+ *
+ * Takes the key's `orgId` (PHASE6 §6.5) even though `id` alone identifies the row. `api_keys` is
+ * RLS-protected, so this write must run on an org-scoped connection or it silently updates zero
+ * rows — and "silently updates zero rows" is exactly what a best-effort call would never surface.
+ * The caller has just resolved the key, so the org is free to pass and the update is honest.
  */
-export async function touchApiKeyUsed(id: string): Promise<void> {
-  const db = getDb();
-  await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, id));
+export async function touchApiKeyUsed(orgId: string, id: string, db: Db = getDb()): Promise<void> {
+  await db
+    .update(apiKeys)
+    .set({ lastUsedAt: new Date() })
+    .where(and(eq(apiKeys.orgId, orgId), eq(apiKeys.id, id)));
 }
 
 /**

@@ -18,14 +18,59 @@ import {
  * Phase 1 schema: durable case mirror, hash-chained audit log, and feed-record store for
  * dedup/provenance. Phase 3 adds the versioned protocol store (organizational memory) and
  * the shadow ledger.
+ *
+ * PHASE6 §6.5 splits every table into one of two classes, and the class is a deliberate
+ * decision per table, never a default:
+ *
+ *  - TENANT tables carry a `orgId` FK, are covered by a `<table>_org_isolation` RLS policy
+ *    (migration 0013), and are only ever read through an org-scoped connection (`withOrgDb`).
+ *  - GLOBAL tables carry no `orgId`. Each one below states WHY in a comment beside it. The
+ *    test is not "could this be per-org" but "would two orgs disagree about this row": a
+ *    shared external fact, a deployment-wide budget, or a row already scoped transitively
+ *    through a tenant table's FK is global.
+ *
+ * Every unique index on a tenant table was audited when `orgId` landed. Uniqueness that used
+ * to mean "unique in the deployment" mostly has to become "unique WITHIN an org" (otherwise
+ * the second hospital to hit a heparin shortage cannot open a case), but a few genuinely must
+ * stay deployment-wide — those are called out individually, because silently widening them
+ * would create a real vulnerability rather than a missing feature.
  */
+
+/**
+ * A tenant (PHASE6 §6.5) — one hospital or facility in a health system. The root of the
+ * isolation model: every tenant table's `orgId` points here, and the RLS policies compare it
+ * against the per-transaction `app.current_org` setting.
+ *
+ * `slug` is the stable human handle (URLs, ops commands, the compose seed); `name` is the
+ * display string and is free to change without breaking a bookmark. Deliberately tiny: an org
+ * is an isolation boundary, not a settings bag. Per-org configuration belongs on the table it
+ * configures, so a new setting does not widen the row every RLS check reads.
+ *
+ * NOT itself an RLS-protected table: a session must be able to resolve its own org (and an
+ * admin to list orgs) BEFORE `app.current_org` is set, which is exactly the chicken-and-egg an
+ * isolation policy on this table would create. It holds no tenant data — only names.
+ */
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("organizations_slug_uq").on(t.slug)],
+);
 
 /** One row per shortage case; mirrors the Temporal workflow's durable state to Postgres. */
 export const cases = pgTable(
   "cases",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    /** Temporal workflow id (deterministic: `case-<key>`). Unique. */
+    /** Owning tenant (PHASE6 §6.5). RLS-enforced; see `organizations`. */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** Temporal workflow id (deterministic: `case-<key>`). Unique WITHIN an org. */
     workflowId: text("workflow_id").notNull(),
     /** Cross-feed dedup key: normalized generic name. */
     key: text("key").notNull(),
@@ -56,9 +101,31 @@ export const cases = pgTable(
     closedAt: timestamp("closed_at", { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex("cases_workflow_id_uq").on(t.workflowId),
-    index("cases_status_idx").on(t.status),
-    index("cases_key_idx").on(t.key),
+    // WIDENED to (org_id, workflow_id) in migration 0013. `workflowIdForKey` is a pure function
+    // of the dedup key, so two hospitals both short on heparin compute the SAME `case-heparin`
+    // id; deployment-wide uniqueness would let the first org to detect it permanently block the
+    // second from opening a case. Org-leading, so it doubles as the org-filter index — no extra
+    // `cases_org_idx` is needed.
+    uniqueIndex("cases_workflow_id_uq").on(t.orgId, t.workflowId),
+    // Both lookups (queue by status, dedup by key) are now ALWAYS org-scoped, so the org column
+    // leads: a bare `status` index would make every org walk every other org's rows before the
+    // RLS predicate discarded them.
+    index("cases_status_idx").on(t.orgId, t.status),
+    // UNIQUE since migration 0014. `(org_id, key)` is the identity this codebase actually treats a
+    // case by: `getCaseByKey` is the only sanctioned way to find one, `upsertCaseForRecord` decides
+    // "does this org already have a case for this drug?" by reading it, and the console addresses
+    // cases through it. All of that was resting on a NON-unique index plus the convention that the
+    // upsert checks first — so two concurrent detections could interleave their check and insert
+    // and leave one org holding two cases for one drug, after which `getCaseByKey`'s unqualified
+    // `.limit(1)` would return whichever the planner happened to emit first and the console would
+    // flip between them between page loads.
+    //
+    // Safe to promote against existing data: before 0013 `cases_workflow_id_uq` was unique on
+    // `workflow_id` alone, and `workflow_id` was `case-<key>` — a pure function of the key — so a
+    // duplicate `(org_id, key)` could not have been written. Migration 0014 creates it as a unique
+    // index rather than adding an `ORDER BY` for that reason: the constraint states the invariant
+    // the code already relies on instead of making a non-deterministic read merely deterministic.
+    uniqueIndex("cases_key_uq").on(t.orgId, t.key),
   ],
 );
 
@@ -70,11 +137,18 @@ export const cases = pgTable(
  * than NULL so the backfill and `getSyntheticUser` can find them deterministically. `email`
  * and `displayName` are best-effort from the token — nullable, because a synthetic user has no
  * inbox. `disabledAt` soft-disables an account without deleting its audit provenance.
+ *
+ * TENANT table (PHASE6 §6.5): a user belongs to exactly one org. See the note on
+ * `users_oidc_subject_uq` below for why that is a deliberate constraint and not an oversight.
  */
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Owning tenant (PHASE6 §6.5). The synthetic `system`/`agent` users belong to the seed org. */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     oidcSubject: text("oidc_subject"),
     email: text("email"),
     displayName: text("display_name"),
@@ -84,7 +158,20 @@ export const users = pgTable(
   (t) => [
     // Partial unique index: two synthetic users legitimately have no subject, and Postgres
     // treats NULLs as distinct anyway — but a real `sub` must never map to two accounts.
+    //
+    // DELIBERATELY NOT WIDENED to (org_id, oidc_subject) in migration 0013, unlike every other
+    // unique index on a tenant table. Widening would let one IdP subject exist in two orgs, and
+    // the sign-in path cannot survive that: the OIDC callback carries a `sub` and nothing else —
+    // there is no org selector at the IdP, so `getUserByOidc(sub)` would become ambiguous and
+    // would have to guess which tenant the human just authenticated into. Guessing an isolation
+    // boundary is the one failure mode this whole item exists to prevent, so the constraint stays
+    // deployment-wide: one IdP subject = one user row = one org.
+    //
+    // The cost is real and accepted: a pharmacist covering two facilities needs two IdP subjects
+    // today. The fix, if it is ever wanted, is a `user_organizations` join table plus an org
+    // picker after sign-in — a feature with its own UI, not a silently relaxed index.
     uniqueIndex("users_oidc_subject_uq").on(t.oidcSubject).where(sql`${t.oidcSubject} is not null`),
+    index("users_org_idx").on(t.orgId),
   ],
 );
 
@@ -94,6 +181,10 @@ export const users = pgTable(
  * column carrying one of `@stopgap/core`'s `Role` literals rather than a PG enum — a new role
  * is then a code change, not a migration, and the app already validates the value on write.
  * `(userId, role)` is unique so re-granting an existing role is a no-op, not a duplicate row.
+ *
+ * GLOBAL table (PHASE6 §6.5) — no `orgId`, scoped TRANSITIVELY through `users`. A role grant is
+ * meaningless without the user it names, and that user already carries the tenant; duplicating
+ * `orgId` here would create a second copy of the same fact that could disagree with the first.
  */
 export const userRoles = pgTable(
   "user_roles",
@@ -115,6 +206,14 @@ export const userRoles = pgTable(
  * before that tier is notified (0 = immediate), `notify` is the role or channel to page. Stored
  * as data (editable by an admin) rather than hard-coded so the on-call ladder is a config change,
  * not a deploy.
+ *
+ * GLOBAL table (PHASE6 §6.5) — no `orgId`, and this one is a genuine open question rather than a
+ * settled fact: per-severity ladders are currently deployment-wide config, and a later PR may
+ * well make them per-org (a teaching hospital's critical ladder is not a clinic's). Left global
+ * here because doing it properly means widening `escalation_policies_severity_uq` to
+ * (org_id, severity) AND giving every org a seeded ladder at creation time, which is escalation
+ * work, not data-layer work. Until then every org shares one ladder — stated plainly so nobody
+ * mistakes it for isolation that already exists.
  */
 export type EscalationStep = { afterMinutes: number; notify: string };
 
@@ -140,6 +239,11 @@ export const acknowledgments = pgTable(
   "acknowledgments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Owning tenant (PHASE6 §6.5) — redundant with `caseId`'s org, and deliberately so: RLS
+     * predicates read a column on the row being checked, not one two joins away. */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     caseId: uuid("case_id")
       .notNull()
       .references(() => cases.id),
@@ -150,8 +254,13 @@ export const acknowledgments = pgTable(
     ackAt: timestamp("ack_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    // NOT widened with `org_id`: `caseId` is a globally unique uuid that already carries exactly
+    // one org, so (org_id, case_id, step) would be strictly WEAKER — it would permit two acks for
+    // the same case and step under two different org labels, which is the double-ack this index
+    // exists to stop.
     uniqueIndex("acknowledgments_case_step_uq").on(t.caseId, t.step),
     index("acknowledgments_case_idx").on(t.caseId),
+    index("acknowledgments_org_idx").on(t.orgId),
   ],
 );
 
@@ -163,6 +272,16 @@ export const auditLog = pgTable(
   "audit_log",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
+    /**
+     * Owning tenant (PHASE6 §6.5). The chain is PER-ORG: `appendAudit` reads the previous hash
+     * within this org, and scheme `v4` folds this column into the HMAC so a row cannot be moved
+     * between tenants without breaking its hash. NOT NULL even for console-level entries with no
+     * `caseId` — an audit row with no tenant would be invisible to every org, which is a silent
+     * hole in exactly the table whose job is to have no holes.
+     */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     caseId: uuid("case_id").references(() => cases.id),
     ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
     actor: text("actor").notNull(),
@@ -199,17 +318,27 @@ export const auditLog = pgTable(
      * under `AUDIT_HMAC_KEY`, whose key lives outside the DB so a write-only attacker can no
      * longer forge a valid chain. Stored per row, not global, so a deployment that turns the
      * key on keeps verifying its existing `v1` rows instead of invalidating history.
+     *
+     * `v4` (PHASE6 §6.5) = the `v3` field set PLUS `orgId`, so a keyed row cannot be relabelled
+     * into another tenant without breaking its hash.
      */
     scheme: text("scheme").notNull().default("v1"),
   },
   (t) => [
     index("audit_case_idx").on(t.caseId),
-    index("audit_ts_idx").on(t.ts),
+    // Org-leading: chain verification and the console timeline both read "this org's rows in id
+    // order", never the deployment's. A bare `ts` index would scan every tenant's history.
+    index("audit_ts_idx").on(t.orgId, t.ts),
     // Within one workflow run each case action fires at most once, so (case_id, action,
     // run_id) is a natural idempotency key: a Temporal activity retry after a committed
     // insert lands here as a no-op instead of double-appending. run_id is in the key because
     // a recurring shortage opens a new run against the same case row (Phase 3).
-    uniqueIndex("audit_case_action_uq").on(t.caseId, t.eventKey, t.runId),
+    //
+    // WIDENED with `org_id` in migration 0013. It does not tighten the key (a `caseId` already
+    // belongs to one org, and a cross-org insert is refused by the policy's WITH CHECK); it is
+    // here so the index LEADS with the column every query now filters on, which is also what
+    // makes a separate `audit_log_org_idx` unnecessary.
+    uniqueIndex("audit_case_action_uq").on(t.orgId, t.caseId, t.eventKey, t.runId),
   ],
 );
 
@@ -221,12 +350,35 @@ export const auditLog = pgTable(
  * unnoticed, because the original head hash lives somewhere they cannot silently edit. This
  * table mirrors what was anchored so the verification UI can cross-check stored heads against
  * the live chain.
+ *
+ * PER-ORG SINCE MIGRATION 0014 (PHASE6 §6.5 pass 2), and this is a correction, not an extension.
+ * Pass 1 made the audit CHAIN per-org — each tenant runs its own hash chain from its own genesis —
+ * but left this table global, which quietly made every row here ambiguous: "the head hash" is no
+ * longer one value, and an anchor pinning `max(audit_log.id)` pins whichever tenant happened to
+ * append last. `verifyAnchors` would then compare that hash against a chain it may not belong to
+ * and report a mismatch that is not tampering, or (worse) a match that proves nothing about the
+ * org whose history someone actually rewrote. One anchor row per org per run makes the pinned head
+ * mean exactly one thing again.
+ *
+ * It is STILL NOT an RLS-protected table, and that is deliberate: the anchoring job and
+ * `pnpm verify-audit` are deployment-wide integrity tasks that read across tenants through
+ * `withBypassDb`. An org whose RLS scoping was misconfigured must not be able to stop its own
+ * history from being anchored — that would let the tenant disable the tamper-evidence that exists
+ * to protect against it. `orgId` here says WHOSE chain a row pins; it is not an isolation boundary.
  */
 export const auditAnchors = pgTable("audit_anchors", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
+  /**
+   * The tenant whose chain head this anchor pins (PHASE6 §6.5, migration 0014). NOT NULL:
+   * migration 0014 backfills every pre-existing anchor to the seed org, which is the tenant whose
+   * chain those anchors were in fact taken over — before 0013 there was only one.
+   */
+  orgId: uuid("org_id")
+    .notNull()
+    .references(() => organizations.id),
   /** When this anchor was taken (the head it pins is the chain as of this moment). */
   ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
-  /** Highest `audit_log.id` covered by this anchor. */
+  /** Highest `audit_log.id` covered by this anchor, WITHIN `orgId`'s chain. */
   maxAuditId: bigint("max_audit_id", { mode: "number" }).notNull(),
   /** Hash of row `maxAuditId` at anchor time — the value re-verification compares against. */
   headHash: text("head_hash").notNull(),
@@ -235,9 +387,33 @@ export const auditAnchors = pgTable("audit_anchors", {
   /** Reference into the sink — the anchor file path, or the base64 TSA token. Nullable. */
   sinkRef: text("sink_ref"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  // Verification reads anchors newest-first per org; the org leads so one tenant's history check
+  // does not walk every other tenant's anchors first.
+  index("audit_anchors_org_idx").on(t.orgId, t.id),
+  // RLS: SELECT-only, since migration 0014. This table is a hybrid and the asymmetry is the design.
+  // READS are scoped like any tenant table — an org may see the anchors that pin its own chain and
+  // nothing else, because anchor metadata (when a tenant last appended, how much history it has) is
+  // still that tenant's information. WRITES are left entirely to the maintenance (BYPASSRLS) role:
+  // there is no INSERT/UPDATE/DELETE policy, so an org-scoped connection cannot touch a row at all.
+  //
+  // That is what keeps BOTH properties. A tenant cannot opt out of being anchored (it cannot delete
+  // or rewrite its anchors, and cannot stop the maintenance role writing new ones), and it also
+  // cannot reach another tenant's anchors — which, before this, it could: with no policy at all, an
+  // ordinary org-scoped connection could UPDATE or DELETE every other hospital's anchor rows, and
+  // `verifyAnchors`'s explicit org filter was the only thing standing between a tenant and every
+  // other tenant's integrity metadata.
+]);
 
-/** Raw feed records for dedup + provenance; `(source, sourceId)` is unique. */
+/**
+ * Raw feed records for dedup + provenance; `(source, sourceId)` is unique.
+ *
+ * GLOBAL table (PHASE6 §6.5) — no `orgId`. This is EXTERNAL data, not tenant data: one openFDA
+ * shortage record is one physical fact about the drug supply, identical for every hospital that
+ * reads it. Per-org copies would multiply the poller's writes by the tenant count to store N
+ * byte-identical rows, and `(source, source_id)` — the dedup contract the whole ingest path rests
+ * on — would stop meaning "we have already seen this record".
+ */
 export const feedRecords = pgTable(
   "feed_records",
   {
@@ -263,6 +439,12 @@ export const protocols = pgTable(
   "protocols",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Owning tenant (PHASE6 §6.5). Substitution guidance is the most org-specific data here —
+     * two hospitals with different formularies must be able to hold different protocols for the
+     * same drug, which is exactly what the widened `protocols_key_uq` below permits. */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     /** Same normalized generic-name key the cases table uses, so a case finds its protocol. */
     key: text("key").notNull(),
     title: text("title").notNull(),
@@ -271,7 +453,14 @@ export const protocols = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("protocols_key_uq").on(t.key), index("protocols_class_idx").on(t.drugClass)],
+  (t) => [
+    // WIDENED to (org_id, key) in migration 0013 — the single most consequential widening in this
+    // migration. Left deployment-wide, the first org to write a heparin protocol would own the
+    // key forever and every other hospital's `draftProtocolVersion` would fail on the unique
+    // index. Org-leading, so it also serves as the org-filter index.
+    uniqueIndex("protocols_key_uq").on(t.orgId, t.key),
+    index("protocols_class_idx").on(t.orgId, t.drugClass),
+  ],
 );
 
 /**
@@ -284,6 +473,11 @@ export const protocolVersions = pgTable(
   "protocol_versions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Owning tenant (PHASE6 §6.5) — denormalized from the parent protocol so the RLS predicate
+     * can read it off this row instead of joining. */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     protocolId: uuid("protocol_id")
       .notNull()
       .references(() => protocols.id),
@@ -314,8 +508,17 @@ export const protocolVersions = pgTable(
     approvedAt: timestamp("approved_at", { withTimezone: true }),
   },
   (t) => [
+    // AUDITED AND DELIBERATELY NOT WIDENED. `protocolId` is a globally unique uuid belonging to
+    // exactly one org, so "version 3 of protocol X" is already unambiguous across tenants; adding
+    // `org_id` in front would strictly WEAKEN the constraint, letting the same protocol hold two
+    // version-3 rows under two org labels and quietly breaking the "history is never overwritten"
+    // guarantee `draftProtocolVersion` depends on. Widening a unique index is not automatically
+    // the multi-tenant move — it is only correct where the tuple was previously tenant-blind.
     uniqueIndex("protocol_versions_uq").on(t.protocolId, t.version),
     index("protocol_versions_state_idx").on(t.state),
+    // A plain org index here rather than an org-leading composite: unlike `cases`/`protocols`,
+    // this table has no org-leading unique index to piggyback on.
+    index("protocol_versions_org_idx").on(t.orgId),
   ],
 );
 
@@ -328,6 +531,11 @@ export const shadowRuns = pgTable(
   "shadow_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Owning tenant (PHASE6 §6.5). Promotion gates read aggregates of this table, and an org
+     * must be promoted on ITS OWN agreement record — never on another hospital's. */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     /** Replay-corpus entry id, so a run is traceable to the exact input it scored. */
     corpusId: text("corpus_id").notNull(),
     key: text("key").notNull(),
@@ -352,10 +560,12 @@ export const shadowRuns = pgTable(
     modelId: text("model_id").notNull(),
     ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
   },
+  // All three reads (by key, by class, newest-first) are now org-scoped, so each index leads with
+  // `org_id` rather than adding a fourth single-column one.
   (t) => [
-    index("shadow_runs_key_idx").on(t.key),
-    index("shadow_runs_class_idx").on(t.drugClass),
-    index("shadow_runs_ran_at_idx").on(t.ranAt),
+    index("shadow_runs_key_idx").on(t.orgId, t.key),
+    index("shadow_runs_class_idx").on(t.orgId, t.drugClass),
+    index("shadow_runs_ran_at_idx").on(t.orgId, t.ranAt),
   ],
 );
 
@@ -367,6 +577,11 @@ export const shadowRuns = pgTable(
  *
  * `day` is a text `YYYY-MM-DD` in UTC, not a `date` column: the cap must mean the same thing
  * regardless of the database's timezone setting.
+ *
+ * GLOBAL table (PHASE6 §6.5) — no `orgId`. The cap it enforces is DEPLOYMENT-wide: it protects
+ * one bill, paid by whoever runs the containers, against one provider account. Splitting it per
+ * org would turn a hard ceiling into N independent ceilings summing to N times the budget, which
+ * is precisely the runaway spend the cap exists to prevent.
  */
 export const llmSpend = pgTable("llm_spend", {
   day: text("day").primaryKey(),
@@ -387,10 +602,16 @@ export const demoRuns = pgTable(
   "demo_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /** Owning tenant (PHASE6 §6.5). The public demo maps to the seed org, so the rate limit stays
+     * a limit on the demo rather than a limit shared with a real hospital's traffic. */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     key: text("key").notNull(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("demo_runs_started_at_idx").on(t.startedAt)],
+  // Org-leading: the only read is "how many runs for THIS org since THIS instant".
+  (t) => [index("demo_runs_started_at_idx").on(t.orgId, t.startedAt)],
 );
 
 /**
@@ -412,6 +633,15 @@ export const apiKeys = pgTable(
   "api_keys",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    /**
+     * The tenant this key acts as (PHASE6 §6.5). A presented key is how an unauthenticated HTTP
+     * request acquires an org at all: the REST layer resolves the key, reads this column, and
+     * opens the request's `withOrgDb` scope from it. That is why `api_keys_key_hash_uq` below
+     * must stay deployment-wide — the lookup happens BEFORE any org is known.
+     */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
     name: text("name").notNull(),
     /** SHA-256 hex of the plaintext key. Unique: two keys must never collide onto one identity. */
     keyHash: text("key_hash").notNull(),
@@ -428,7 +658,15 @@ export const apiKeys = pgTable(
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("api_keys_key_hash_uq").on(t.keyHash)],
+  (t) => [
+    // AUDITED AND DELIBERATELY NOT WIDENED — widening this one would be a real vulnerability, not
+    // a missing feature. `findActiveApiKeyByPlaintext` hashes the presented secret and looks it up
+    // with NO org in hand (the org is the ANSWER, not an input), so a (org_id, key_hash) index
+    // could not serve the lookup; worse, it would permit the identical secret to authenticate as
+    // two different tenants. One secret must map to exactly one identity, deployment-wide.
+    uniqueIndex("api_keys_key_hash_uq").on(t.keyHash),
+    index("api_keys_org_idx").on(t.orgId),
+  ],
 );
 
 /**
@@ -441,6 +679,12 @@ export const apiKeys = pgTable(
  * containers behind a load balancer would otherwise each grant the full hourly quota). Rows are
  * written when a request is admitted, so the count is of attempts allowed through, not of requests
  * that happened to succeed — a limit bounds attempts, not successes.
+ *
+ * GLOBAL table (PHASE6 §6.5) — no `orgId`, scoped TRANSITIVELY through `api_keys`. Every read is
+ * "how many rows for THIS key", and a key belongs to exactly one org, so the tenant is already
+ * pinned by the FK. Also: this row is written on the authentication path, BEFORE the request has
+ * an org-scoped connection, so an RLS policy here would have to be satisfied by a session that
+ * does not yet know its org.
  */
 export const apiKeyRequests = pgTable(
   "api_key_requests",
@@ -456,6 +700,8 @@ export const apiKeyRequests = pgTable(
   (t) => [index("api_key_requests_key_at_idx").on(t.apiKeyId, t.at)],
 );
 
+export type OrganizationRow = typeof organizations.$inferSelect;
+export type NewOrganizationRow = typeof organizations.$inferInsert;
 export type EscalationPolicyRow = typeof escalationPolicies.$inferSelect;
 export type AcknowledgmentRow = typeof acknowledgments.$inferSelect;
 export type UserRow = typeof users.$inferSelect;

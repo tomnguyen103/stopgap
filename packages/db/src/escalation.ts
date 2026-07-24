@@ -11,6 +11,10 @@ import {
 } from "./schema.js";
 
 /**
+ * ORG SCOPING (PHASE6 §6.5). `escalationPolicies` is a GLOBAL table — one ladder per severity for
+ * the whole deployment (see the schema comment for why, and that a later PR may make it per-org),
+ * so its three helpers take no `orgId`. `acknowledgments` IS tenant data and its helpers do.
+ *
  * Escalation ladders + acknowledgments (PHASE6 §6.3). The escalation workflow reads a severity's
  * ladder and writes an acknowledgment when a human acks; the admin UI edits ladders. Kept a
  * small, deliberate surface, like `users.ts` — no scheduling logic lives here, only the durable
@@ -64,12 +68,21 @@ export async function upsertEscalationPolicy(
  * excluded, because neither can be paged. An empty result is a real answer ("nobody holds this
  * role"), which the caller records as a non-delivery rather than silently paging someone else.
  */
-export async function listRoleRecipients(db: Db, role: string): Promise<string[]> {
+export async function listRoleRecipients(db: Db, orgId: string, role: string): Promise<string[]> {
   const rows = await db
     .select({ email: users.email })
     .from(userRoles)
     .innerJoin(users, eq(users.id, userRoles.userId))
-    .where(and(eq(userRoles.role, role), isNull(users.disabledAt), isNotNull(users.email)))
+    // The org predicate sits on `users`, not `user_roles`: role grants are scoped transitively
+    // through the user they name, so THIS is the join where a cross-tenant page would leak.
+    .where(
+      and(
+        eq(users.orgId, orgId),
+        eq(userRoles.role, role),
+        isNull(users.disabledAt),
+        isNotNull(users.email),
+      ),
+    )
     .orderBy(asc(users.email));
   return [...new Set(rows.map((r) => r.email).filter((e): e is string => e !== null))];
 }
@@ -83,21 +96,25 @@ export async function listRoleRecipients(db: Db, role: string): Promise<string[]
  */
 export async function recordAcknowledgment(
   db: Db,
-  input: { caseId: string; userId: string; step: number },
+  input: { orgId: string; caseId: string; userId: string; step: number },
 ): Promise<boolean> {
   const inserted = await db
     .insert(acknowledgments)
-    .values({ caseId: input.caseId, userId: input.userId, step: input.step })
+    .values({ orgId: input.orgId, caseId: input.caseId, userId: input.userId, step: input.step })
     .onConflictDoNothing({ target: [acknowledgments.caseId, acknowledgments.step] })
     .returning({ id: acknowledgments.id });
   return inserted.length > 0;
 }
 
 /** Every acknowledgment for a case, oldest first — the escalation timeline's "acked by whom". */
-export async function listAcknowledgments(db: Db, caseId: string): Promise<AcknowledgmentRow[]> {
+export async function listAcknowledgments(
+  db: Db,
+  orgId: string,
+  caseId: string,
+): Promise<AcknowledgmentRow[]> {
   return db
     .select()
     .from(acknowledgments)
-    .where(eq(acknowledgments.caseId, caseId))
+    .where(and(eq(acknowledgments.orgId, orgId), eq(acknowledgments.caseId, caseId)))
     .orderBy(asc(acknowledgments.step));
 }

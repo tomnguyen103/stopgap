@@ -95,45 +95,77 @@ describe("counter registry", () => {
  * explicit 0 (so a dashboard can tell "no cap" from "cap not reached"), and an absent ack latency
  * must emit NO sample rather than a fabricated 0.
  */
+
+/**
+ * DEPLOYMENT-WIDE, WITH NO `org` LABEL ANYWHERE (PHASE6 §6.5). The `/api/metrics` route is exempt
+ * from the auth middleware so Prometheus can scrape it, so anything emitted here is readable by
+ * anyone who can reach the console — including one tenant's users. Per-org series would publish the
+ * list of every hospital on the deployment along with each one's case volume and backlog. The
+ * assertions below therefore pin the ABSENCE of the label as hard as they pin the values: a
+ * regression that reintroduces per-tenant series is a data leak, not a formatting change.
+ */
+const DEPLOYMENT_OPS = {
+  casesOpenedToday: 5,
+  exceptionQueueDepth: 2,
+  feedStaleness: [{ source: "openfda", secondsStale: 90 }],
+  ackLatencySeconds: 300,
+  criticalUnacked: { count: 3, maxAgeSeconds: 7200 },
+};
+
+/** Records what `getOpsMetrics` was asked for, so "undefined = every tenant" is asserted, not assumed. */
+const opsCalls: (string | undefined)[] = [];
+
 vi.mock("@stopgap/db", () => ({
   getDb: () => ({}),
   getLlmSpend: async () => ({ usd: 1.25 }),
-  getOpsMetrics: async () => ({
-    casesOpenedToday: 4,
-    exceptionQueueDepth: 2,
-    feedStaleness: [{ source: "openfda", secondsStale: 90 }],
-    ackLatencySeconds: undefined,
-    criticalUnacked: { count: 3, maxAgeSeconds: 7200 },
-  }),
+  getOpsMetrics: async (orgId: string | undefined) => {
+    opsCalls.push(orgId);
+    return DEPLOYMENT_OPS;
+  },
+  withBypassDb: (fn: (db: unknown) => Promise<unknown>) => fn({}),
 }));
 vi.mock("@stopgap/core/env", () => ({ getEnv: () => ({ LLM_DAILY_USD_CAP: undefined }) }));
 
 describe("collectGaugeFamilies", () => {
   function sampleValue(families: MetricFamily[], name: string): number | undefined {
-    return families.find((f) => f.name === name)?.samples[0]?.value;
+    return (families.find((f) => f.name === name)?.samples ?? [])[0]?.value;
   }
 
   it("maps the DB reads onto the gauge families a scraper reads", async () => {
     const { collectGaugeFamilies, collectMetricsText } = await import("./metrics.js");
+    opsCalls.length = 0;
     const families = await collectGaugeFamilies();
 
-    expect(sampleValue(families, "stopgap_cases_opened_today")).toBe(4);
+    // ONE aggregate query covering every tenant, not one query per org: `undefined` is the
+    // deployment-wide form, and it is computed in SQL rather than summed in JS because an average
+    // of per-tenant average ack latencies is not the deployment's average ack latency.
+    expect(opsCalls).toEqual([undefined]);
+
+    expect(sampleValue(families, "stopgap_cases_opened_today")).toBe(5);
     expect(sampleValue(families, "stopgap_exception_queue_depth")).toBe(2);
-    expect(sampleValue(families, "stopgap_llm_daily_spend_usd")).toBe(1.25);
     expect(sampleValue(families, "stopgap_critical_case_unacked_count")).toBe(3);
     expect(sampleValue(families, "stopgap_critical_case_unacked_seconds")).toBe(7200);
+    expect(sampleValue(families, "stopgap_llm_daily_spend_usd")).toBe(1.25);
     // An unset cap is an explicit 0, not an absent gauge.
     expect(sampleValue(families, "stopgap_llm_daily_cap_usd")).toBe(0);
-    // Nothing acked yet: no sample at all rather than a made-up zero latency.
-    expect(families.find((f) => f.name === "stopgap_ack_latency_seconds")?.samples).toEqual([]);
-    // Feed staleness is per-source labelled.
+    expect(families.find((f) => f.name === "stopgap_ack_latency_seconds")?.samples).toEqual([
+      { value: 300 },
+    ]);
+    // Feed staleness is per-SOURCE and deployment-wide: one openFDA snapshot is one external fact.
     expect(families.find((f) => f.name === "stopgap_feed_staleness_seconds")?.samples).toEqual([
       { value: 90, labels: { source: "openfda" } },
     ]);
 
+    // THE LEAK TEST. No sample anywhere carries an `org` label — a tenant list is not something an
+    // unauthenticated endpoint may publish, whatever else changes about these gauges.
+    for (const family of families) {
+      for (const sample of family.samples) expect(sample.labels?.org).toBeUndefined();
+    }
+
     // The console scrape (gauges only) renders those same families as exposition text.
     const text = await collectMetricsText(false);
     expect(text).toContain("# TYPE stopgap_cases_opened_today gauge");
-    expect(text).toContain("stopgap_cases_opened_today 4");
+    expect(text).toContain("stopgap_cases_opened_today 5");
+    expect(text).not.toContain('org="');
   });
 });

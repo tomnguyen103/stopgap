@@ -1,8 +1,9 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { getEnv } from "@stopgap/core/env";
-import { desc, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "./client.js";
+import { SEED_ORG_ID } from "./orgs.js";
 import { auditAnchors, auditLog, type AuditAnchorRow } from "./schema.js";
 
 /**
@@ -81,21 +82,35 @@ async function requestTsaToken(
 }
 
 /**
- * Take one anchor of the current chain head. No-op (returns `null`) on an empty chain — there
- * is nothing to pin yet. Always writes the file sink; if `AUDIT_TSA_URL` is set it also tries
- * for a signed timestamp token and records `sink: "tsa"` only when one actually came back.
+ * Anchor ONE org's chain head. No-op (returns `null`) when that org has no audit rows yet — there
+ * is nothing to pin, and an anchor row claiming otherwise would be a fiction.
+ *
+ * PER-ORG SINCE PASS 2 (PHASE6 §6.5). Pass 1 made the chain per-tenant but left this function
+ * anchoring `max(audit_log.id)` across the whole deployment, which is a real defect once more than
+ * one org writes: "the head hash" stops being one value, the anchor pins whichever tenant appended
+ * most recently, and `verifyAnchors` ends up comparing an anchor against a chain it does not
+ * belong to. Each org is anchored separately so the pinned `(maxAuditId, headHash)` pair is
+ * unambiguously a statement about that org's chain.
  */
-export async function anchorAuditChain(db: Db): Promise<AuditAnchorRow | null> {
+async function anchorOneOrg(db: Db, orgId: string): Promise<AuditAnchorRow | null> {
   const [head] = await db
     .select({ id: auditLog.id, hash: auditLog.hash })
     .from(auditLog)
+    .where(eq(auditLog.orgId, orgId))
     .orderBy(desc(auditLog.id))
     .limit(1);
   if (!head) return null;
 
   const env = getEnv();
   const ts = new Date();
-  const line = JSON.stringify({ ts: ts.toISOString(), maxAuditId: head.id, headHash: head.hash });
+  // The line carries `orgId` from now on. Lines written BEFORE this change have no such field;
+  // `readAnchorFile` maps those to the seed org rather than dropping them — see there.
+  const line = JSON.stringify({
+    ts: ts.toISOString(),
+    orgId,
+    maxAuditId: head.id,
+    headHash: head.hash,
+  });
   // The file anchor is the always-present sink. Create the parent dir on first write so a
   // fresh deployment (or a fresh Docker volume) does not fail the very first anchor.
   await mkdir(dirname(env.AUDIT_ANCHOR_FILE), { recursive: true });
@@ -117,35 +132,96 @@ export async function anchorAuditChain(db: Db): Promise<AuditAnchorRow | null> {
 
   const [row] = await db
     .insert(auditAnchors)
-    .values({ ts, maxAuditId: head.id, headHash: head.hash, sink, sinkRef })
+    .values({ orgId, ts, maxAuditId: head.id, headHash: head.hash, sink, sinkRef })
     .returning();
   return row ?? null;
 }
 
-/** Most recent anchors first (verification UI + CLI). */
-export async function listAnchors(db: Db, limit = 50): Promise<AuditAnchorRow[]> {
-  return db.select().from(auditAnchors).orderBy(desc(auditAnchors.id)).limit(limit);
+/**
+ * Take one anchor per organization. Returns the rows actually written — an org with an empty chain
+ * contributes nothing, so an empty array is the honest answer for a fresh deployment rather than a
+ * row pinning a head that does not exist.
+ *
+ * CROSS-TENANT BY DESIGN (PHASE6 §6.5). It reads every org's chain, so it must run through
+ * `withBypassDb` under a role holding BYPASSRLS (`stopgap_maintenance`, see
+ * `docs/multi-tenancy.md`). Run on an ordinary org-scoped connection, the per-org head queries
+ * return nothing, every org no-ops, and tamper-evidence quietly stops accumulating — the
+ * fail-closed direction, but SILENT, which is why the role requirement is not optional.
+ *
+ * `orgIds` is a parameter rather than a `select` from `organizations` inside this function so the
+ * caller owns the enumeration (the activity already lists orgs for other work) and so a test can
+ * anchor a known set without seeding the registry.
+ */
+export async function anchorAuditChain(db: Db, orgIds: readonly string[]): Promise<AuditAnchorRow[]> {
+  const rows: AuditAnchorRow[] = [];
+  for (const orgId of orgIds) {
+    // Sequential, not `Promise.all`: each iteration appends a line to ONE file, and concurrent
+    // `appendFile` calls to the same path are not ordered against each other.
+    const row = await anchorOneOrg(db, orgId);
+    if (row) rows.push(row);
+  }
+  return rows;
 }
 
 /**
- * Read the EXTERNAL anchor file into a `maxAuditId → headHash` map. This is the sink the DB
- * cannot reach, so it is the only anchor an attacker with DB write access cannot also patch.
- * Returns `null` (honest "no external record") when the file is missing or unreadable — never
- * throws, so verification degrades to DB-internal-only rather than crashing. The file is one
- * JSON object per line (`{ts,maxAuditId,headHash}`), appended hourly, so it stays small.
+ * Most recent anchors first (verification UI + CLI). `orgId` narrows to one tenant's anchors; the
+ * cross-tenant view (`pnpm verify-audit`) omits it and runs under the bypass role.
  */
-export async function readAnchorFile(): Promise<Map<number, string> | null> {
+export async function listAnchors(db: Db, limit = 50, orgId?: string): Promise<AuditAnchorRow[]> {
+  return orgId === undefined
+    ? db.select().from(auditAnchors).orderBy(desc(auditAnchors.id)).limit(limit)
+    : db
+        .select()
+        .from(auditAnchors)
+        .where(eq(auditAnchors.orgId, orgId))
+        .orderBy(desc(auditAnchors.id))
+        .limit(limit);
+}
+
+/**
+ * The key an external anchor record is filed under: one tenant's chain at one audit id. A composite
+ * string rather than a nested map because that is the whole of the lookup — `verifyAnchors` asks
+ * "what did the outside world record for THIS org at THIS id" and nothing else. ` ` separates
+ * the parts because a uuid can never contain it, so two different pairs can never collide into one
+ * key.
+ */
+function anchorFileKey(orgId: string, maxAuditId: number): string {
+  return `${orgId}:${String(maxAuditId)}`;
+}
+
+/**
+ * Read the EXTERNAL anchor file into a `(orgId, maxAuditId) → headHash` map. This is the sink the
+ * DB cannot reach, so it is the only anchor an attacker with DB write access cannot also patch.
+ * Returns `null` (honest "no external record") when the file is missing or unreadable — never
+ * throws, so verification degrades to DB-internal-only rather than crashing. The file is one JSON
+ * object per line (`{ts,orgId,maxAuditId,headHash}`), appended hourly, so it stays small.
+ *
+ * BACKWARD COMPATIBILITY IS EXPLICIT, NOT ACCIDENTAL. Lines appended before PHASE6 §6.5 pass 2 have
+ * no `orgId` field: at the time they were written the deployment had exactly one tenant, the one
+ * migration 0013 backfilled everything into. Such a line is therefore attributed to `SEED_ORG_ID`,
+ * which is not a guess — it is the only org those rows could have belonged to. The alternative
+ * readings are both wrong: skipping the line would silently discard the strongest tamper evidence
+ * the deployment has (the pre-existing external record), and throwing would turn "this file has
+ * history in it" into a crash on the verification path. The choice is made here, once, and stated,
+ * rather than left as a `?? something` at the comparison site.
+ */
+export async function readAnchorFile(): Promise<Map<string, string> | null> {
   try {
     const contents = await readFile(getEnv().AUDIT_ANCHOR_FILE, "utf8");
-    const map = new Map<number, string>();
+    const map = new Map<string, string>();
     for (const line of contents.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        const parsed = JSON.parse(trimmed) as { maxAuditId?: unknown; headHash?: unknown };
+        const parsed = JSON.parse(trimmed) as {
+          orgId?: unknown;
+          maxAuditId?: unknown;
+          headHash?: unknown;
+        };
         if (typeof parsed.maxAuditId === "number" && typeof parsed.headHash === "string") {
-          // Later lines win for a repeated id (append-only, so newest is last).
-          map.set(parsed.maxAuditId, parsed.headHash);
+          const orgId = typeof parsed.orgId === "string" ? parsed.orgId : SEED_ORG_ID;
+          // Later lines win for a repeated pair (append-only, so newest is last).
+          map.set(anchorFileKey(orgId, parsed.maxAuditId), parsed.headHash);
         }
       } catch {
         // A single malformed line must not sink the whole external check.
@@ -178,29 +254,47 @@ export interface AnchorVerification extends AuditAnchorRow {
  * file. `limit` defaults to "all" so the verification path never silently stops re-checking
  * older anchors; the display `listAnchors` keeps its small default. Batches the head lookups
  * into one query rather than one per anchor.
+ *
+ * PER ORG (PHASE6 §6.5 pass 2). Pass `orgId` to verify one tenant's anchors — what the console's
+ * integrity page does, because a signed-in pharmacist is asking about THEIR hospital's history and
+ * an answer mixing in another tenant's anchors would be both a leak and a non sequitur. Omit it
+ * (the `pnpm verify-audit` path, under the bypass role) to check every org's.
+ *
+ * The live-hash lookup is scoped to the anchor's own org, not just its id. `audit_log.id` is a
+ * deployment-wide sequence, so an id alone would resolve to a row regardless of tenant — and an
+ * anchor whose `org_id` had been tampered to point at another hospital's row would then verify
+ * green against a chain it was never taken over. Matching on `(org_id, id)` makes that edit a
+ * mismatch instead.
  */
 export async function verifyAnchors(
   db: Db,
   limit: number = Number.MAX_SAFE_INTEGER,
+  orgId?: string,
 ): Promise<AnchorVerification[]> {
-  const anchors = await listAnchors(db, limit);
+  const anchors = await listAnchors(db, limit, orgId);
   if (anchors.length === 0) return [];
   const ids = [...new Set(anchors.map((a) => a.maxAuditId))];
   const heads = await db
-    .select({ id: auditLog.id, hash: auditLog.hash })
+    .select({ id: auditLog.id, orgId: auditLog.orgId, hash: auditLog.hash })
     .from(auditLog)
-    .where(inArray(auditLog.id, ids));
-  const liveHashById = new Map(heads.map((h) => [h.id, h.hash]));
+    .where(
+      orgId === undefined
+        ? inArray(auditLog.id, ids)
+        : and(eq(auditLog.orgId, orgId), inArray(auditLog.id, ids)),
+    );
+  const liveHashByOrgAndId = new Map(heads.map((h) => [anchorFileKey(h.orgId, h.id), h.hash]));
   const external = await readAnchorFile();
   return anchors.map((anchor) => {
-    const liveHash = liveHashById.get(anchor.maxAuditId);
-    const externalHead = external?.get(anchor.maxAuditId);
+    const lookupKey = anchorFileKey(anchor.orgId, anchor.maxAuditId);
+    const liveHash = liveHashByOrgAndId.get(lookupKey);
+    const externalHead = external?.get(lookupKey);
     return {
       ...anchor,
-      // Missing row (truncated chain) is a mismatch too — the anchored head is simply gone.
+      // Missing row (truncated chain, or an anchor relabelled into another org) is a mismatch too:
+      // the anchored head is simply not there under the org this row claims.
       headMatches: liveHash === anchor.headHash,
       // Compare the OUTSIDE-the-DB record against the live chain. null when we have no external
-      // record for this id (file missing/unreadable, or this anchor predates the file).
+      // record for this org+id (file missing/unreadable, or this anchor predates the file).
       externalMatches: external === null || externalHead === undefined ? null : externalHead === liveHash,
     };
   });

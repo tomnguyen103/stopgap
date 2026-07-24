@@ -1,7 +1,15 @@
-import { shadowStatsByClass } from "@stopgap/db";
+import { shadowStatsByClass, withOrgDb } from "@stopgap/db";
 import { authenticateApiRequest } from "../../../../lib/api-auth";
 import { jsonOk } from "../../../../lib/api-response";
 import { shadowStatsSchema } from "../../../../lib/api-schemas";
+
+/**
+ * TENANT SCOPE (PHASE6 §6.5): the KEY's org, `auth.key.orgId`, and never anything from the request.
+ * A key is issued into one organization and can never act outside it — see `lib/api-auth.ts` for
+ * why deriving the tenant from the credential rather than from a parameter is what makes the public
+ * API tenant-safe. `withOrgDb` sets `app.current_org` for the transaction, so RLS backs the
+ * explicit filters rather than merely coexisting with them.
+ */
 
 /**
  * `GET /api/v1/shadow/stats` (PHASE6 §6.7) — scope `shadow:read`.
@@ -19,6 +27,7 @@ export async function GET(request: Request): Promise<Response> {
   const auth = await authenticateApiRequest(request, "shadow:read");
   if (!auth.ok) return auth.response;
 
-  const classes = await shadowStatsByClass();
+  const orgId = auth.key.orgId;
+  const classes = await withOrgDb(orgId, (db) => shadowStatsByClass(orgId, db));
   return jsonOk(shadowStatsSchema.parse({ classes }));
 }

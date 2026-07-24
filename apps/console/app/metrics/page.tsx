@@ -1,5 +1,6 @@
-import { getKpis } from "@stopgap/db";
+import { getKpis, withOrgDb } from "@stopgap/db";
 import { getShadowDashboard } from "../lib/data";
+import { resolvePrincipal } from "../lib/principal";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,13 @@ function pct(value: number | undefined): string {
  * says so rather than rendering a confident zero.
  */
 export default async function MetricsPage() {
-  const [kpis, shadow] = await Promise.all([getKpis(), getShadowDashboard()]);
+  // The caller's org (PHASE6 §6.5): KPIs are one hospital's operational performance, and averaging
+  // two tenants' medians into one number would describe neither of them.
+  const { orgId } = await resolvePrincipal();
+  const [kpis, shadow] = await Promise.all([
+    withOrgDb(orgId, (db) => getKpis(orgId, db)),
+    getShadowDashboard(),
+  ]);
   const worstUnderEscalation = shadow.reduce(
     (worst, row) => Math.max(worst, row.stats.underEscalationRate),
     0,

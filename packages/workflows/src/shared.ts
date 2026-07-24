@@ -16,6 +16,18 @@ export const ANCHOR_AUDIT_WORKFLOW = "anchorAuditWorkflow";
 
 /** Input to a shortage case workflow: the (possibly merged) detected shortage. */
 export interface CaseInput {
+  /**
+   * The tenant this case belongs to (PHASE6 §6.5). Carried in the workflow INPUT, not looked up
+   * inside an activity, because a Temporal workflow has no session and no request: the org is
+   * decided once by whoever started the case (the per-org feed poll, or a console action running
+   * as a signed-in user) and must then be stable for the case's whole multi-week life. An activity
+   * that re-derived it would be free to derive a different answer after a redeploy, and every
+   * audit entry it wrote would land in a different hospital's chain.
+   *
+   * It is also what every activity below passes to `withOrgDb`, so a case started for org A
+   * physically cannot read or write org B's rows.
+   */
+  orgId: string;
   record: ShortageRecord;
   /** Feeds that contributed to this shortage (provenance). */
   sources: ShortageRecord["source"][];
@@ -131,6 +143,8 @@ export interface ProtocolMemoryHit {
 
 /** Input for writing a case's approved outcome back into the protocol store. */
 export interface RecordProtocolInput {
+  /** The tenant whose protocol store this version belongs to (PHASE6 §6.5). */
+  orgId: string;
   key: string;
   title: string;
   body: string;

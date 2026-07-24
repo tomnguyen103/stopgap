@@ -1,5 +1,6 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { isRole } from "@stopgap/core";
@@ -7,13 +8,15 @@ import {
   appendAudit,
   approveProtocolVersion,
   assignRole,
+  getCaseByKey,
   getCaseByWorkflowId,
-  getDb,
+  getOrganization,
   isApiScope,
   issueApiKey,
   revokeApiKey,
   revokeRole,
   setUserDisabled,
+  withOrgDb,
 } from "@stopgap/db";
 import { assertMutationAllowed, isDemoMode, prepareDemoRun, type DemoRunResult } from "@stopgap/demo";
 import {
@@ -24,6 +27,7 @@ import {
   withTemporalClient,
 } from "@stopgap/workflows";
 import { requireRole } from "./auth-guards";
+import { ACTIVE_ORG_COOKIE, ACTIVE_ORG_COOKIE_MAX_AGE_SECONDS, resolvePrincipal } from "./principal";
 
 /**
  * HITL actions (PROJECT_PLAN §2, §13 Phase 4). Every one of these signals the durable
@@ -36,6 +40,12 @@ import { requireRole } from "./auth-guards";
  * reviewer/approver identity now comes from the authenticated session (`principal.userId`, a
  * real `users.id`), NEVER a client-supplied string, and is threaded through the workflow signal
  * into the tamper-evident audit chain.
+ *
+ * A THIRD thing comes from the session and never from the caller (PHASE6 §6.5): the ORG.
+ * `principal.orgId` is resolved server-side in `resolvePrincipal`, every DB read and write below
+ * runs inside `withOrgDb(principal.orgId, ...)`, and every audit entry records it. No action here
+ * accepts an org as an argument, which is the property that makes cross-tenant access impossible
+ * to request rather than merely forbidden: there is no parameter to put another hospital's id in.
  */
 
 const reviewDecisionSchema = z.discriminatedUnion("kind", [
@@ -52,11 +62,19 @@ const resolutionSchema = z.object({
 
 const workflowIdSchema = z.string().min(1).max(200);
 
-/** The dedup key behind a workflow id, so an action can address the case the page shows. */
-async function keyForWorkflow(workflowId: string): Promise<string> {
-  const row = await getCaseByWorkflowId(getDb(), workflowId);
+/**
+ * The case row behind the workflow id a page is showing, scoped to the caller's org.
+ *
+ * Returns the ROW, not just the key, because the signal helpers now address a workflow by the id
+ * the row CARRIES rather than by one recomputed from the key (PHASE6 §6.5): a case opened before
+ * the org-qualified format answers only to `case-<key>`, so recomputing would silently signal a
+ * workflow that does not exist. The org predicate is what makes a guessed workflow id from another
+ * tenant a plain "no case", with RLS behind it as the backstop.
+ */
+async function caseForWorkflow(orgId: string, workflowId: string) {
+  const row = await withOrgDb(orgId, (db) => getCaseByWorkflowId(db, orgId, workflowId));
   if (!row) throw new Error(`no case for workflow ${workflowId}`);
-  return row.key;
+  return row;
 }
 
 export async function reviewCase(workflowId: string, decision: unknown): Promise<void> {
@@ -65,9 +83,9 @@ export async function reviewCase(workflowId: string, decision: unknown): Promise
   assertMutationAllowed("Approving or rejecting a case");
   const principal = await requireRole("review_case");
   const parsed = reviewDecisionSchema.parse(decision);
-  const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
+  const row = await caseForWorkflow(principal.orgId, workflowIdSchema.parse(workflowId));
   await withTemporalClient((client) =>
-    submitReview(client, key, parsed, principal.label, principal.userId ?? undefined),
+    submitReview(client, row.workflowId, parsed, principal.label, principal.userId ?? undefined),
   );
   revalidatePath(`/cases/${encodeURIComponent(workflowId)}`);
   revalidatePath("/");
@@ -77,9 +95,9 @@ export async function resolveExceptionCase(workflowId: string, resolution: unkno
   assertMutationAllowed("Resolving an exception");
   const principal = await requireRole("resolve_exception");
   const parsed = resolutionSchema.parse(resolution);
-  const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
+  const row = await caseForWorkflow(principal.orgId, workflowIdSchema.parse(workflowId));
   await withTemporalClient((client) =>
-    resolveException(client, key, {
+    resolveException(client, row.workflowId, {
       ...parsed,
       resolvedBy: principal.label,
       resolvedByUserId: principal.userId ?? undefined,
@@ -103,9 +121,9 @@ export async function acknowledgeCase(workflowId: unknown): Promise<void> {
   // A signed-in pharmacist always has a `users.id`; the guard already rejected the anonymous
   // viewer, so this only guards the (impossible-past-the-gate) authenticated-without-id case.
   if (!principal.userId) throw new Error("acknowledge requires an authenticated user id");
-  const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
+  const row = await caseForWorkflow(principal.orgId, workflowIdSchema.parse(workflowId));
   await withTemporalClient((client) =>
-    signalAcknowledge(client, key, { userId: principal.userId!, label: principal.label }),
+    signalAcknowledge(client, row.workflowId, { userId: principal.userId!, label: principal.label }),
   );
   revalidatePath(`/cases/${encodeURIComponent(String(workflowId))}`);
 }
@@ -118,18 +136,24 @@ export async function acknowledgeCase(workflowId: unknown): Promise<void> {
  * NULL `caseId` keeps rows distinct in the unique index so repeated grants/toggles each append.
  */
 async function recordPrivilegedAudit(
-  principal: { label: string; userId: string | null },
+  principal: { label: string; userId: string | null; orgId: string },
   action: string,
   detail: Record<string, unknown>,
   eventKey: string,
 ): Promise<void> {
-  await appendAudit(getDb(), {
-    actor: principal.label,
-    actorUserId: principal.userId ?? undefined,
-    action,
-    detail: { ...detail, identitySource: "authenticated-session" },
-    eventKey,
-  });
+  // The org the caller is ACTING IN, which for an admin using the active-org switch is the tenant
+  // they switched to, not their home org. That is the point of recording it: the chain has to say
+  // which hospital an action happened in, and for a deployment admin those two can differ.
+  await withOrgDb(principal.orgId, (db) =>
+    appendAudit(db, {
+      orgId: principal.orgId,
+      actor: principal.label,
+      actorUserId: principal.userId ?? undefined,
+      action,
+      detail: { ...detail, identitySource: "authenticated-session" },
+      eventKey,
+    }),
+  );
 }
 
 /**
@@ -143,7 +167,9 @@ export async function approveProtocolVersionAction(versionId: unknown): Promise<
   assertMutationAllowed("Approving a protocol version");
   const principal = await requireRole("approve_protocol_version");
   const id = z.string().uuid().parse(versionId);
-  const { row, changed } = await approveProtocolVersion(id, principal.label, principal.userId ?? undefined);
+  const { row, changed } = await withOrgDb(principal.orgId, (db) =>
+    approveProtocolVersion(principal.orgId, id, principal.label, principal.userId ?? undefined, db),
+  );
   // Skip the audit entry when the version was already approved (no-op): recording it would put a
   // second "approved" claim into the chain for an approval that did not happen.
   if (changed) {
@@ -162,27 +188,42 @@ export async function approveProtocolVersionAction(versionId: unknown): Promise<
 const roleSchema = z.string().refine(isRole, "unknown role");
 const userIdSchema = z.string().uuid();
 
-/** Grant a role (admin only, PHASE6 §6.1). */
+/**
+ * Grant a role (admin only, PHASE6 §6.1), CONSTRAINED TO THE ADMIN'S ACTIVE ORG (§6.5).
+ *
+ * A uuid is the only thing these two actions receive, and validating that it IS a uuid says nothing
+ * about WHOSE it is. Before the org scope below, an admin acting in org A could grant or revoke any
+ * role on any user in org B by knowing their id — bypassing the audited active-org switch entirely,
+ * and filing the audit entry in the acting admin's org, so the target hospital's own chain never
+ * recorded that its user's privileges changed. `setUserDisabledAction` on the next page down was
+ * already doing this correctly; these two were the outliers.
+ *
+ * The org predicate lives inside `assignRole`/`revokeRole` (on `users`, the RLS-protected table),
+ * and a foreign id makes them THROW rather than return "no change" — an attempt to reach into
+ * another tenant must not be indistinguishable from a re-grant that was already in place. Since the
+ * target is now necessarily a member of `principal.orgId`, the audit entry `recordPrivilegedAudit`
+ * writes into that org IS the target user's org: the two can no longer diverge.
+ */
 export async function assignRoleAction(userId: unknown, role: unknown): Promise<void> {
   assertMutationAllowed("Managing users");
   const principal = await requireRole("manage_users");
   const uid = userIdSchema.parse(userId);
   const r = roleSchema.parse(role);
   // Only audit a real grant — assignRole is a no-op when the user already holds the role.
-  if (await assignRole(uid, r)) {
+  if (await withOrgDb(principal.orgId, (db) => assignRole(db, principal.orgId, uid, r))) {
     await recordPrivilegedAudit(principal, "user.role_granted", { targetUserId: uid, role: r }, `user.role_granted.${uid}.${r}`);
   }
   revalidatePath("/admin/users");
 }
 
-/** Revoke a role (admin only). */
+/** Revoke a role (admin only). Org-scoped exactly as `assignRoleAction` above. */
 export async function revokeRoleAction(userId: unknown, role: unknown): Promise<void> {
   assertMutationAllowed("Managing users");
   const principal = await requireRole("manage_users");
   const uid = userIdSchema.parse(userId);
   const r = roleSchema.parse(role);
   // Only audit a real revoke — revokeRole is a no-op when the user never held the role.
-  if (await revokeRole(uid, r)) {
+  if (await withOrgDb(principal.orgId, (db) => revokeRole(db, principal.orgId, uid, r))) {
     await recordPrivilegedAudit(principal, "user.role_revoked", { targetUserId: uid, role: r }, `user.role_revoked.${uid}.${r}`);
   }
   revalidatePath("/admin/users");
@@ -196,7 +237,7 @@ export async function setUserDisabledAction(userId: unknown, disabled: unknown):
   const flag = z.boolean().parse(disabled);
   // Only audit a real state flip — setUserDisabled is a no-op when the account is already in the
   // requested state. eventKey matches the action label ("user.disabled"/"user.enabled").
-  if (await setUserDisabled(uid, flag)) {
+  if (await withOrgDb(principal.orgId, (db) => setUserDisabled(principal.orgId, uid, flag, db))) {
     const action = flag ? "user.disabled" : "user.enabled";
     await recordPrivilegedAudit(principal, action, { targetUserId: uid }, `${action}.${uid}`);
   }
@@ -228,12 +269,20 @@ export async function issueApiKeyAction(
   assertMutationAllowed("Issuing an API key");
   const principal = await requireRole("manage_api_keys");
   const parsed = issueApiKeySchema.parse(input);
-  const { row, plaintext } = await issueApiKey({
-    name: parsed.name,
-    scopes: parsed.scopes,
-    rateLimitPerHour: parsed.rateLimitPerHour,
-    createdByUserId: principal.userId,
-  });
+  // The key is issued INTO the admin's ACTIVE org and can never act outside it — see
+  // `apps/console/app/lib/api-auth.ts`, where every `/api/v1` request scopes to `key.orgId`.
+  const { row, plaintext } = await withOrgDb(principal.orgId, (db) =>
+    issueApiKey(
+      {
+        orgId: principal.orgId,
+        name: parsed.name,
+        scopes: parsed.scopes,
+        rateLimitPerHour: parsed.rateLimitPerHour,
+        createdByUserId: principal.userId,
+      },
+      db,
+    ),
+  );
   // COMPENSATE IF THE AUDIT APPEND FAILS. The key row is committed by the time we get here, and the
   // plaintext is about to be thrown away with the request — so a failed audit would leave a LIVE
   // credential that nobody holds and no chain entry explains: an orphan the admin page shows but
@@ -257,7 +306,9 @@ export async function issueApiKeyAction(
   } catch (err) {
     // Best-effort: if this also fails the key is still unusable to anyone but this request, which
     // is ending without returning the plaintext. Rethrow the ORIGINAL failure either way.
-    await revokeApiKey(row.id).catch(() => undefined);
+    await withOrgDb(principal.orgId, (db) => revokeApiKey(principal.orgId, row.id, db)).catch(
+      () => undefined,
+    );
     throw err;
   }
   revalidatePath("/admin/api-keys");
@@ -277,7 +328,7 @@ export async function revokeApiKeyAction(id: unknown): Promise<void> {
   // re-arm a key an admin has already decided to kill. The action still throws, so the operator
   // sees the failure and can re-run it — the second run is a no-op that appends nothing, which is
   // why the audit gap is worth recording here rather than papering over.
-  if (await revokeApiKey(keyId)) {
+  if (await withOrgDb(principal.orgId, (db) => revokeApiKey(principal.orgId, keyId, db))) {
     await recordPrivilegedAudit(principal, "api_key.revoked", { apiKeyId: keyId }, `api_key.revoked.${keyId}`);
   }
   revalidatePath("/admin/api-keys");
@@ -294,9 +345,86 @@ export async function startDemoShortage(key: unknown): Promise<DemoRunResult> {
   if (!isDemoMode()) {
     return { ok: false, reason: "unknown-drug", message: "demo scenarios are not enabled" };
   }
-  const prepared = await prepareDemoRun(z.string().min(1).max(120).parse(key));
+  // The demo maps to the seed tenant, and `resolvePrincipal` says so for the anonymous viewer —
+  // so the run is opened in the org the visitor is already looking at rather than in an org named
+  // separately here, which could drift from it.
+  const principal = await resolvePrincipal();
+  const prepared = await prepareDemoRun(principal.orgId, z.string().min(1).max(120).parse(key));
   if (!prepared.ok) return prepared;
-  const started = await withTemporalClient((client) => startCase(client, prepared.record));
+  const existing = await withOrgDb(principal.orgId, (db) =>
+    getCaseByKey(db, principal.orgId, prepared.record.key),
+  );
+  const started = await withTemporalClient((client) =>
+    startCase(
+      client,
+      principal.orgId,
+      prepared.record,
+      [prepared.record.source],
+      existing?.workflowId,
+    ),
+  );
   revalidatePath("/");
   return { ok: true, ...started };
+}
+
+const orgIdSchema = z.string().uuid();
+
+/**
+ * Switch the ADMIN's active organization (PHASE6 §6.5).
+ *
+ * Three server-side gates, in this order, and none of them is in the UI:
+ *
+ *  1. `requireRole("manage_users")` — admin-only. The switcher control is hidden from everyone
+ *     else, but a server action is a public endpoint whether or not a button renders it, so the
+ *     hiding is a convenience and THIS is the enforcement. `manage_users` is the existing
+ *     admin-minimum action rather than a new one, so the matrix keeps one definition of "admin".
+ *  2. the org must exist. A cookie naming a nonexistent tenant is fail-closed at the database but
+ *     presents as an inexplicably empty console; refusing it here says what actually went wrong.
+ *  3. the audit append happens BEFORE the cookie is set. An admin entering another hospital's data
+ *     is the event worth recording, and recording it first means a failure to write the chain
+ *     entry prevents the switch rather than leaving an unrecorded one — the switch and its record
+ *     cannot come apart in the direction that loses the record.
+ *
+ * The entry is written in the org being ENTERED, so it lands in that tenant's chain: "an admin
+ * from outside acted here" is information that hospital's own audit export must contain.
+ *
+ * The cookie is `httpOnly` — nothing client-side reads it, `resolvePrincipal` does — and
+ * `sameSite: lax`, so a cross-site POST cannot silently re-point an admin's session at another
+ * tenant before they act.
+ */
+export async function setActiveOrgAction(orgId: unknown): Promise<void> {
+  assertMutationAllowed("Switching the active organization");
+  const principal = await requireRole("manage_users");
+  const target = orgIdSchema.parse(orgId);
+  const org = await getOrganization(target);
+  if (!org) throw new Error(`no such organization: ${target}`);
+
+  await recordPrivilegedAudit(
+    { ...principal, orgId: org.id },
+    "org.active_switched",
+    { fromOrgId: principal.orgId, toOrgId: org.id, toOrgSlug: org.slug },
+    // Keyed by (admin, target org) so a repeated switch back and forth does not append a row per
+    // click, while a different admin or a different tenant still records its own entry.
+    `org.active_switched.${principal.userId ?? "unknown"}.${org.id}`,
+  );
+
+  (await cookies()).set(ACTIVE_ORG_COOKIE, org.id, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    // THE ELEVATED STATE EXPIRES ON ITS OWN (PHASE6 §6.5). Without a lifetime this cookie is a
+    // session cookie that survives every navigation and, in a browser that restores tabs, days of
+    // them: an admin who switched into another hospital last Tuesday is still acting inside it
+    // today, and the next protocol they approve lands in the wrong facility's chain. Nothing else
+    // in the system would notice — the switch is legitimate, the audit entry was written a week
+    // ago, and the console (before `ActiveOrgBadge`) said nothing. A short window makes "acting as
+    // another tenant" something you do deliberately and re-affirm, rather than a mode you forget
+    // you are in. One hour: long enough for a real cross-tenant task, short enough that it cannot
+    // outlive the reason for it. Re-switching is one click and appends no duplicate audit row (the
+    // entry is keyed by admin + target org).
+    maxAge: ACTIVE_ORG_COOKIE_MAX_AGE_SECONDS,
+  });
+  // Everything on the page is org-scoped, so nothing that was rendered before the switch is still
+  // correct after it.
+  revalidatePath("/", "layout");
 }
