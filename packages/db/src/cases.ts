@@ -42,7 +42,7 @@ export async function updateCaseStatus(
   db: Db,
   workflowId: string,
   status: CaseStatus,
-  patch: { severity?: Severity; lastNote?: string; closedAt?: Date } = {},
+  patch: { severity?: Severity; lastNote?: string; closedAt?: Date; openedAt?: Date } = {},
 ): Promise<void> {
   await db
     .update(cases)
@@ -51,6 +51,9 @@ export async function updateCaseStatus(
       severity: patch.severity,
       lastNote: patch.lastNote,
       closedAt: patch.closedAt,
+      // Only the demo seeder passes this, to place a case at a believable point in its
+      // lifecycle ("day 18"); real cases keep the timestamp their first detection wrote.
+      openedAt: patch.openedAt,
       updatedAt: new Date(),
     })
     .where(eq(cases.workflowId, workflowId));

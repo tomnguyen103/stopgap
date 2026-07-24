@@ -1,10 +1,11 @@
 # Stopgap — Build Progress
 
-**Phases 1–4 are merged to `main`.** Phase 5 (deploy, demo, library extraction, writeup) is
-out of scope for this run — see `PHASE5-TODO.md`.
+**Phases 1–4 are merged to `main`; Phase 5 is in progress.** Deploy + demo mode are built and
+verified locally; `shadow-ledger` extraction and the writeups remain. Open items and known
+gaps stay in `PHASE5-TODO.md`.
 
 Single source of truth: `PROJECT_PLAN.md`. This file tracks phase status against the
-plan's build table (§13). Out of scope this run: Phase 5 (see `PHASE5-TODO.md`).
+plan's build table (§13).
 
 ## Environment (verified 2026-07-23)
 
@@ -168,6 +169,69 @@ doc; injection test suite; provider comparison table.
   structured-output reliability, and the three weakness classes). The Gemini column is empty
   and says why: no `GEMINI_API_KEY` in this environment. One command fills it when a key
   exists; nothing is estimated.
+
+## Phase 5 — Ship (weeks 8–10)
+
+**Status:** 🚧 in progress. Deploy + demo mode built and verified locally; library extraction
+and writeups are the remaining items.
+
+Target deliverable: VPS deploy (incl. Ollama container); demo mode; extract `shadow-ledger`
+lib; writeup; post-mortem; portfolio page + video.
+
+- [x] Deployment stack (`deploy/`): Dockerfile with `console`/`worker` targets,
+  `docker-compose.prod.yml` (app, worker, Temporal + UI, one Postgres with three databases,
+  Langfuse, CPU Ollama, Caddy auto-TLS), Caddyfile with basic auth on the Temporal and
+  Langfuse subdomains, `.env.prod.example`, and the runbook at
+  [docs/deploy.md](docs/deploy.md). **No paid host was provisioned** — the stack was
+  rehearsed on a local Docker daemon instead (see below).
+- [x] Demo mode (`@stopgap/demo`): read-only console (reviews and exception resolutions
+  refused in the server action, not merely hidden), "Run a shortage" against a fixed drug
+  catalogue with an hourly rate limit counted from a durable `demo_runs` table, nightly
+  idempotent re-seed of three mid-lifecycle cases (day 2 / 18 / 45) and their protocol
+  history. The limit is deployment-wide rather than per visitor, and the seed writes no
+  shadow-ledger rows — both deviations from §11, recorded in `PHASE5-TODO.md` with reasons.
+- [x] Live-feed panel with a last-polled timestamp (§11). Building it surfaced that nothing
+  had ever written `feed_records` — the table existed from Phase 1 but the poll path never
+  persisted to it, so provenance for "which feed record opened this case" did not exist.
+  `pollAndOpenCases` now stores every fetched record. Verified against live openFDA: 100
+  records stored, panel rendering the real timestamp.
+- [x] An agent-layer outage now parks a case in the exception queue instead of killing the
+  workflow. Found by pulling Ollama out from under a running case during the rehearsal: the
+  activity exhausted its five retries, the failure escaped, and the case sat at `assessing`
+  forever with nobody told — a dropped case, the one number §14 puts at zero. Regression
+  test added (`agent-unavailable`).
+- [x] Daily LLM spend cap (`LLM_DAILY_USD_CAP`, off unless set): every call's cost
+  accumulates in `llm_spend`, and past the cap the provider layer routes only to the free
+  local model. It lives with tracing rather than with the demo because it has to hold for
+  every caller — a 03:00 scheduled poll spends the same dollars a visitor does.
+- [x] **Verified partially live against the production compose images** (local Docker,
+  2026-07-23). What actually ran: `postgres`, `temporal`, `migrate`, `console`, `worker`, and
+  the seeder — migrations applied, the seeder produced the day 2 / 18 / 45 cases, "Run a
+  shortage" started a real case that reached `awaiting_review` (severity `moderate`) through
+  the live agents with five hash-chained audit rows, the case page rendered the
+  review-disabled card in place of the approve/reject panel, and `llm_spend` counted the two
+  model calls the case made. What did **not** run: Caddy (needs public DNS), the Temporal UI,
+  the whole Langfuse stack, the long-running `demo-seed` service, and the `ollama` container —
+  the rehearsal pointed the containers at a host Ollama (`docker-compose.localcheck.yml`), so
+  the in-cluster model container and the over-cap fallback path are still unexercised.
+- [x] **Bug the rehearsal caught:** `next build` minifies function names, so starting a
+  workflow by passing the imported function sent Temporal the workflow type `aa` — every case
+  started from the deployed console died with "no such function is exported by the workflow
+  bundle". Workflows are now started by name (`SHORTAGE_CASE_WORKFLOW`). Neither dev mode nor
+  the unit tests could have surfaced this; only a production build could.
+- [x] Extracted `shadow-ledger` as a standalone, dependency-free, storage-agnostic library
+  (§12 artifact 5): ordinal scale + agreement scoring + cohort aggregation + evidence-based
+  promotion gates, MIT licensed, with its own README and 14 tests. `@stopgap/shadow` is now a
+  thin Stopgap-shaped adapter over it (severity scale, "auto-draft" stage name, pharmacist
+  wording), so the mechanism has one implementation and one test suite. Not published to npm
+  — that is a release decision, and `PUBLISHING.md` records the steps plus the
+  `pnpm pack` vs `npm pack` entrypoint trap.
+- [x] Engineering writeup ([docs/writeup.md](docs/writeup.md)) following the §15 outline,
+  post-mortem ([docs/post-mortem.md](docs/post-mortem.md)) covering the five real failures of
+  this build, and portfolio page copy ([docs/portfolio.md](docs/portfolio.md)) including a
+  "not claimed" section and the 3-minute demo-video outline. Every figure in all three is one
+  already measured and recorded in this file; the unmeasured items (Gemini comparison, live
+  deployment) are named as unmeasured rather than estimated.
 
 ---
 

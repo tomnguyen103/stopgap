@@ -1,7 +1,7 @@
 import { getEnv } from "@stopgap/core/env";
 import { ScheduleAlreadyRunning } from "@temporalio/client";
 import { makeClient } from "../client.js";
-import { pollFeedsWorkflow } from "../workflows.js";
+import { POLL_FEEDS_WORKFLOW } from "../shared.js";
 
 const SCHEDULE_ID = "poll-feeds";
 
@@ -20,7 +20,7 @@ async function main() {
       spec: { intervals: [{ every: "15m" }] },
       action: {
         type: "startWorkflow",
-        workflowType: pollFeedsWorkflow,
+        workflowType: POLL_FEEDS_WORKFLOW,
         taskQueue: env.TEMPORAL_TASK_QUEUE,
         workflowId: "poll-feeds-run",
       },

@@ -1,0 +1,31 @@
+# Caddy edge for the Stopgap VPS (PROJECT_PLAN §11). Auto-TLS via Let's Encrypt.
+#
+# Only the console is public, and only because it runs in demo mode (read-only: reviews and
+# exception resolutions are refused server-side, not just hidden). The Temporal UI and
+# Langfuse both expose case data and prompt text, and neither has an auth layer of its own
+# worth the name here — so both sit behind basic auth. See PHASE5-TODO.md "Auth".
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy console:3000
+}
+
+# Visitors can watch real durable workflows execute — behind basic auth, because the Temporal
+# UI can also terminate them.
+{$TEMPORAL_DOMAIN} {
+	encode zstd gzip
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+	reverse_proxy temporal-ui:8080
+}
+
+# Langfuse has its own login; the basic-auth layer in front of it keeps the signup page from
+# being reachable by anyone who finds the subdomain.
+{$TRACES_DOMAIN} {
+	encode zstd gzip
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+	reverse_proxy langfuse-web:3000
+}

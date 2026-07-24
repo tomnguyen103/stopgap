@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCaseByWorkflowId, getDb } from "@stopgap/db";
-import { resolveException, submitReview, withTemporalClient } from "@stopgap/workflows";
+import { assertMutationAllowed, isDemoMode, prepareDemoRun, type DemoRunResult } from "@stopgap/demo";
+import { resolveException, startCase, submitReview, withTemporalClient } from "@stopgap/workflows";
 
 /**
  * HITL actions (PROJECT_PLAN §2, §13 Phase 4). Every one of these signals the durable
@@ -42,6 +43,9 @@ async function keyForWorkflow(workflowId: string): Promise<string> {
 }
 
 export async function reviewCase(workflowId: string, decision: unknown): Promise<void> {
+  // A public demo must not let a visitor approve clinical guidance, and there is no auth
+  // layer to distinguish one visitor from a pharmacist — so in demo mode the answer is no.
+  assertMutationAllowed("Approving or rejecting a case");
   const parsed = reviewDecisionSchema.parse(decision);
   const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
   await withTemporalClient((client) => submitReview(client, key, parsed, REVIEWER));
@@ -50,6 +54,7 @@ export async function reviewCase(workflowId: string, decision: unknown): Promise
 }
 
 export async function resolveExceptionCase(workflowId: string, resolution: unknown): Promise<void> {
+  assertMutationAllowed("Resolving an exception");
   const parsed = resolutionSchema.parse(resolution);
   const key = await keyForWorkflow(workflowIdSchema.parse(workflowId));
   await withTemporalClient((client) =>
@@ -57,4 +62,22 @@ export async function resolveExceptionCase(workflowId: string, resolution: unkno
   );
   revalidatePath(`/cases/${encodeURIComponent(workflowId)}`);
   revalidatePath("/protocols");
+}
+
+/**
+ * The one mutation demo mode allows: start a real case for one of the catalogue drugs
+ * (PROJECT_PLAN §11). Rate limiting and the drug allow-list live in `@stopgap/demo`, because
+ * they must hold for every caller and not just for whoever came through this button.
+ */
+export async function startDemoShortage(key: unknown): Promise<DemoRunResult> {
+  // A server action is a public endpoint whether or not a button renders it, and outside the
+  // demo there is no reason for anyone to open cases for three fixed drugs.
+  if (!isDemoMode()) {
+    return { ok: false, reason: "unknown-drug", message: "demo scenarios are not enabled" };
+  }
+  const prepared = await prepareDemoRun(z.string().min(1).max(120).parse(key));
+  if (!prepared.ok) return prepared;
+  const started = await withTemporalClient((client) => startCase(client, prepared.record));
+  revalidatePath("/");
+  return { ok: true, ...started };
 }

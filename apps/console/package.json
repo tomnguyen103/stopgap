@@ -12,6 +12,7 @@
   "dependencies": {
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
+    "@stopgap/demo": "workspace:*",
     "drizzle-orm": "^0.38.0",
     "next": "^15.1.0",
     "react": "^19.0.0",

@@ -198,6 +198,40 @@ export const shadowRuns = pgTable(
   ],
 );
 
+/**
+ * Daily LLM spend, one row per UTC calendar day (PROJECT_PLAN §11: the public demo needs a
+ * hard daily budget cap). Aggregated rather than per-call because the cap only ever asks one
+ * question — "how much has today cost?" — and a per-call table would grow without bound for
+ * an answer that is a single number. Per-call truth stays in the OTel spans.
+ *
+ * `day` is a text `YYYY-MM-DD` in UTC, not a `date` column: the cap must mean the same thing
+ * regardless of the database's timezone setting.
+ */
+export const llmSpend = pgTable("llm_spend", {
+  day: text("day").primaryKey(),
+  usdCost: numeric("usd_cost", { precision: 12, scale: 8 }).notNull().default("0"),
+  calls: integer("calls").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One row per accepted demo scenario start (PROJECT_PLAN §11 rate limiting).
+ *
+ * A separate table rather than counting `cases`: a demo drug reuses one case row, so
+ * `cases.opened_at` stops moving after the first run and a count over it would let the limit
+ * decay to "unlimited" within an hour. Rows are written when a run is accepted, so the count
+ * is of attempts that were allowed through, not of cases that happened to be created.
+ */
+export const demoRuns = pgTable(
+  "demo_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    key: text("key").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("demo_runs_started_at_idx").on(t.startedAt)],
+);
+
 export type CaseRow = typeof cases.$inferSelect;
 export type NewCaseRow = typeof cases.$inferInsert;
 export type AuditRow = typeof auditLog.$inferSelect;
@@ -207,3 +241,5 @@ export type ProtocolVersionRow = typeof protocolVersions.$inferSelect;
 export type NewProtocolVersionRow = typeof protocolVersions.$inferInsert;
 export type ShadowRunRow = typeof shadowRuns.$inferSelect;
 export type NewShadowRunRow = typeof shadowRuns.$inferInsert;
+export type LlmSpendRow = typeof llmSpend.$inferSelect;
+export type DemoRunRow = typeof demoRuns.$inferSelect;

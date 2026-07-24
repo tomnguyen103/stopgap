@@ -1,4 +1,10 @@
-import { condition, defineQuery, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
+import {
+  condition,
+  defineQuery,
+  defineSignal,
+  proxyActivities,
+  setHandler,
+} from "@temporalio/workflow";
 // Deliberately imported from the isolated `/schemas` subpath, not the package root: the
 // root barrel also exports the agent functions (network calls, provider SDKs), which must
 // never enter Temporal's deterministic workflow sandbox. This subpath is pure Zod + a
@@ -24,6 +30,27 @@ const acts = proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 5, initialInterval: "1s", backoffCoefficient: 2 },
 });
+
+/**
+ * Run an agent activity and turn an exhausted-retry failure into a value instead of an
+ * exception. The agent layer is the one dependency that can be down for minutes (provider
+ * outage, model not pulled yet) rather than milliseconds, and an escaping activity failure
+ * fails the whole workflow — leaving a real shortage case frozen mid-assessment with nobody
+ * notified. Callers park those cases in the exception queue, which is where "the machine
+ * could not decide this" belongs.
+ *
+ * Deliberately not a catch-all: this wraps only the two LLM activities. A failure in a
+ * database write is a bug, and swallowing it would hide it.
+ */
+async function callAgent<T>(
+  run: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; error: string }> {
+  try {
+    return { ok: true, value: await run() };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 /** Pharmacist approve/edit/reject on the drafted protocol. */
 export const reviewSignal = defineSignal<[ReviewDecision]>("review");
@@ -65,7 +92,10 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
    * approved protocol version (memory) and lets the case continue; no resolution within the
    * monitoring horizon leaves the case in `exception`, exactly as before this loop existed.
    */
-  async function parkInException(reason: string, detail: Record<string, unknown>): Promise<boolean> {
+  async function parkInException(
+    reason: string,
+    detail: Record<string, unknown>,
+  ): Promise<boolean> {
     state.status = "exception";
     state.exceptionReason = reason;
     await acts.persistStatus(key, "exception", { reason, ...detail });
@@ -92,25 +122,33 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // Assess impact.
   state.status = "assessing";
   await acts.persistStatus(key, "assessing");
-  const impact = await acts.assessImpact(input);
-  state.severity = impact.severity;
-
-  // A shaky severity call is as dangerous as a shaky substitution — don't spend a research
-  // call building on an assessment the agent itself isn't confident in (§8 under-escalation
-  // target ≈ 0).
-  if (impact.confidence < CONFIDENCE_THRESHOLD) {
+  const impact = await callAgent(() => acts.assessImpact(input));
+  if (!impact.ok) {
+    // The agent layer is down (provider outage, exhausted retries). Letting the activity
+    // failure escape would fail the workflow and strand the case mid-assessment with nobody
+    // told — a dropped case, the one number PROJECT_PLAN §14 puts at zero. Park it for a
+    // human instead: the exception queue is exactly the place for "the machine could not
+    // decide this".
+    const resolved = await parkInException("agent-unavailable", {
+      step: "assessImpact",
+      error: impact.error,
+    });
+    if (!resolved) return state;
+  } else if (impact.value.confidence < CONFIDENCE_THRESHOLD) {
+    state.severity = impact.value.severity;
     const resolved = await parkInException("low-confidence-impact", {
-      confidence: impact.confidence,
-      severity: impact.severity,
+      confidence: impact.value.confidence,
+      severity: impact.value.severity,
     });
     if (!resolved) return state;
   } else {
+    state.severity = impact.value.severity;
     // Organizational memory first (PROJECT_PLAN §3B/§4): if a pharmacist already approved
     // substitution guidance for this drug, reuse it instead of paying for a research call
     // and asking a human to re-approve text they wrote themselves. The HITL gate still runs
     // — memory changes how much work happens before the pharmacist looks, never whether.
     state.status = "researching";
-    await acts.persistStatus(key, "researching", { severity: impact.severity });
+    await acts.persistStatus(key, "researching", { severity: impact.value.severity });
     const remembered = await acts.lookupProtocol(key);
     if (remembered) {
       state.alternatives = remembered.alternatives;
@@ -118,30 +156,43 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       state.protocolSource = "memory";
       state.protocolVersion = remembered.version;
     } else {
-      const research = await acts.researchAlternatives(input);
-      state.alternatives = research.alternatives;
-      state.draft = research.draft;
-      state.protocolSource = "agent";
-
-      // No therapeutic equivalent, no draft text, or the agent isn't confident enough to
-      // auto-draft → exception queue (always human; PROJECT_PLAN §2 exception matrix, §8
-      // under-escalation target ≈ 0). A missing draft with alternatives present would
-      // otherwise reach the HITL review with nothing to approve/edit/reject.
-      const missingDraft = research.draft.trim().length === 0;
-      if (
-        research.alternatives.length === 0 ||
-        missingDraft ||
-        research.confidence < CONFIDENCE_THRESHOLD
-      ) {
-        const resolved = await parkInException(
-          research.alternatives.length === 0
-            ? "no-therapeutic-equivalent"
-            : missingDraft
-              ? "missing-protocol-draft"
-              : "low-confidence-alternatives",
-          { confidence: research.confidence },
-        );
+      const researched = await callAgent(() => acts.researchAlternatives(input));
+      if (!researched.ok) {
+        // Same reasoning as the assessment step: an agent outage becomes a human decision,
+        // never a workflow that dies with the case still open.
+        const resolved = await parkInException("agent-unavailable", {
+          step: "researchAlternatives",
+          error: researched.error,
+        });
         if (!resolved) return state;
+        // Resolved: the pharmacist's text is the protocol, and the HITL block below skips
+        // exception-resolution cases, so nothing further in this branch applies.
+      } else {
+        const research = researched.value;
+        state.alternatives = research.alternatives;
+        state.draft = research.draft;
+        state.protocolSource = "agent";
+
+        // No therapeutic equivalent, no draft text, or the agent isn't confident enough to
+        // auto-draft → exception queue (always human; PROJECT_PLAN §2 exception matrix, §8
+        // under-escalation target ≈ 0). A missing draft with alternatives present would
+        // otherwise reach the HITL review with nothing to approve/edit/reject.
+        const missingDraft = research.draft.trim().length === 0;
+        if (
+          research.alternatives.length === 0 ||
+          missingDraft ||
+          research.confidence < CONFIDENCE_THRESHOLD
+        ) {
+          const resolved = await parkInException(
+            research.alternatives.length === 0
+              ? "no-therapeutic-equivalent"
+              : missingDraft
+                ? "missing-protocol-draft"
+                : "low-confidence-alternatives",
+            { confidence: research.confidence },
+          );
+          if (!resolved) return state;
+        }
       }
     }
   }
@@ -175,7 +226,8 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
         title: input.record.genericName,
         body: state.draft ?? "",
         alternatives: state.alternatives,
-        authoredBy: decision!.kind === "edit" ? (decision!.reviewer ?? "unknown-reviewer") : "agent",
+        authoredBy:
+          decision!.kind === "edit" ? (decision!.reviewer ?? "unknown-reviewer") : "agent",
         approvedBy: decision!.reviewer ?? "unknown-reviewer",
         rationale:
           decision!.kind === "edit"

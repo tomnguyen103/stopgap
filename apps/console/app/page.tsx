@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { getCases } from "./lib/data";
+import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
+import { DemoPanel } from "./demo-panel";
+import { getCases, getFeedFreshness } from "./lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -8,9 +10,29 @@ function sevClass(sev: string | null): string {
 }
 
 export default async function CasesPage() {
-  const cases = await getCases();
+  const [cases, feeds] = await Promise.all([getCases(), getFeedFreshness()]);
   return (
     <>
+      {isDemoMode() ? (
+        <DemoPanel drugs={DEMO_DRUGS.map((d) => ({ key: d.key, genericName: d.genericName }))} />
+      ) : null}
+      <div className="card">
+        <h2 className="card-title">Feeds</h2>
+        {feeds.length === 0 ? (
+          // Absence is the honest reading: no stored record means no feed has returned data
+          // to this deployment yet (ASHP without a key never does).
+          <p className="sub sub-tight">No feed data stored yet — run the poll schedule.</p>
+        ) : (
+          <p className="sub sub-tight">
+            {feeds.map((f) => (
+              <span key={f.source} className="feed-line">
+                <b>{f.source}</b> · latest stored record {new Date(f.lastFetchedAt).toLocaleString()} ·{" "}
+                {f.records} record{f.records === 1 ? "" : "s"}
+              </span>
+            ))}
+          </p>
+        )}
+      </div>
       <h1>Shortage cases</h1>
       <p className="sub">
         {cases.length} case{cases.length === 1 ? "" : "s"} · durable Temporal workflows mirrored from Postgres

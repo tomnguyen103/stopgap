@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  feedFreshness,
   getCaseByWorkflowId,
   getDb,
   listCases,
@@ -9,6 +10,7 @@ import {
 } from "@stopgap/db";
 import type {
   AuditRow,
+  FeedFreshness,
   CaseRow,
   ProtocolRow,
   ProtocolVersionRow,
@@ -18,6 +20,11 @@ import type {
 import { evaluatePromotion, type PromotionDecision } from "@stopgap/shadow";
 import { getCaseState, withTemporalClient, type CaseState } from "@stopgap/workflows";
 import { desc, eq } from "drizzle-orm";
+
+/** When each feed last returned data — the list view's freshness line. */
+export async function getFeedFreshness(): Promise<FeedFreshness[]> {
+  return feedFreshness(getDb());
+}
 
 /** All cases, newest-touched first (list view). */
 export async function getCases(): Promise<CaseRow[]> {

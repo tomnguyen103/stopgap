@@ -1,17 +1,44 @@
-# Phase 5 — Out of scope this run (ship / deploy / extract / writeups)
+# Phase 5 — open items (ship / deploy / extract / writeups)
 
-Per the build instructions, this run stops when Phase 4 is verified. Everything below is
-deferred to Phase 5.
+Phase 5 is in progress. Deploy and demo mode are done (see PROGRESS.md); everything still
+open is listed here.
 
-## Deferred from the plan (§13 Phase 5, §11 deployment)
+## Remaining from the plan (§13 Phase 5, §11 deployment)
 
-- Hetzner VPS deploy via docker-compose (app, worker, Temporal + UI, Postgres, Langfuse,
-  Ollama container, Caddy auto-TLS). Subdomains per §11.
-- Demo mode: read-only guest, nightly re-seed of mid-lifecycle cases, "Run a shortage"
-  interactive scenario, daily budget cap → Ollama fallback, demo video fallback.
-- Extract `shadow-ledger` as a standalone open-source npm library (§12.5).
-- Engineering writeup + dev.to crosspost; published failure post-mortem; portfolio page;
-  3-min demo video.
+- **Provisioning.** The compose stack, Caddyfile and runbook exist and were rehearsed on a
+  local Docker daemon; no VPS has been rented, so Let's Encrypt issuance and the public
+  subdomains are unverified. Renting the host is a paid decision, deliberately left to the
+  owner.
+- Publish `shadow-ledger` to npm and split it into its own pinned repository (§12.5). The
+  library is extracted, built and consumed in-workspace; publishing is a release decision
+  left to the owner (`packages/shadow-ledger/PUBLISHING.md`).
+- **Publishing** the writeup and post-mortem (dev.to crosspost), putting the portfolio copy
+  on tomnguyen.me, and recording the 3-minute demo video. All three documents are written
+  (`docs/writeup.md`, `docs/post-mortem.md`, `docs/portfolio.md`, the last containing the
+  video outline); pushing them to public channels is the owner's call, not an agent's.
+
+## Done in Phase 5
+
+- Deployment stack + runbook (`deploy/`, `docs/deploy.md`).
+- `shadow-ledger` extraction: standalone dependency-free library, `@stopgap/shadow` reduced
+  to an adapter over it.
+- Demo mode: read-only console, "Run a shortage", nightly idempotent re-seed, live-feed
+  freshness panel, daily USD cap with local-model fallback (`@stopgap/demo`,
+  `@stopgap/observability` spend cap, `llm_spend`, `demo_runs`).
+
+## Deliberate deviations from §11 (recorded, not dropped)
+
+- **The demo seed writes no shadow-ledger rows.** §11 lists a "populated shadow ledger" in
+  the nightly re-seed. Seeding it would mean inventing agreement percentages and printing
+  them on a dashboard whose whole purpose is to report measured agreement. The runbook
+  instead populates `/shadow` by running the real replay on the host, so every figure there
+  was actually measured.
+- **The scenario rate limit is deployment-wide, not per visitor.** §11 says "generous
+  per-visitor limits". Without an auth layer there is no honest way to tell two visitors
+  apart — an IP is not a person — and a per-IP limit would read as a stronger guarantee than
+  it is. One busy visitor can use up the hour's runs. Per-visitor limits land with auth.
+- **The `ollama` container and the over-cap fallback are unexercised.** The local rehearsal
+  pointed the containers at a host Ollama, so the in-cluster model service has not run.
 
 ## Stubbed during this run — needs real credentials/config before Phase 5
 
@@ -49,8 +76,8 @@ deferred to Phase 5.
   `pollAndOpenCases` to also cross-check open `monitoring` cases against the latest feed
   snapshot and signal resolution is real feature work (Phase 2/3 territory: it needs a
   feed-diff strategy, not just a poll), deferred rather than bolted on here.
-- **Build gate doesn't build library packages.** `pnpm gate`'s build step only produces
-  output for `apps/console` (the only package with a `build` script) — `packages/*` are
+- **Build gate builds only the packages that have a build.** `pnpm gate`'s build step
+  produces output for `apps/console` and `shadow-ledger` (the publishable library) — `packages/*` are
   consumed as workspace TS source directly (via `tsx`/Temporal's bundler/Next's transpiler),
   not compiled artifacts, so there's nothing for them to build in this run. Revisit if any
   package needs standalone publishing or a compiled entrypoint.

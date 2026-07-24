@@ -1,0 +1,294 @@
+# Stopgap single-VPS deployment (PROJECT_PLAN §11).
+#
+#   cd deploy && cp .env.prod.example .env && $EDITOR .env
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Everything runs on one host: app, worker, Temporal + UI, one Postgres holding three
+# databases (app / temporal / langfuse), Langfuse, a CPU Ollama, and Caddy for TLS.
+#
+# Ports are deliberately NOT published for anything except Caddy. There is no auth layer
+# (PHASE5-TODO.md), so the console, Temporal UI and Langfuse are reachable only through
+# Caddy, which is where the basic-auth gate lives.
+name: stopgap-prod
+
+x-app-env: &app-env
+  DATABASE_URL: postgres://stopgap:${POSTGRES_PASSWORD}@postgres:5432/stopgap
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_NAMESPACE: default
+  TEMPORAL_TASK_QUEUE: stopgap-cases
+  LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+  OLLAMA_BASE_URL: http://ollama:11434
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+  OPENFDA_API_KEY: ${OPENFDA_API_KEY:-}
+  ASHP_AUTH_KEY: ${ASHP_AUTH_KEY:-}
+  LANGFUSE_BASE_URL: http://langfuse-web:3000
+  LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+  LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+  RESEND_API_KEY: ${RESEND_API_KEY:-}
+  COMMS_FROM: ${COMMS_FROM:-stopgap@example.com}
+  COMMS_PHARMACY_TO: ${COMMS_PHARMACY_TO:-}
+  COMMS_DEMO_INBOX: ${COMMS_DEMO_INBOX:-}
+  EHR_WEBHOOK_URL: ${EHR_WEBHOOK_URL:-http://localhost:4000/ehr/formulary-flag}
+  STOPGAP_DEMO_MODE: ${STOPGAP_DEMO_MODE:-on}
+  LLM_DAILY_USD_CAP: ${LLM_DAILY_USD_CAP:-}
+  DEMO_MAX_RUNS_PER_HOUR: ${DEMO_MAX_RUNS_PER_HOUR:-6}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stopgap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: stopgap
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stopgap"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: stopgap
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: https://${TEMPORAL_DOMAIN}
+
+  # Local model, CPU-only. `ollama-pull` runs once at boot so the first case doesn't pay for
+  # a multi-GB download while a visitor waits.
+  ollama:
+    image: ollama/ollama:0.5.7
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+
+  ollama-pull:
+    image: ollama/ollama:0.5.7
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["sh", "-c", "ollama pull ${OLLAMA_MODEL:-mistral}"]
+    restart: "no"
+
+  # Schema migration as a one-shot: the app and worker must not race each other applying it.
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *app-env
+    command: ["pnpm", "--filter", "@stopgap/db", "migrate"]
+    restart: "no"
+
+  console:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: console
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+    environment: *app-env
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+      # Wait for the model download, not just the container: the worker's first case would
+      # otherwise fail its assessment before `ollama pull` finishes (a multi-GB first boot).
+      ollama-pull:
+        condition: service_completed_successfully
+    environment: *app-env
+
+  # Nightly demo re-seed (PROJECT_PLAN §11). A sleep loop rather than a cron image: one
+  # dependency fewer, and the seeder is idempotent so a missed or doubled run is harmless.
+  demo-seed:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: worker
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment: *app-env
+    entrypoint:
+      ["sh", "-c", "while true; do pnpm --filter @stopgap/demo seed || true; sleep 86400; done"]
+
+  # ---- Langfuse (self-hosted tracing) ------------------------------------------------------
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  langfuse-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  langfuse-minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  langfuse-db-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    command: >-
+      sh -c "psql -h postgres -U stopgap -d stopgap -tAc \"SELECT 1 FROM pg_database WHERE datname='langfuse'\" | grep -q 1 || psql -h postgres -U stopgap -d stopgap -c 'CREATE DATABASE langfuse'"
+    restart: "no"
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-db-init:
+        condition: service_completed_successfully
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    environment: &langfuse-env
+      DATABASE_URL: postgres://stopgap:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      NEXTAUTH_URL: https://${TRACES_DOMAIN}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${REDIS_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_USER}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    restart: unless-stopped
+    depends_on:
+      langfuse-worker:
+        condition: service_started
+    environment:
+      <<: *langfuse-env
+      LANGFUSE_INIT_ORG_ID: stopgap
+      LANGFUSE_INIT_ORG_NAME: Stopgap
+      LANGFUSE_INIT_PROJECT_ID: stopgap-prod
+      LANGFUSE_INIT_PROJECT_NAME: Stopgap
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_ADMIN_EMAIL}
+      LANGFUSE_INIT_USER_NAME: Stopgap Admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD}
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - console
+      - temporal-ui
+      - langfuse-web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      TEMPORAL_DOMAIN: ${TEMPORAL_DOMAIN}
+      TRACES_DOMAIN: ${TRACES_DOMAIN}
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER}
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  pgdata:
+  clickhouse-data:
+  minio-data:
+  ollama:
+  caddy-data:
+  caddy-config:

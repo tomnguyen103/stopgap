@@ -72,3 +72,14 @@ button {
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.danger { background: transparent; color: var(--crit); border: 1px solid var(--crit); }
 .error { color: var(--crit); font-size: 13px; margin: 10px 0 0; }
+
+/* Phase 5: demo mode. */
+.demo-banner {
+  padding: 8px 24px; font-size: 13px; color: var(--text);
+  background: #12202c; border-bottom: 1px solid var(--line);
+}
+.demo-banner.capped { background: #2a1e12; }
+.card-title { margin: 0 0 6px; }
+.sub-tight { margin: 0; }
+.sub-note { margin: 10px 0 0; }
+.feed-line { display: block; }

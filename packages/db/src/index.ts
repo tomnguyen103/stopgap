@@ -23,7 +23,12 @@ export {
   shadowStatsByClass,
   type ShadowClassStats,
 } from "./shadow.js";
+export { getLlmSpend, recordLlmSpend, utcDay, type DailySpend } from "./spend.js";
+export { countDemoRunsSince, reserveDemoRun } from "./demo-runs.js";
+export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export type {
+  DemoRunRow,
+  LlmSpendRow,
   CaseRow,
   NewCaseRow,
   AuditRow,

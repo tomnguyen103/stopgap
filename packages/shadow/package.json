@@ -15,6 +15,7 @@
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
     "@stopgap/providers": "workspace:*",
+    "shadow-ledger": "workspace:*",
     "@stopgap/observability": "workspace:*"
   },
   "devDependencies": {

@@ -2,12 +2,17 @@ import { getEnv } from "@stopgap/core/env";
 import type { ShortageRecord } from "@stopgap/core";
 import { workflowIdForKey } from "@stopgap/db";
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from "@temporalio/client";
-import type { CaseState, ExceptionResolution, ReviewDecision } from "./shared.js";
+import {
+  SHORTAGE_CASE_WORKFLOW,
+  type CaseState,
+  type ExceptionResolution,
+  type ReviewDecision,
+} from "./shared.js";
+import type { shortageCaseWorkflow } from "./workflows.js";
 import {
   exceptionResolvedSignal,
   resolvedSignal,
   reviewSignal,
-  shortageCaseWorkflow,
   stateQuery,
 } from "./workflows.js";
 
@@ -51,7 +56,8 @@ export async function startCase(
 ): Promise<{ workflowId: string; started: boolean }> {
   const workflowId = workflowIdForKey(record.key);
   try {
-    await client.workflow.start(shortageCaseWorkflow, {
+    // By name, never by function reference: see SHORTAGE_CASE_WORKFLOW.
+    await client.workflow.start<typeof shortageCaseWorkflow>(SHORTAGE_CASE_WORKFLOW, {
       args: [{ record, sources }],
       taskQueue: getEnv().TEMPORAL_TASK_QUEUE,
       workflowId,

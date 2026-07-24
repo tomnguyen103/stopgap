@@ -87,3 +87,37 @@ pnpm eval:full                # all golden cases (slow: hundreds of local model 
 Evals run **outside** `pnpm gate` on purpose — small local models aren't fully deterministic
 even at temperature 0, so a hard build gate on live-model output would train everyone to
 ignore red. `pnpm gate` stays deterministic; `pnpm eval` reports the real signal.
+
+## Writeups
+
+- [Engineering writeup](docs/writeup.md) — the three patterns (durable spine, shadow mode,
+  self-writing SOPs), with the measured numbers behind each.
+- [Post-mortem](docs/post-mortem.md) — what actually broke: a deployment-only workflow-naming
+  bug, a table nothing ever wrote to, a case dropped when the model went away, an audit chain
+  that forked.
+- [Portfolio page copy](docs/portfolio.md) — problem, before/after, what is measured and what
+  is explicitly not claimed.
+
+## `shadow-ledger`
+
+The shadow-mode harness is extracted as a standalone, dependency-free library in
+[`packages/shadow-ledger`](packages/shadow-ledger): an ordinal scale, agreement scoring
+against a human baseline, per-cohort aggregation, and promotion gates that grant autonomy
+from measured agreement rather than from a demo that went well. `@stopgap/shadow` is a thin
+adapter over it that keeps the clinical vocabulary.
+
+## Deployment & demo mode
+
+A single-VPS `docker compose` stack lives in [`deploy/`](deploy) — console, worker, Temporal
++ UI, one Postgres with three databases, Langfuse, a CPU Ollama, and Caddy for TLS. The
+runbook is [`docs/deploy.md`](docs/deploy.md); the stack was rehearsed end to end on a local
+Docker daemon, and no paid host has been provisioned.
+
+`STOPGAP_DEMO_MODE=on` makes the console a public read-only surface: reviews and exception
+resolutions are refused in the server action (not merely hidden), and the only visitor
+mutation is **"Run a shortage"**, which starts a real Temporal case for one of three
+catalogue drugs, rate limited per hour (deployment-wide, not per visitor — without auth there
+is no honest way to tell visitors apart). Every LLM call's cost accumulates in an `llm_spend`
+row; if `LLM_DAILY_USD_CAP` is set, routing past it is restricted to the free local model and
+the banner says which model is answering. That cap applies to every deployment, not just the
+demo, and is off unless configured.
