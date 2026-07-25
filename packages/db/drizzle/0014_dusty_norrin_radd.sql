@@ -91,6 +91,25 @@ DROP INDEX IF EXISTS "cases_key_idx";--> statement-breakpoint
 CREATE UNIQUE INDEX "cases_key_uq" ON "cases" USING btree ("org_id","key");--> statement-breakpoint
 
 -- ---------------------------------------------------------------------------------------------
+-- 1c. audit_log (org_id, id) — the index the per-org chain tail read needs.
+-- ---------------------------------------------------------------------------------------------
+-- THIS INDEX IS ON THE ADVISORY LOCK'S CRITICAL PATH. Every `appendAudit` takes
+-- `pg_advisory_xact_lock('audit_log_chain:' || org_id)` and then, while HOLDING it, reads this
+-- org's chain tail — `where org_id = ? order by id desc limit 1` — to get the hash the new row
+-- chains to. Every other append for that tenant is queued behind that read.
+--
+-- No index that existed before this one could serve it. `audit_ts_idx(org_id, ts)` orders by `ts`,
+-- not `id`, so the planner cannot take its first row and stop; `audit_case_action_uq(org_id,
+-- case_id, event_key, run_id)` has the wrong second column and does not cover rows with a null
+-- `case_id` usefully either. The tail read therefore fell back to scanning or sorting the org's
+-- whole audit history — inside the lock — so a tenant's append latency grew with the size of its
+-- own chain, which is the one table in this schema that only ever grows.
+--
+-- `(org_id, id)` matches the query exactly: seek to the org, walk the id side backwards, take one
+-- row. Org-leading like every other index here, so it is also usable for a plain org filter.
+CREATE INDEX "audit_org_id_idx" ON "audit_log" USING btree ("org_id","id");--> statement-breakpoint
+
+-- ---------------------------------------------------------------------------------------------
 -- 2. The second organization.
 -- ---------------------------------------------------------------------------------------------
 -- §6.5's acceptance is "two seeded orgs run side by side; cases, protocols, shadow, audit fully

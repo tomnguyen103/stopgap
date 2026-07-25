@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenMonitoringCase } from "@stopgap/db";
 
 /**
  * CROSS-TENANT COVERAGE FOR THE WORKER (PHASE6 §6.5), with no Postgres involved.
@@ -30,6 +31,14 @@ const audits: Record<string, unknown>[] = [];
 const startedCases: { orgId: string; key: string; workflowId: string | undefined }[] = [];
 /** Case rows keyed by `${orgId}:${key}` — what `getCaseByKey` answers from. */
 const caseRows = new Map<string, { id: string; workflowId: string; key: string }>();
+/** Open monitoring cases per org — what the feed-resolution half of the poll works from. */
+const openMonitoringCases = new Map<string, OpenMonitoringCase[]>();
+/** Workflow ids `markResolved` refuses to signal (a completed/terminated/aged-out execution). */
+const unsignalableWorkflowIds = new Set<string>();
+/** Workflow ids `markResolved` was asked to signal, in order. */
+const signalledWorkflowIds: string[] = [];
+/** Counters incremented, so the failure path can be asserted as recorded rather than swallowed. */
+const counters: string[] = [];
 
 vi.mock("@stopgap/db", () => ({
   withOrgDb: (orgId: string, fn: (db: unknown) => Promise<unknown>) => {
@@ -61,7 +70,7 @@ vi.mock("@stopgap/db", () => ({
     return row;
   },
   updateCaseStatus: async () => undefined,
-  listOpenMonitoringCases: async () => [],
+  listOpenMonitoringCases: async (_db: unknown, orgId: string) => openMonitoringCases.get(orgId) ?? [],
   recordFeedRecords: async () => undefined,
   resetFeedMiss: async () => undefined,
   bumpFeedMiss: async () => undefined,
@@ -104,12 +113,23 @@ vi.mock("@stopgap/ingest", () => ({
 }));
 
 vi.mock("@stopgap/comms", () => ({ sendEmail: async () => ({ channel: "email", delivered: false }), sendEhrFlag: async () => ({ channel: "ehr", delivered: false }) }));
-vi.mock("@stopgap/observability", () => ({ incrementCounter: () => undefined }));
+vi.mock("@stopgap/observability", () => ({
+  incrementCounter: (name: string) => {
+    counters.push(name);
+  },
+}));
 vi.mock("@stopgap/agents", () => ({ assessImpact: async () => ({}), researchAlternatives: async () => ({}) }));
 
 vi.mock("./client.js", () => ({
   makeClient: async () => ({ client: {}, connection: { close: async () => undefined } }),
-  markResolved: async () => undefined,
+  markResolved: async (_client: unknown, workflowId: string) => {
+    signalledWorkflowIds.push(workflowId);
+    if (unsignalableWorkflowIds.has(workflowId)) {
+      // What Temporal raises when the execution is gone — completed, terminated, or dropped by
+      // retention — while the case row is still in a monitoring status.
+      throw new Error(`workflow execution not found: ${workflowId}`);
+    }
+  },
   startCase: async (
     _client: unknown,
     orgId: string,
@@ -134,6 +154,10 @@ beforeEach(() => {
   audits.length = 0;
   startedCases.length = 0;
   caseRows.clear();
+  openMonitoringCases.clear();
+  unsignalableWorkflowIds.clear();
+  signalledWorkflowIds.length = 0;
+  counters.length = 0;
   openFdaCalls = 0;
 });
 
@@ -188,6 +212,62 @@ describe("the scheduled feed poll (no session, no case)", () => {
     // Every tenant transaction the poll opened named a real org from the registry — never a
     // default, and never one org's scope used for another org's work.
     expect(new Set(scopedOrgIds)).toEqual(new Set([ORG_A, ORG_B]));
+  });
+
+  /**
+   * ONE UNSIGNALABLE CASE MUST NOT STOP THE POLL.
+   *
+   * `markResolved` signals a Temporal execution that may no longer exist — completed, terminated,
+   * or aged out of retention — while the case row still sits in a monitoring status. Unguarded,
+   * that rejection escapes `pollAndOpenCases`, so every org LATER in the loop gets no case opened
+   * and no resolution that cycle, `stopgap_feed_poll_success_total` never increments, and the
+   * FeedStale runbook reads "the poller stopped" for what is one stale row in one tenant. The
+   * escalation ladder already contains exactly this hazard per tier; this asserts the poll does too.
+   */
+  it("keeps polling when one case's resolution signal fails, and records the failure", async () => {
+    const monitoring = (caseId: string, workflowId: string, key: string): OpenMonitoringCase => ({
+      caseId,
+      workflowId,
+      key,
+      source: "openfda",
+      sourceId: "s0",
+      // Threshold is 3, so one more miss this poll crosses it and the case resolves.
+      feedMissCount: 2,
+    });
+    // Org A comes FIRST in the registry, and its first case is the one whose execution is gone.
+    openMonitoringCases.set(ORG_A, [
+      monitoring("case-a-dead", "org-a-case-aspirin", "aspirin"),
+      monitoring("case-a-live", "org-a-case-insulin", "insulin"),
+    ]);
+    openMonitoringCases.set(ORG_B, [monitoring("case-b-live", "org-b-case-warfarin", "warfarin")]);
+    unsignalableWorkflowIds.add("org-a-case-aspirin");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await pollAndOpenCases();
+    // Logged with the case it belongs to, so the failure is diagnosable rather than a silent drop.
+    expect(logged).toHaveBeenCalledTimes(1);
+    expect(String(logged.mock.calls[0]?.[0])).toContain("case-a-dead");
+    logged.mockRestore();
+
+    // Every case was still attempted — the failure did not short-circuit its own org, let alone
+    // the tenants after it.
+    expect(signalledWorkflowIds).toEqual([
+      "org-a-case-aspirin",
+      "org-a-case-insulin",
+      "org-b-case-warfarin",
+    ]);
+    // Two resolved, and the failed one is NOT counted: reporting it as resolved would be the faked
+    // success this codebase refuses.
+    expect(result.resolved).toBe(2);
+    expect(audits.filter((a) => a.action === "case.feed_resolved").map((a) => a.caseId)).toEqual([
+      "case-a-live",
+      "case-b-live",
+    ]);
+    // The rest of the poll's work still happened for BOTH tenants.
+    expect(startedCases.map((c) => c.orgId)).toEqual([ORG_A, ORG_B]);
+    // Contained, not swallowed: the failure is counted, and the poll still reports its own success.
+    expect(counters).toContain("stopgap_feed_resolution_failures_total");
+    expect(counters).toContain("stopgap_feed_poll_success_total");
   });
 
   it("reuses an existing case's STORED workflow id rather than minting a new one", async () => {

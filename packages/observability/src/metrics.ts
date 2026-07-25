@@ -99,6 +99,8 @@ const COUNTER_HELP: Record<string, string> = {
   stopgap_comms_delivered_total: "Outbound comms messages that a transport actually delivered.",
   stopgap_comms_nondelivered_total: "Outbound comms messages recorded as non-delivered (no credentials, transport error).",
   stopgap_feed_poll_success_total: "Feed-poll workflow runs that completed successfully.",
+  stopgap_feed_resolution_failures_total:
+    "Monitoring cases the feed poll could not resolve (workflow unsignalable, or the audit append failed). The case stays monitoring and the next poll retries it.",
   stopgap_workflow_task_failures_total: "Activity executions that threw (before Temporal retry).",
 };
 

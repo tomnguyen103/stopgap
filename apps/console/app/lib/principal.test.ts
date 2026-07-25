@@ -93,11 +93,16 @@ describe("resolvePrincipal (PHASE6 §6.5 tenant resolution)", () => {
     expect(principal.orgId).toBe(OWN_ORG_ID);
   });
 
-  it("rejects a cookie that is not a uuid at all (no such organization)", async () => {
+  it("rejects a MALFORMED cookie without ever querying, resolving to the admin's own org", async () => {
     auth.mockResolvedValue(session(["admin"]));
     cookieValue = "'; drop table cases; --";
     const principal = await resolvePrincipal();
     expect(principal.orgId).toBe(OWN_ORG_ID);
+    // The lookup must not happen at all. `organizations.id` is a `uuid` COLUMN, so a non-uuid does
+    // not come back as "no such organization" — Postgres raises `invalid input syntax for type
+    // uuid` from inside the comparison, uncaught, during a render every page awaits. One bad cookie
+    // would 500 the whole console for that admin until it expired.
+    expect(getOrganization).not.toHaveBeenCalled();
   });
 
   it("resolves the anonymous/demo viewer to the seed org, read-only", async () => {

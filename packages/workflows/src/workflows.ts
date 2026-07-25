@@ -2,6 +2,7 @@ import {
   condition,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
 } from "@temporalio/workflow";
@@ -14,6 +15,8 @@ import type * as activities from "./activities.js";
 import {
   MAX_MONITORING_MS,
   MONITOR_POLL_MS,
+  ORG_QUALIFIED_CASE_INPUT_PATCH,
+  resolveCaseOrgId,
   type CaseAcknowledgment,
   type CaseInput,
   type CaseState,
@@ -79,7 +82,17 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // §6.5). A workflow has no session to derive it from, and deriving it inside an activity would
   // let it change across a case's multi-week life — week 6's audit entry landing in a different
   // hospital's chain from week 1's. Carried in the input, it cannot.
-  const orgId = input.orgId;
+  //
+  // `patched()` is evaluated FIRST and unconditionally, before any signal handler or activity, so
+  // the marker lands at the same point in every execution's history. It distinguishes the two eras
+  // of this workflow's input: executions started before multi-tenancy carry no `orgId` at all, and
+  // with `MAX_MONITORING_MS` at 90 days there are always some of those in flight when a deploy
+  // lands. `resolveCaseOrgId` documents which value each era gets and why.
+  const orgId = resolveCaseOrgId(input, patched(ORG_QUALIFIED_CASE_INPUT_PATCH));
+  // The input as the activities see it. `recordDetected` reads `input.orgId` directly (it is the
+  // activity that CREATES the case row), so handing it the raw pre-patch input would scope it to
+  // `undefined` — the resolved org has to travel with the payload, not just in this closure.
+  const caseInput: CaseInput = { ...input, orgId };
   const state: CaseState = {
     status: "detected",
     alternatives: [],
@@ -266,12 +279,12 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     return true;
   }
 
-  await acts.recordDetected(input);
+  await acts.recordDetected(caseInput);
 
   // Assess impact.
   state.status = "assessing";
   await acts.persistStatus(orgId, key, "assessing");
-  const impact = await callAgent(() => acts.assessImpact(input));
+  const impact = await callAgent(() => acts.assessImpact(caseInput));
   if (!impact.ok) {
     // The agent layer is down (provider outage, exhausted retries). Letting the activity
     // failure escape would fail the workflow and strand the case mid-assessment with nobody
@@ -310,7 +323,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       state.protocolSource = "memory";
       state.protocolVersion = remembered.version;
     } else {
-      const researched = await callAgent(() => acts.researchAlternatives(input));
+      const researched = await callAgent(() => acts.researchAlternatives(caseInput));
       if (!researched.ok) {
         // Same reasoning as the assessment step: an agent outage becomes a human decision,
         // never a workflow that dies with the case still open.

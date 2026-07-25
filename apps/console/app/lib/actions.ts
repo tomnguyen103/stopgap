@@ -399,14 +399,26 @@ export async function setActiveOrgAction(orgId: unknown): Promise<void> {
   const org = await getOrganization(target);
   if (!org) throw new Error(`no such organization: ${target}`);
 
-  await recordPrivilegedAudit(
-    { ...principal, orgId: org.id },
-    "org.active_switched",
-    { fromOrgId: principal.orgId, toOrgId: org.id, toOrgSlug: org.slug },
-    // Keyed by (admin, target org) so a repeated switch back and forth does not append a row per
-    // click, while a different admin or a different tenant still records its own entry.
-    `org.active_switched.${principal.userId ?? "unknown"}.${org.id}`,
-  );
+  // GATED ON "DID THE ACTIVE ORG ACTUALLY CHANGE", like every other privileged action in this file
+  // gates its audit on the underlying op's "did state change" return.
+  //
+  // The eventKey below CANNOT do this job, and the comment that claimed it could was wrong:
+  // `appendAudit` only runs its eventKey idempotency lookup when `entry.caseId` is truthy, and
+  // `recordPrivilegedAudit` never sets `caseId`. So the key is written to the row and never
+  // consulted, and before this check every click on an already-active org appended another
+  // "an admin entered this tenant" entry for an entry that did not happen. `principal.orgId` is the
+  // org this request is ALREADY acting in (`resolveActiveOrg` has run), so comparing against it is
+  // the state question, not a guess about the cookie.
+  if (principal.orgId !== org.id) {
+    await recordPrivilegedAudit(
+      { ...principal, orgId: org.id },
+      "org.active_switched",
+      { fromOrgId: principal.orgId, toOrgId: org.id, toOrgSlug: org.slug },
+      // Still keyed by (admin, target org): it is the row's stable identity for anyone reading the
+      // chain, and a different admin or a different tenant records its own entry.
+      `org.active_switched.${principal.userId ?? "unknown"}.${org.id}`,
+    );
+  }
 
   (await cookies()).set(ACTIVE_ORG_COOKIE, org.id, {
     httpOnly: true,
@@ -420,8 +432,8 @@ export async function setActiveOrgAction(orgId: unknown): Promise<void> {
     // ago, and the console (before `ActiveOrgBadge`) said nothing. A short window makes "acting as
     // another tenant" something you do deliberately and re-affirm, rather than a mode you forget
     // you are in. One hour: long enough for a real cross-tenant task, short enough that it cannot
-    // outlive the reason for it. Re-switching is one click and appends no duplicate audit row (the
-    // entry is keyed by admin + target org).
+    // outlive the reason for it. Re-switching is one click; the cookie is re-set (which is what
+    // refreshes the hour), and the audit entry is skipped because the active org did not change.
     maxAge: ACTIVE_ORG_COOKIE_MAX_AGE_SECONDS,
   });
   // Everything on the page is org-scoped, so nothing that was rendered before the switch is still

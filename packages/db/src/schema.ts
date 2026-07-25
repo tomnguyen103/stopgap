@@ -70,7 +70,13 @@ export const cases = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    /** Temporal workflow id (deterministic: `case-<key>`). Unique WITHIN an org. */
+    /**
+     * Temporal workflow id, unique WITHIN an org. Deterministic, and in one of TWO formats:
+     * `workflowIdForKey` mints `org-<orgId>-case-<key>` since PHASE6 §6.5, while rows written
+     * before that pass hold the older `case-<key>`. Temporal cannot rename a running execution, so
+     * both formats stay live and every lookup uses the id the ROW carries rather than a recomputed
+     * one.
+     */
     workflowId: text("workflow_id").notNull(),
     /** Cross-feed dedup key: normalized generic name. */
     key: text("key").notNull(),
@@ -329,6 +335,14 @@ export const auditLog = pgTable(
     // Org-leading: chain verification and the console timeline both read "this org's rows in id
     // order", never the deployment's. A bare `ts` index would scan every tenant's history.
     index("audit_ts_idx").on(t.orgId, t.ts),
+    // ON THE ADVISORY LOCK'S CRITICAL PATH (migration 0014). `appendAudit` holds
+    // `pg_advisory_xact_lock('audit_log_chain:' || org_id)` while it reads this org's chain tail —
+    // `where org_id = ? order by id desc limit 1` — so every other append for that tenant waits on
+    // that read. Nothing else here serves it: `audit_ts_idx` orders by `ts`, not `id`, and
+    // `audit_case_action_uq`'s second column is `case_id`. Without this the tail read scans or
+    // sorts the org's whole history inside the lock, making append latency a function of chain
+    // length on the one table that only ever grows.
+    index("audit_org_id_idx").on(t.orgId, t.id),
     // Within one workflow run each case action fires at most once, so (case_id, action,
     // run_id) is a natural idempotency key: a Temporal activity retry after a committed
     // insert lands here as a no-op instead of double-appending. run_id is in the key because
@@ -360,11 +374,8 @@ export const auditLog = pgTable(
  * org whose history someone actually rewrote. One anchor row per org per run makes the pinned head
  * mean exactly one thing again.
  *
- * It is STILL NOT an RLS-protected table, and that is deliberate: the anchoring job and
- * `pnpm verify-audit` are deployment-wide integrity tasks that read across tenants through
- * `withBypassDb`. An org whose RLS scoping was misconfigured must not be able to stop its own
- * history from being anchored — that would let the tenant disable the tamper-evidence that exists
- * to protect against it. `orgId` here says WHOSE chain a row pins; it is not an isolation boundary.
+ * 0014 also gives it RLS, with a deliberately ASYMMETRIC policy — SELECT only, no write policy at
+ * all. See the index/policy block at the bottom of this table for what that buys and why.
  */
 export const auditAnchors = pgTable("audit_anchors", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

@@ -63,10 +63,11 @@ export function workflowIdForKey(orgId: string, key: string): string {
 export async function upsertCaseForRecord(db: Db, orgId: string, record: ShortageRecord): Promise<CaseRow> {
   // KEY FIRST, id second (PHASE6 §6.5 pass 2). A case row written before the workflow-id format
   // changed holds the old `case-<key>` id, so arbitrating only on the NEWLY computed
-  // `org-<orgId>-case-<key>` would find no conflict and insert a SECOND row for a drug this org
-  // already has a case for — a silent duplicate, and the worse failure mode of the two, because
-  // `cases_key_idx` is not unique and would not stop it. The `(org_id, key)` read is the identity
-  // question this function actually asks; the insert below is only for a case that does not exist.
+  // `org-<orgId>-case-<key>` would find no conflict for it. Migration 0014's `cases_key_uq` — UNIQUE
+  // on `(org_id, key)` — means the insert below would then RAISE rather than silently duplicate, but
+  // raising is still the wrong answer: the org does have a case for this drug, and the caller asked
+  // for it. The `(org_id, key)` read finds legacy-format rows and returns them, which is the
+  // identity question this function actually asks; the insert is only for a case that does not exist.
   const existingByKey = await getCaseByKey(db, orgId, record.key);
   if (existingByKey) return existingByKey;
   const workflowId = workflowIdForKey(orgId, record.key);

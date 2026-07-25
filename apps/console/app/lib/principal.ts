@@ -109,6 +109,20 @@ export async function resolvePrincipal(): Promise<Principal> {
 }
 
 /**
+ * A uuid in the exact textual form Postgres will cast — the same check `withOrgDb` applies, for the
+ * same reason and one layer earlier.
+ *
+ * `organizations.id` is a `uuid` COLUMN, so a cookie value that is not one does not come back as
+ * "no such organization": Postgres raises `invalid input syntax for type uuid` from inside the
+ * comparison. Nothing here catches that, and this function runs during `resolvePrincipal`, which
+ * every server render awaits — so one malformed cookie 500s every page for that admin until the
+ * cookie expires. That is the exact opposite of what the docstring below promises. Rejecting the
+ * value before it reaches the database makes a garbage cookie indistinguishable from a cookie
+ * naming an org that does not exist, which is what it is.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
  * Apply the admin active-org switch, or fall through to the user's own org.
  *
  * The `getOrganization` round trip is not decoration. Without it, `admin` plus an arbitrary uuid in
@@ -121,6 +135,9 @@ async function resolveActiveOrg(roles: Role[], ownOrgId: string): Promise<string
   if (!rolesAllow(roles, "admin")) return ownOrgId;
   const requested = (await cookies()).get(ACTIVE_ORG_COOKIE)?.value;
   if (!requested || requested === ownOrgId) return ownOrgId;
+  // Shape first, existence second. A cookie is client-controlled, so the value that reaches a
+  // `uuid` column must be one this process has already checked.
+  if (!UUID_RE.test(requested)) return ownOrgId;
   const org = await getOrganization(requested);
   return org ? org.id : ownOrgId;
 }

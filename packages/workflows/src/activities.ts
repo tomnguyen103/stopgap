@@ -375,33 +375,59 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
         for (const caseId of diff.toBump) await bumpFeedMiss(db, org.id, caseId, pollRun);
       });
       for (const evidence of diff.toResolve) {
-        // Signal the durable workflow (it owns the state machine), record the evidence in the
-        // tamper-evident chain, then clear the counter. The signal is addressed to the id the CASE
-        // ROW carries, so a pre-migration case is still reachable. `runId` is the poll's run id so
-        // a retry within one poll dedups on the idempotency key while a later recurrence's
-        // resolution (a different poll run) still lands its own entry.
-        await markResolved(client, evidence.workflowId);
-        await withOrgDb(org.id, async (db) => {
-          await appendAudit(db, {
-            orgId: org.id,
-            caseId: evidence.caseId,
-            actor: "system",
-            actorUserId: getSyntheticUser("system"),
-            action: "case.feed_resolved",
-            detail: {
-              reason: evidence.reason,
-              source: evidence.source,
-              lastSeenSourceId: evidence.lastSeenSourceId,
-              consecutiveMisses: evidence.consecutiveMisses,
-              missPollTimestamps: evidence.missPollTimestamps,
-            },
-            runId: currentRunId(),
-            eventKey: "case.feed_resolved",
+        // ONE CASE'S FAILURE STOPS THAT CASE, NOT THE POLL. `markResolved` signals a Temporal
+        // execution that may no longer exist — completed, terminated, or aged out of retention —
+        // while the case ROW still sits in a monitoring status, which is an ordinary end state for
+        // a 90-day workflow whose history was dropped. Unguarded, that rejection escapes
+        // `pollAndOpenCases` entirely: every org LATER in the loop gets no case opened and no
+        // resolution this cycle, `stopgap_feed_poll_success_total` never increments, and the
+        // FeedStale runbook reads "the poller stopped" for what is one stale row in one tenant.
+        // The escalation ladder already takes exactly this stance for the same hazard (a tier whose
+        // notification activity rejects is recorded and the ladder keeps climbing); this is that
+        // rule applied to the poll.
+        //
+        // Contained, not swallowed: the failure is logged with the case it belongs to, counted, and
+        // — because `resetFeedMiss` is inside the same block — the miss counter is left ABOVE the
+        // threshold, so the next poll retries this case rather than starting its count again.
+        try {
+          // Signal the durable workflow (it owns the state machine), record the evidence in the
+          // tamper-evident chain, then clear the counter. The signal is addressed to the id the CASE
+          // ROW carries, so a pre-migration case is still reachable. `runId` is the poll's run id so
+          // a retry within one poll dedups on the idempotency key while a later recurrence's
+          // resolution (a different poll run) still lands its own entry.
+          await markResolved(client, evidence.workflowId);
+          await withOrgDb(org.id, async (db) => {
+            await appendAudit(db, {
+              orgId: org.id,
+              caseId: evidence.caseId,
+              actor: "system",
+              actorUserId: getSyntheticUser("system"),
+              action: "case.feed_resolved",
+              detail: {
+                reason: evidence.reason,
+                source: evidence.source,
+                lastSeenSourceId: evidence.lastSeenSourceId,
+                consecutiveMisses: evidence.consecutiveMisses,
+                missPollTimestamps: evidence.missPollTimestamps,
+              },
+              runId: currentRunId(),
+              eventKey: "case.feed_resolved",
+            });
+            await resetFeedMiss(db, org.id, evidence.caseId);
           });
-          await resetFeedMiss(db, org.id, evidence.caseId);
-        });
+          // Counted only on the path that actually resolved something. A case whose signal or audit
+          // append failed did NOT resolve, and reporting it as resolved would be the faked success
+          // this codebase refuses.
+          resolved += 1;
+        } catch (err) {
+          incrementCounter("stopgap_feed_resolution_failures_total");
+          console.error(
+            `[poll] feed resolution failed for org ${org.id} case ${evidence.caseId} ` +
+              `(workflow ${evidence.workflowId}): ${err instanceof Error ? err.message : String(err)}. ` +
+              "The case stays monitoring and its miss counter is unchanged, so the next poll retries it.",
+          );
+        }
       }
-      resolved += diff.toResolve.length;
     }
     // A completed poll is a liveness signal for the scheduler (PHASE6 §6.4): the FeedStale alert's
     // runbook checks this counter to tell "the feed went quiet" from "the poller stopped running".

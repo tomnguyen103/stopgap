@@ -31,8 +31,9 @@ tenant. See "The feed poll" below.
 | `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
 
 `audit_anchors` sits between the two: migration 0014 gives it an `org_id` (so an anchor says WHOSE
-chain it pins) but deliberately no RLS policy (so a tenant cannot stop its own history being
-anchored). See "Anchoring is per-org" below.
+chain it pins) and RLS with a deliberately **asymmetric** policy — SELECT scoped to the tenant, and
+no INSERT/UPDATE/DELETE policy at all, so a tenant can read the anchors pinning its own chain but
+cannot stop its own history being anchored. See "Anchoring is per-org" below.
 
 Global is a decision per table, recorded in `packages/db/src/schema.ts` beside each one:
 
@@ -143,6 +144,13 @@ working production configuration** — it enforces no isolation. Nothing pretend
 - the pool logs a loud warning at startup when the application role turns out to bypass RLS;
 - `/api/readyz` reports `checks.rlsEnforced` (`false` when the role bypasses, `null` when unknown).
   It is a reported condition, not a hard failure — local dev legitimately runs single-role;
+- `/api/readyz` also reports `checks.maintenanceConnection`, a **separate** named check that **does
+  fail readiness (503) when `NODE_ENV=production`** and there is no usable maintenance connection —
+  unset `DATABASE_URL_MAINTENANCE`, unreachable, or pointed at a role that does not hold BYPASSRLS.
+  The two checks are independent, which is why neither is folded into the other: a production
+  deployment that omits the variable reports `rlsEnforced: true` (the policies really are applying)
+  while every cross-tenant read returns zero rows, so nobody can sign in and nothing says why. In
+  development the check reports its state and does not gate;
 - `anchorAuditChain` and `pnpm verify-audit` call `assertMaintenanceRoleBypassesRls` and **refuse to
   run** on a non-bypassing connection, rather than reporting green over zero visible rows.
 
@@ -165,15 +173,22 @@ CREATE ROLE stopgap_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '…';
 -- "permission denied for schema public" no matter what table grants it holds.
 GRANT USAGE ON SCHEMA public TO stopgap_app;
 
-GRANT ALL ON ALL TABLES IN SCHEMA public TO stopgap_app;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO stopgap_app;
+-- The four DML verbs, never `ALL`. `ALL` includes TRUNCATE, and ROW-LEVEL SECURITY DOES NOT APPLY
+-- TO TRUNCATE: a role holding it can empty every tenant's cases, protocols and audit chain in one
+-- statement with every policy enforcing perfectly. On sequences, `UPDATE` is `setval` — the ability
+-- to rewind `audit_log.id` — so only USAGE (nextval) and SELECT are granted.
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO stopgap_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO stopgap_app;
 
 -- Grants are per-object and are NOT inherited by tables created later, so without these two the
 -- next migration ships a table the application cannot read — a failure that appears one deploy
 -- after the change that caused it. `FOR ROLE stopgap` because MIGRATIONS RUN AS THE OWNER, never as
--- `stopgap_app`, which holds no CREATE right on the schema.
-ALTER DEFAULT PRIVILEGES FOR ROLE stopgap IN SCHEMA public GRANT ALL ON TABLES TO stopgap_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE stopgap IN SCHEMA public GRANT ALL ON SEQUENCES TO stopgap_app;
+-- `stopgap_app`, which holds no CREATE right on the schema. The verb list MIRRORS the direct grants
+-- above: `ALL` here would hand TRUNCATE back on every table a future migration creates.
+ALTER DEFAULT PRIVILEGES FOR ROLE stopgap IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO stopgap_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE stopgap IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO stopgap_app;
 ```
 
 ### The authentication bootstrap
@@ -250,8 +265,11 @@ invalidating a single hash. With `AUDIT_HMAC_KEY` set, new rows are `v4`; withou
 before. See `docs/audit-integrity.md`.
 
 `verifyAuditChain(db, orgId)` verifies one org. The console's integrity page verifies the signed-in
-user's org. `pnpm verify-audit` loops over every org through `withBypassDb`; run it as
-`stopgap_maintenance`, or every per-org query returns zero rows and the check passes vacuously.
+user's org. `pnpm verify-audit` loops over every org through `withBypassDb`, and it **cannot** pass
+vacuously: `assertMaintenanceRoleBypassesRls` runs first and **aborts before any verification
+happens** if the connection is not a BYPASSRLS (or superuser) role. Run it as
+`stopgap_maintenance`; run it as anything else and you get a refusal naming the problem, never a
+green result computed over zero visible rows.
 
 ## Anchoring is per-org
 
@@ -295,10 +313,13 @@ so ordinary users are single-org **by construction** and have nothing to pick be
 therefore implemented as an **admin-only active-org switch** (`/admin/organizations`):
 
 - selecting an org stores its id in an `httpOnly`, `sameSite=lax` cookie **with a one-hour
-  `maxAge`**, so the elevated state expires on its own. Nothing else ends it: a switch made last
-  week is still in force today, and every clinical action taken since landed in the other hospital's
-  data and its audit chain — each one individually successful and correctly recorded, in the wrong
-  tenant;
+  `maxAge`**, so the elevated state expires on its own. That lifetime is the point: nothing else in
+  the system ends the switch. Without it the cookie is a session cookie that survives every
+  navigation and, in a browser that restores tabs, days of them — an admin who switched on Tuesday
+  would still be acting inside the other hospital on Thursday, with every clinical action taken
+  since landing in that tenant's data and audit chain, each one individually successful and
+  correctly recorded, in the wrong facility. An hour is long enough for a real cross-tenant task and
+  short enough that it cannot outlive the reason for it; re-switching is one click;
 - while an admin is acting outside their own org, the console header shows a prominent **"Acting in
   &lt;hospital&gt;"** badge (`app/active-org-badge.tsx`) linking back to the switcher. It renders
   only in the elevated state, because a badge that is always there is a badge nobody reads;
@@ -346,7 +367,7 @@ need an **authenticated scrape**; that is recorded as an open question under §6
 Migration 0013 inserts one organization with a **fixed** id, and backfills every pre-existing row
 into it:
 
-```
+```text
 id   00000000-0000-0000-0000-0000000000a1   (SEED_ORG_ID in packages/db/src/orgs.ts)
 slug stopgap
 name Stopgap (seed organization)
@@ -363,7 +384,7 @@ anonymous viewer: the demo IS the seed tenant, read-only through the existing de
 disjoint". One tenant demonstrates nothing — every query returns the same rows whether or not the
 policies work — so migration **0014** creates a second:
 
-```
+```text
 id   00000000-0000-0000-0000-0000000000a2   (SECOND_ORG_ID in packages/db/src/orgs.ts)
 slug riverside
 name Riverside General (second seeded organization)

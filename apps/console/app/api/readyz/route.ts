@@ -1,4 +1,4 @@
-import { checkAppRoleRls, pingDb } from "@stopgap/db";
+import { checkAppRoleRls, checkMaintenanceConnection, pingDb } from "@stopgap/db";
 import { checkTemporal } from "@stopgap/workflows";
 import { NextResponse } from "next/server";
 
@@ -16,13 +16,28 @@ import { NextResponse } from "next/server";
  * single-role local development legitimately connects as the compose superuser, and 503-ing the dev
  * stack to make a point would only teach operators to ignore the check. `null` means the probe
  * could not reach the database — unknown, reported as unknown rather than as fine.
+ *
+ * `maintenanceConnection` is a SEPARATE named check and, unlike `rlsEnforced`, it DOES fail
+ * readiness — but only in production (PHASE6 §6.5). The two conditions are independent, which is
+ * why neither is folded into the other: a production deployment that omits
+ * `DATABASE_URL_MAINTENANCE` reports `rlsEnforced: true` (the policies really are applying) while
+ * every cross-tenant read returns zero rows. OIDC sign-in cannot resolve a subject to an
+ * organization, REST key authentication cannot resolve a key hash, anchoring and verification
+ * refuse to run — and the console comes up, serves the anonymous demo viewer, and passes every
+ * other probe. Nobody can log in and nothing says why. In development the check reports its state
+ * and does not gate, because the single-role local stack legitimately has no second connection.
  */
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<NextResponse> {
-  const [database, temporal, rls] = await Promise.all([pingDb(), checkTemporal(), checkAppRoleRls()]);
-  const ready = database && temporal;
+  const [database, temporal, rls, maintenance] = await Promise.all([
+    pingDb(),
+    checkTemporal(),
+    checkAppRoleRls(),
+    checkMaintenanceConnection(),
+  ]);
+  const ready = database && temporal && maintenance.ok;
   return NextResponse.json(
     {
       ready,
@@ -33,6 +48,14 @@ export async function GET(): Promise<NextResponse> {
         rlsEnforced: rls.checked ? !rls.bypassesRls : null,
         // Named only when it is the bad case, so the field's presence is itself the signal.
         ...(rls.checked && rls.bypassesRls ? { rlsBypassRole: rls.role ?? null } : {}),
+        // Gates readiness in production only; reported everywhere. `required` says which of those
+        // this process is, so a 200 in development is not mistaken for a configured deployment.
+        maintenanceConnection: {
+          ok: maintenance.ok,
+          configured: maintenance.configured,
+          required: maintenance.required,
+          ...(maintenance.reason ? { reason: maintenance.reason } : {}),
+        },
       },
     },
     { status: ready ? 200 : 503 },

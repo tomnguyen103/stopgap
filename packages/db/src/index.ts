@@ -6,9 +6,11 @@ export {
   pingDb,
   checkAppRoleRls,
   checkMaintenanceRoleRls,
+  checkMaintenanceConnection,
   assertMaintenanceRoleBypassesRls,
   type Db,
   type RoleRlsStatus,
+  type MaintenanceConnectionStatus,
 } from "./client.js";
 export {
   appendAudit,

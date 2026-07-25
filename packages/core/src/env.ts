@@ -6,6 +6,18 @@ import { z } from "zod";
  * a sensible local-dev default so the local gate runs with zero configuration.
  */
 const EnvSchema = z.object({
+  /**
+   * Which deployment shape this process is running in. Only ever compared against `"production"`,
+   * and kept as a free-form string rather than an enum because it is not ours to constrain — Node,
+   * Next.js and the test runner all set it, and a value we did not anticipate must not crash the
+   * parse of every OTHER variable.
+   *
+   * It exists here for exactly one decision: configuration that is OPTIONAL in development and
+   * MANDATORY in production (today, `DATABASE_URL_MAINTENANCE`). Defaulting to "development" keeps
+   * the zero-config local gate green — a developer never has to set it — while a real deployment,
+   * which Node already sets to "production", gets the strict behaviour without opting in.
+   */
+  NODE_ENV: z.string().default("development"),
   DATABASE_URL: z.string().default("postgres://stopgap:stopgap@localhost:5433/stopgap"),
   /**
    * SECOND connection string, for the handful of jobs that are genuinely deployment-wide and must

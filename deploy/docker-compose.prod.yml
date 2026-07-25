@@ -25,6 +25,16 @@ name: stopgap-prod
 # jobs that are genuinely cross-tenant (the OIDC/API-key authentication bootstrap, hourly audit
 # anchoring, `pnpm verify-audit`, the Prometheus scrape). Those jobs cannot work on the app role and
 # do not silently degrade if they are pointed at it: they refuse to run.
+#
+# BOTH PASSWORDS MUST BE URL-SAFE, and the env example says so rather than this file percent-encoding
+# them. They are interpolated RAW into a connection URL here, while `app-role.sql` sets the same
+# value through psql's `:'app_pw'` quoting — so a password containing `@ / : # ?` is set correctly in
+# Postgres and then MIS-PARSED here: `@` ends the userinfo early, `/` ends the authority, and the
+# result is an authentication failure pointing nowhere near the cause. Compose has no percent-encode
+# function, so encoding would mean either a shell-substitution hack that is harder to read than the
+# rule it enforces, or two variables (raw + encoded) that can drift apart. Constraining GENERATION
+# instead is the smaller contract: `openssl rand -hex 32` (and base64url) emit only characters that
+# are safe in both places, which is exactly what deploy/.env.prod.example instructs.
 x-db-app-url: &db-app-url postgres://stopgap_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD to a generated secret}@postgres:5432/stopgap
 x-db-owner-url: &db-owner-url postgres://stopgap:${POSTGRES_PASSWORD}@postgres:5432/stopgap
 

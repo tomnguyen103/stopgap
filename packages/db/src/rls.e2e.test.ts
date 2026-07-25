@@ -312,6 +312,13 @@ afterAll(async () => {
       await tx`delete from users where org_id = ${org}`;
     });
   }
+  // `audit_anchors` takes no writes from a tenant connection at all (migration 0014), so its rows
+  // go over `maint` — and they are torn down HERE rather than at the end of each anchor test. Inline
+  // cleanup only runs when the test reaches it: an assertion that fails mid-test leaves the rows
+  // behind, and unlike every other fixture in this file those rows have no deterministic id to
+  // collide with (`audit_anchors.id` is a `bigserial`), so the next run silently sees four anchors
+  // where it expects two and fails somewhere unrelated. Before the organizations delete: the FK.
+  await maint`delete from audit_anchors where org_id in (${ORG_A}, ${ORG_B})`;
   await db`delete from organizations where id in (${ORG_A}, ${ORG_B})`;
   await db.end({ timeout: 5 });
   await maint.end({ timeout: 5 });
@@ -471,9 +478,12 @@ describe("audit_anchors carry an org (migration 0014)", () => {
     const headA = await asOrg(ORG_A, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
     const headB = await asOrg(ORG_B, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
     // Written on the maintenance path (unscoped here) — which is how anchoring actually runs.
+    // Each anchor test tags its rows with its own `sink` so the two can coexist until `afterAll`
+    // tears them down; `audit_anchors.id` is a `bigserial`, so there is no deterministic id to key
+    // on the way every other fixture in this file does.
     await maint`insert into audit_anchors (org_id, max_audit_id, head_hash, sink)
-                values (${ORG_A}, ${headA[0]!.id}, ${headA[0]!.hash}, 'file'),
-                       (${ORG_B}, ${headB[0]!.id}, ${headB[0]!.hash}, 'file')`;
+                values (${ORG_A}, ${headA[0]!.id}, ${headA[0]!.hash}, 'test-policy'),
+                       (${ORG_B}, ${headB[0]!.id}, ${headB[0]!.hash}, 'test-policy')`;
 
     // READ: org A sees its own anchors and none of org B's.
     const visible = await asOrg(ORG_A, (tx) => tx`select org_id from audit_anchors`);
@@ -493,10 +503,9 @@ describe("audit_anchors carry an org (migration 0014)", () => {
 
     // Everything is still there, unmodified, for both tenants.
     const survivors =
-      await maint`select org_id, head_hash from audit_anchors where org_id in (${ORG_A}, ${ORG_B})`;
+      await maint`select org_id, head_hash from audit_anchors where sink = 'test-policy'`;
     expect(survivors).toHaveLength(2);
     expect(survivors.some((r) => r.head_hash === "hijacked")).toBe(false);
-    await maint`delete from audit_anchors where org_id in (${ORG_A}, ${ORG_B})`;
   });
 
   it("anchors from two orgs stay attributable to their own chains", async () => {
@@ -508,17 +517,16 @@ describe("audit_anchors carry an org (migration 0014)", () => {
     // maintenance role, which is how anchoring actually runs — so these inserts and the
     // cross-tenant join below go over `maint`, not through `asOrg` and not through `unscoped`.
     await maint`insert into audit_anchors (org_id, max_audit_id, head_hash, sink)
-                values (${ORG_A}, ${headA[0]!.id}, ${headA[0]!.hash}, 'file'),
-                       (${ORG_B}, ${headB[0]!.id}, ${headB[0]!.hash}, 'file')`;
+                values (${ORG_A}, ${headA[0]!.id}, ${headA[0]!.hash}, 'test-attribution'),
+                       (${ORG_B}, ${headB[0]!.id}, ${headB[0]!.hash}, 'test-attribution')`;
     const rows = await maint`select a.org_id, a.head_hash, l.org_id as chain_org
                              from audit_anchors a join audit_log l on l.id = a.max_audit_id
-                             where a.org_id in (${ORG_A}, ${ORG_B})`;
+                             where a.sink = 'test-attribution'`;
     expect(rows).toHaveLength(2);
     // Each anchor pins a head that belongs to the SAME org it names. Before 0014 an anchor pinned
     // `max(audit_log.id)` across the deployment, so this join could legitimately cross tenants —
     // and a verification comparing that hash against the "wrong" chain would report a mismatch
     // that was not tampering.
     for (const row of rows) expect(row.chain_org).toBe(row.org_id);
-    await maint`delete from audit_anchors where org_id in (${ORG_A}, ${ORG_B})`;
   });
 });

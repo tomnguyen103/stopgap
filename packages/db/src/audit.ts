@@ -249,8 +249,10 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
       orgId: entry.orgId,
       caseId: entry.caseId,
       actor: entry.actor,
-      // Persisted but not part of `hash` above (computeAuditHash never sees it): the machine
-      // identity rides alongside the hashed text `actor`, leaving the chain bytes untouched.
+      // Persisted, AND bound into the hash for `v3`/`v4` rows (see the `computeAuditHash` call
+      // above, which is passed this exact value): a keyed deployment cannot have the recorded
+      // principal rewritten without breaking the chain (CWE-353). On a `v1`/`v2` row it is unhashed
+      // provenance riding alongside the hashed text `actor` — those byte layouts are frozen.
       actorUserId: entry.actorUserId,
       action: entry.action,
       detail,

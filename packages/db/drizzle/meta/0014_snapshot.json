@@ -581,6 +581,27 @@
           "method": "btree",
           "with": {}
         },
+        "audit_org_id_idx": {
+          "name": "audit_org_id_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "audit_case_action_uq": {
           "name": "audit_case_action_uq",
           "columns": [

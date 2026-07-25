@@ -20,6 +20,10 @@ export function getDb() {
     // `getDb()` is synchronous and every caller would otherwise pay a round trip; the promise is
     // memoised, so `/api/readyz` awaiting it later gets the same answer rather than a second probe.
     void checkAppRoleRls();
+    // Same shape, for the OTHER half of the two-connection design: is there a usable maintenance
+    // connection at all? Fired here so the loud production warning happens at startup rather than
+    // waiting for the first sign-in to fail.
+    void checkMaintenanceConnection();
   }
   return dbInstance;
 }
@@ -151,6 +155,87 @@ export function checkMaintenanceRoleRls(): Promise<RoleRlsStatus> {
 }
 
 /**
+ * Is there a USABLE maintenance connection for this deployment shape (PHASE6 §6.5)?
+ *
+ * `bypassesRls` above answers "does the connection ignore the policies". This answers the question
+ * a readiness probe actually needs: given where this process is running, can the jobs that require
+ * a cross-tenant connection do their work?
+ *
+ * WHY THIS IS A READINESS FAILURE IN PRODUCTION AND NOTHING IN DEVELOPMENT. When
+ * `DATABASE_URL_MAINTENANCE` is unset, `withBypassDb` falls back to the ordinary pool. Locally that
+ * is correct — the compose `DATABASE_URL` names a superuser, which bypasses every policy anyway —
+ * and 503-ing the zero-config dev stack over it would only teach operators to ignore the check.
+ *
+ * In a PRODUCTION deployment, where `DATABASE_URL` correctly names a non-bypassing application
+ * role, the same fallback is a broken deployment that looks healthy. `rlsEnforced` reports TRUE —
+ * the isolation policies really are applying — while every cross-tenant read returns zero rows:
+ * OIDC sign-in cannot resolve a subject to an org, REST key authentication cannot resolve a key
+ * hash, and anchoring and `pnpm verify-audit` refuse outright. The console comes up, serves the
+ * anonymous demo viewer, passes `/readyz`, and nobody can log in. That is precisely the "up but
+ * cannot serve" state readiness exists to catch, which is why it is a NAMED CHECK of its own
+ * rather than folded into `rlsEnforced`: the two conditions are independent, and a deployment can
+ * fail this one while the other is perfectly green.
+ */
+export interface MaintenanceConnectionStatus {
+  /** Was `DATABASE_URL_MAINTENANCE` set at all? */
+  configured: boolean;
+  /** Does this deployment shape REQUIRE a real maintenance connection (`NODE_ENV=production`)? */
+  required: boolean;
+  /** The probe of the maintenance pool — which, when unconfigured, is the ordinary pool. */
+  role: RoleRlsStatus;
+  /** False only when the connection is required and cannot do its job. Drives `/api/readyz`. */
+  ok: boolean;
+  /** Why it is not ok, in the words an operator needs. */
+  reason?: string;
+}
+
+let maintenanceConnection: Promise<MaintenanceConnectionStatus> | undefined;
+
+/**
+ * Probe the maintenance connection once per process and memoise the answer (it cannot change
+ * without a reconnect). Logs loudly, once, when a production deployment is missing it — the same
+ * stance as `checkAppRoleRls`: a silent-by-construction misconfiguration gets stated at startup
+ * instead of being discovered when the first person tries to sign in.
+ */
+export function checkMaintenanceConnection(): Promise<MaintenanceConnectionStatus> {
+  maintenanceConnection ??= (async (): Promise<MaintenanceConnectionStatus> => {
+    const env = getEnv();
+    const configured = Boolean(env.DATABASE_URL_MAINTENANCE);
+    const required = env.NODE_ENV === "production";
+    const role = await checkMaintenanceRoleRls();
+    const reason = !configured
+      ? "DATABASE_URL_MAINTENANCE is unset, so withBypassDb falls back to the application pool."
+      : !role.checked
+        ? `could not probe the maintenance connection: ${role.reason ?? "unknown"}`
+        : !role.bypassesRls
+          ? `the maintenance connection is "${role.role ?? "?"}", which holds neither SUPERUSER nor BYPASSRLS.`
+          : undefined;
+    // Usable is usable: an unset variable on a stack whose single role already bypasses RLS (local
+    // compose) is not a problem, and reporting it as one would be noise rather than a signal.
+    const usable = role.checked && role.bypassesRls;
+    const status: MaintenanceConnectionStatus = {
+      configured,
+      required,
+      role,
+      ok: usable || !required,
+      ...(usable ? {} : { reason }),
+    };
+    if (!status.ok) {
+      console.error(
+        "[db] NO USABLE MAINTENANCE CONNECTION IN PRODUCTION. " +
+          `${status.reason ?? ""} Every cross-tenant job therefore reads zero rows: OIDC sign-in ` +
+          "cannot resolve a subject to an organization, REST key authentication cannot resolve a " +
+          "key hash, and audit anchoring and `pnpm verify-audit` refuse to run. The console will " +
+          "come up and serve nobody. Set DATABASE_URL_MAINTENANCE to a role holding BYPASSRLS — " +
+          "see docs/multi-tenancy.md.",
+      );
+    }
+    return status;
+  })();
+  return maintenanceConnection;
+}
+
+/**
  * Refuse to continue unless the maintenance connection genuinely bypasses RLS.
  *
  * THE FAILURE THIS PREVENTS IS VACUOUS SUCCESS. Audit anchoring and `pnpm verify-audit` are
@@ -210,6 +295,7 @@ export async function closeDb(): Promise<void> {
   // DATABASE_URL must be re-probed rather than inheriting the previous role's answer.
   appRoleRls = undefined;
   maintenanceRoleRls = undefined;
+  maintenanceConnection = undefined;
 }
 
 export type Db = ReturnType<typeof getDb>;
