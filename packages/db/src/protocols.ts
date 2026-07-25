@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { getDb } from "./client.js";
+import { getDb, type Db } from "./client.js";
 import { protocols, protocolVersions } from "./schema.js";
 import type { ProtocolRow, ProtocolVersionRow } from "./schema.js";
 
@@ -10,6 +10,8 @@ import type { ProtocolRow, ProtocolVersionRow } from "./schema.js";
  */
 
 export interface DraftProtocolInput {
+  /** Owning tenant (PHASE6 §6.5) — see the ORG SCOPING note in `cases.ts` for why it is explicit. */
+  orgId: string;
   key: string;
   title: string;
   drugClass?: string | null;
@@ -25,23 +27,33 @@ export interface DraftProtocolInput {
 }
 
 /** The protocol row for a shortage key, if one has ever been written. */
-async function findProtocol(key: string): Promise<ProtocolRow | undefined> {
-  const db = getDb();
-  const [protocol] = await db.select().from(protocols).where(eq(protocols.key, key)).limit(1);
+async function findProtocol(db: Db, orgId: string, key: string): Promise<ProtocolRow | undefined> {
+  const [protocol] = await db
+    .select()
+    .from(protocols)
+    .where(and(eq(protocols.orgId, orgId), eq(protocols.key, key)))
+    .limit(1);
   return protocol;
 }
 
 /** The approved version a new case should reuse, or undefined if the protocol is unwritten. */
 export async function getApprovedProtocol(
+  orgId: string,
   key: string,
+  db: Db = getDb(),
 ): Promise<{ protocol: ProtocolRow; version: ProtocolVersionRow } | undefined> {
-  const db = getDb();
-  const protocol = await findProtocol(key);
+  const protocol = await findProtocol(db, orgId, key);
   if (!protocol) return undefined;
   const [version] = await db
     .select()
     .from(protocolVersions)
-    .where(and(eq(protocolVersions.protocolId, protocol.id), eq(protocolVersions.state, "approved")))
+    .where(
+      and(
+        eq(protocolVersions.orgId, orgId),
+        eq(protocolVersions.protocolId, protocol.id),
+        eq(protocolVersions.state, "approved"),
+      ),
+    )
     .orderBy(desc(protocolVersions.version))
     .limit(1);
   return version ? { protocol, version } : undefined;
@@ -71,8 +83,7 @@ export interface ProtocolSummary {
  * ever broke, this list would fan out — which is the correct, visible failure, rather than silently
  * picking one of two rows that both claim to be live.
  */
-export async function listProtocols(limit = 50): Promise<ProtocolSummary[]> {
-  const db = getDb();
+export async function listProtocols(orgId: string, limit = 50, db: Db = getDb()): Promise<ProtocolSummary[]> {
   return db
     .select({
       key: protocols.key,
@@ -86,19 +97,23 @@ export async function listProtocols(limit = 50): Promise<ProtocolSummary[]> {
       protocolVersions,
       and(eq(protocolVersions.protocolId, protocols.id), eq(protocolVersions.state, "approved")),
     )
+    .where(eq(protocols.orgId, orgId))
     .orderBy(desc(protocols.updatedAt))
     .limit(limit);
 }
 
 /** Every version of a protocol, newest first — the provenance/history view. */
-export async function listProtocolVersions(key: string): Promise<ProtocolVersionRow[]> {
-  const db = getDb();
-  const protocol = await findProtocol(key);
+export async function listProtocolVersions(
+  orgId: string,
+  key: string,
+  db: Db = getDb(),
+): Promise<ProtocolVersionRow[]> {
+  const protocol = await findProtocol(db, orgId, key);
   if (!protocol) return [];
   return db
     .select()
     .from(protocolVersions)
-    .where(eq(protocolVersions.protocolId, protocol.id))
+    .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.protocolId, protocol.id)))
     .orderBy(desc(protocolVersions.version));
 }
 
@@ -108,29 +123,41 @@ export async function listProtocolVersions(key: string): Promise<ProtocolVersion
  * both claim version N (the `(protocol_id, version)` unique index is the backstop, turning
  * a lost race into a retryable error rather than a silently overwritten history).
  */
-export async function draftProtocolVersion(input: DraftProtocolInput): Promise<ProtocolVersionRow> {
-  const db = getDb();
+export async function draftProtocolVersion(
+  input: DraftProtocolInput,
+  db: Db = getDb(),
+): Promise<ProtocolVersionRow> {
   return db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(protocols).where(eq(protocols.key, input.key)).limit(1);
+    const [existing] = await tx
+      .select()
+      .from(protocols)
+      .where(and(eq(protocols.orgId, input.orgId), eq(protocols.key, input.key)))
+      .limit(1);
     const protocol =
       existing ??
       (
         await tx
           .insert(protocols)
-          .values({ key: input.key, title: input.title, drugClass: input.drugClass ?? null })
+          .values({
+            orgId: input.orgId,
+            key: input.key,
+            title: input.title,
+            drugClass: input.drugClass ?? null,
+          })
           .returning()
       )[0]!;
 
     const [latest] = await tx
       .select({ version: protocolVersions.version })
       .from(protocolVersions)
-      .where(eq(protocolVersions.protocolId, protocol.id))
+      .where(and(eq(protocolVersions.orgId, input.orgId), eq(protocolVersions.protocolId, protocol.id)))
       .orderBy(desc(protocolVersions.version))
       .limit(1);
 
     const [created] = await tx
       .insert(protocolVersions)
       .values({
+        orgId: input.orgId,
         protocolId: protocol.id,
         version: (latest?.version ?? 0) + 1,
         state: "draft",
@@ -162,16 +189,17 @@ export interface ApprovalResult {
 }
 
 export async function approveProtocolVersion(
+  orgId: string,
   versionId: string,
   approvedBy: string,
   approvedByUserId?: string | null,
+  db: Db = getDb(),
 ): Promise<ApprovalResult> {
-  const db = getDb();
   return db.transaction(async (tx) => {
     const [target] = await tx
       .select()
       .from(protocolVersions)
-      .where(eq(protocolVersions.id, versionId))
+      .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.id, versionId)))
       .limit(1);
     if (!target) throw new Error(`protocol version ${versionId} not found`);
     // Serialize approvals per protocol. Without this lock two concurrent approvals both read
@@ -187,15 +215,24 @@ export async function approveProtocolVersion(
     await tx
       .update(protocolVersions)
       .set({ state: "superseded" })
-      .where(and(eq(protocolVersions.protocolId, target.protocolId), eq(protocolVersions.state, "approved")));
+      .where(
+        and(
+          eq(protocolVersions.orgId, orgId),
+          eq(protocolVersions.protocolId, target.protocolId),
+          eq(protocolVersions.state, "approved"),
+        ),
+      );
 
     const [approved] = await tx
       .update(protocolVersions)
       .set({ state: "approved", approvedBy, approvedByUserId: approvedByUserId ?? null, approvedAt: new Date() })
-      .where(eq(protocolVersions.id, versionId))
+      .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.id, versionId)))
       .returning();
 
-    await tx.update(protocols).set({ updatedAt: new Date() }).where(eq(protocols.id, target.protocolId));
+    await tx
+      .update(protocols)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(protocols.orgId, orgId), eq(protocols.id, target.protocolId)));
     return { row: approved!, changed: true };
   });
 }

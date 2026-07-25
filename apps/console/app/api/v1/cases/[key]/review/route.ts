@@ -1,9 +1,17 @@
-import { getCaseByWorkflowId, getDb, workflowIdForKey } from "@stopgap/db";
+import { getCaseByKey, withOrgDb } from "@stopgap/db";
 import { submitReview } from "@stopgap/workflows";
 import { authenticateApiRequest, demoGateOr403, recordApiAudit } from "../../../../../lib/api-auth";
 import { jsonError, jsonOk, parseJsonBodyOr400 } from "../../../../../lib/api-response";
 import { acceptedSchema, reviewDecisionSchema } from "../../../../../lib/api-schemas";
 import { signalTemporalOr503 } from "../../../../../lib/api-temporal";
+
+/**
+ * TENANT SCOPE (PHASE6 §6.5): the KEY's org, `auth.key.orgId`, and never anything from the request.
+ * A key is issued into one organization and can never act outside it — see `lib/api-auth.ts` for
+ * why deriving the tenant from the credential rather than from a parameter is what makes the public
+ * API tenant-safe. `withOrgDb` sets `app.current_org` for the transaction, so RLS backs the
+ * explicit filters rather than merely coexisting with them.
+ */
 
 /**
  * `POST /api/v1/cases/{key}/review` (PHASE6 §6.7) — scope `protocols:write`.
@@ -50,12 +58,20 @@ export async function POST(
 
   // Confirm the case exists before signalling, so a wrong key reads as "no such case" rather than
   // surfacing as a transport error from deep inside the Temporal client.
-  const row = await getCaseByWorkflowId(getDb(), workflowIdForKey(key));
+  const orgId = auth.key.orgId;
+  const row = await withOrgDb(orgId, (db) => getCaseByKey(db, orgId, key));
   if (!row) return jsonError(404, "not_found", `no case for key "${key}"`);
 
   const { key: apiKey } = auth;
   const signalled = await signalTemporalOr503((client) =>
-    submitReview(client, row.key, body.data, `api-key:${apiKey.name}`, apiKey.createdByUserId ?? undefined),
+    // Addressed by the id the ROW carries, so a pre-migration case is still reachable.
+    submitReview(
+      client,
+      row.workflowId,
+      body.data,
+      `api-key:${apiKey.name}`,
+      apiKey.createdByUserId ?? undefined,
+    ),
   );
   if (!signalled.ok) return signalled.response;
 

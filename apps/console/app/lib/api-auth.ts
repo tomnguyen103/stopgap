@@ -2,15 +2,37 @@ import "server-only";
 import {
   appendAudit,
   findActiveApiKeyByPlaintext,
-  getDb,
   isApiScope,
   reserveApiKeyRequest,
   touchApiKeyUsed,
+  withOrgDb,
   type ApiKeyRow,
   type ApiScope,
 } from "@stopgap/db";
 import { assertMutationAllowed, DemoReadOnlyError } from "@stopgap/demo";
 import { jsonError } from "./api-response";
+
+/**
+ * THE TENANT OF A REST REQUEST IS THE KEY'S (PHASE6 §6.5).
+ *
+ * A key is issued INTO the issuing admin's active organization (`issueApiKeyAction`), `orgId` is
+ * NOT NULL on `api_keys`, and it is never rewritten. Every `/api/v1` route therefore scopes to
+ * `auth.key.orgId` and to nothing else — there is no org header, no org query parameter, and no
+ * org field in any request body.
+ *
+ * THIS IS THE PROPERTY THAT MAKES THE PUBLIC API TENANT-SAFE, and it is worth being explicit about
+ * why. A caller of the REST API is an integration, not a person: it presents one secret and
+ * nothing else, and it can hold that secret for years. If the org were carried in the REQUEST —
+ * even as an optional parameter validated against a membership list — then every route would need
+ * that check to be correct, and the day one route forgot it, a valid key would read another
+ * hospital's cases. Deriving the org from the CREDENTIAL instead means a key physically cannot ask
+ * about a tenant it was not issued for: there is no place to put the request. A leaked key is then
+ * bounded damage (one tenant, revocable in one click) rather than a platform-wide breach.
+ *
+ * `withOrgDb(key.orgId, ...)` is what turns that into enforcement rather than convention: the
+ * transaction's `app.current_org` is the key's org, so the RLS policies would refuse a
+ * cross-tenant row even if a route's own filter were wrong.
+ */
 
 /**
  * API-key authentication and scope enforcement (PHASE6 §6.7) — the single gate every `/api/v1`
@@ -131,7 +153,7 @@ export async function authenticateApiRequest(
 
   // Best-effort usage stamp: operational metadata must never fail an authorized request. The
   // authoritative record of what the key did is the audit chain, not this column.
-  await touchApiKeyUsed(key.id).catch(() => undefined);
+  await withOrgDb(key.orgId, (db) => touchApiKeyUsed(key.orgId, key.id, db)).catch(() => undefined);
   return { ok: true, key };
 }
 
@@ -196,6 +218,9 @@ export function demoGateOr403(action: string): Response | undefined {
  * These entries carry no `caseId`, so `appendAudit` does not dedupe them on `eventKey`; the key is
  * a stable descriptive label, and the NULL `caseId` keeps repeated writes distinct in the unique
  * index. Nothing here changes what any existing scheme hashes — this is an ordinary append.
+ *
+ * The entry lands in the KEY's org (PHASE6 §6.5), which is the only org this request has, so an
+ * integration's writes appear in exactly the tenant's chain they affected.
  */
 export async function recordApiAudit(
   key: ApiKeyRow,
@@ -205,11 +230,14 @@ export async function recordApiAudit(
   detail: Record<string, unknown>,
   eventKey: string,
 ): Promise<void> {
-  await appendAudit(getDb(), {
-    actor: apiKeyActorLabel(key),
-    actorUserId: key.createdByUserId ?? undefined,
-    action,
-    detail: { ...detail, identitySource: "api-key", apiKeyId: key.id, scope, endpoint },
-    eventKey,
-  });
+  await withOrgDb(key.orgId, (db) =>
+    appendAudit(db, {
+      orgId: key.orgId,
+      actor: apiKeyActorLabel(key),
+      actorUserId: key.createdByUserId ?? undefined,
+      action,
+      detail: { ...detail, identitySource: "api-key", apiKeyId: key.id, scope, endpoint },
+      eventKey,
+    }),
+  );
 }

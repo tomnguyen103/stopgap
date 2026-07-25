@@ -14,7 +14,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   const detail = await getCaseDetail(decodeURIComponent(id));
   if (!detail) notFound();
   const { case: c, audit, acks } = detail;
-  const live = await getWorkflowState(c.key);
+  // The id the ROW carries, not one recomputed from the key (PHASE6 §6.5): a case opened before
+  // workflow ids became org-qualified still answers only to `case-<key>`.
+  const live = await getWorkflowState(c.workflowId);
   // Server component, so the caller's roles are available here. `isActionAllowed` is the pure,
   // non-throwing half of the same matrix `requireRole` enforces in the action.
   const principal = await resolvePrincipal();

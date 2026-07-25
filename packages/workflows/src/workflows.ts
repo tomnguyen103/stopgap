@@ -2,6 +2,7 @@ import {
   condition,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
 } from "@temporalio/workflow";
@@ -14,6 +15,8 @@ import type * as activities from "./activities.js";
 import {
   MAX_MONITORING_MS,
   MONITOR_POLL_MS,
+  ORG_QUALIFIED_CASE_INPUT_PATCH,
+  resolveCaseOrgId,
   type CaseAcknowledgment,
   type CaseInput,
   type CaseState,
@@ -75,6 +78,21 @@ export const stateQuery = defineQuery<CaseState>("state");
 
 export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState> {
   const key = input.record.key;
+  // The tenant this case belongs to, fixed at start time and passed to every activity (PHASE6
+  // §6.5). A workflow has no session to derive it from, and deriving it inside an activity would
+  // let it change across a case's multi-week life — week 6's audit entry landing in a different
+  // hospital's chain from week 1's. Carried in the input, it cannot.
+  //
+  // `patched()` is evaluated FIRST and unconditionally, before any signal handler or activity, so
+  // the marker lands at the same point in every execution's history. It distinguishes the two eras
+  // of this workflow's input: executions started before multi-tenancy carry no `orgId` at all, and
+  // with `MAX_MONITORING_MS` at 90 days there are always some of those in flight when a deploy
+  // lands. `resolveCaseOrgId` documents which value each era gets and why.
+  const orgId = resolveCaseOrgId(input, patched(ORG_QUALIFIED_CASE_INPUT_PATCH));
+  // The input as the activities see it. `recordDetected` reads `input.orgId` directly (it is the
+  // activity that CREATES the case row), so handing it the raw pre-patch input would scope it to
+  // `undefined` — the resolved org has to travel with the payload, not just in this closure.
+  const caseInput: CaseInput = { ...input, orgId };
   const state: CaseState = {
     status: "detected",
     alternatives: [],
@@ -137,7 +155,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       await condition(() => pendingAck !== undefined);
       const ack = pendingAck!;
       try {
-        await acts.recordAck({ key, userId: ack.userId, label: ack.label, step: ack.step });
+        await acts.recordAck({ orgId, key, userId: ack.userId, label: ack.label, step: ack.step });
         state.ackError = undefined;
         ackPersisted = true;
         return;
@@ -181,6 +199,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
       // silently never paged.
       try {
         await acts.sendEscalationNotification({
+          orgId,
           key,
           severity,
           stepIndex: i,
@@ -238,7 +257,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   ): Promise<boolean> {
     state.status = "exception";
     state.exceptionReason = reason;
-    await acts.persistStatus(key, "exception", { reason, ...detail });
+    await acts.persistStatus(orgId, key, "exception", { reason, ...detail });
     const resolved = await condition(() => exceptionResolution !== undefined, MAX_MONITORING_MS);
     if (!resolved) return false;
     const resolution = exceptionResolution!;
@@ -246,6 +265,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     state.alternatives = resolution.alternatives;
     state.protocolSource = "exception-resolution";
     await acts.recordProtocolVersion({
+      orgId,
       key,
       title: input.record.genericName,
       body: resolution.protocolBody,
@@ -259,12 +279,12 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     return true;
   }
 
-  await acts.recordDetected(input);
+  await acts.recordDetected(caseInput);
 
   // Assess impact.
   state.status = "assessing";
-  await acts.persistStatus(key, "assessing");
-  const impact = await callAgent(() => acts.assessImpact(input));
+  await acts.persistStatus(orgId, key, "assessing");
+  const impact = await callAgent(() => acts.assessImpact(caseInput));
   if (!impact.ok) {
     // The agent layer is down (provider outage, exhausted retries). Letting the activity
     // failure escape would fail the workflow and strand the case mid-assessment with nobody
@@ -295,15 +315,15 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     // and asking a human to re-approve text they wrote themselves. The HITL gate still runs
     // — memory changes how much work happens before the pharmacist looks, never whether.
     state.status = "researching";
-    await acts.persistStatus(key, "researching", { severity: impact.value.severity });
-    const remembered = await acts.lookupProtocol(key);
+    await acts.persistStatus(orgId, key, "researching", { severity: impact.value.severity });
+    const remembered = await acts.lookupProtocol(orgId, key);
     if (remembered) {
       state.alternatives = remembered.alternatives;
       state.draft = remembered.body;
       state.protocolSource = "memory";
       state.protocolVersion = remembered.version;
     } else {
-      const researched = await callAgent(() => acts.researchAlternatives(input));
+      const researched = await callAgent(() => acts.researchAlternatives(caseInput));
       if (!researched.ok) {
         // Same reasoning as the assessment step: an agent outage becomes a human decision,
         // never a workflow that dies with the case still open.
@@ -349,17 +369,17 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
   // would be ceremony, not review.
   if (state.protocolSource !== "exception-resolution") {
     state.status = "protocol_draft";
-    await acts.persistStatus(key, "protocol_draft");
+    await acts.persistStatus(orgId, key, "protocol_draft");
     state.status = "awaiting_review";
-    await acts.persistStatus(key, "awaiting_review");
+    await acts.persistStatus(orgId, key, "awaiting_review");
 
     // Block (possibly for days) until the pharmacist decides.
     await condition(() => decision !== undefined);
     state.decision = decision;
-    await acts.recordDecision(key, decision!);
+    await acts.recordDecision(orgId, key, decision!);
     if (decision!.kind === "reject") {
       state.status = "rejected";
-      await acts.persistStatus(key, "rejected", { reason: decision!.reason });
+      await acts.persistStatus(orgId, key, "rejected", { reason: decision!.reason });
       return state;
     }
     if (decision!.kind === "edit") state.draft = decision!.editedDraft;
@@ -369,6 +389,7 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     // protocol unchanged writes nothing: it would be a duplicate version with no new content.
     if (state.protocolSource === "agent" || decision!.kind === "edit") {
       await acts.recordProtocolVersion({
+        orgId,
         key,
         title: input.record.genericName,
         body: state.draft ?? "",
@@ -391,17 +412,17 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
 
   // Approved → comms out.
   state.status = "approved";
-  await acts.persistStatus(key, "approved");
-  const comms = await acts.sendComms(key, state.draft ?? "", state.alternatives);
+  await acts.persistStatus(orgId, key, "approved");
+  const comms = await acts.sendComms(orgId, key, state.draft ?? "", state.alternatives);
   state.status = "comms_sent";
   state.commsDelivered = comms.delivered;
-  await acts.persistStatus(key, "comms_sent", { delivered: comms.delivered });
+  await acts.persistStatus(orgId, key, "comms_sent", { delivered: comms.delivered });
 
   // Monitor until the feed resolves the shortage — the long-horizon leg (weeks–months).
   // Ticks weekly (durable across worker restarts/deploys) so monitoringWeeks reflects real
   // elapsed time; auto-escalates to exception if unresolved past MAX_MONITORING_MS total.
   state.status = "monitoring";
-  await acts.persistStatus(key, "monitoring");
+  await acts.persistStatus(orgId, key, "monitoring");
   const monitorStart = Date.now();
   while (!state.resolved) {
     const remaining = MAX_MONITORING_MS - (Date.now() - monitorStart);
@@ -413,21 +434,21 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
     // be a shortened remainder, and that shouldn't round up to a full monitoringWeeks tick.
     if (waitMs === MONITOR_POLL_MS) {
       state.monitoringWeeks += 1;
-      await acts.persistStatus(key, "monitoring", { monitoringWeeks: state.monitoringWeeks });
+      await acts.persistStatus(orgId, key, "monitoring", { monitoringWeeks: state.monitoringWeeks });
     }
   }
   const deadlineHit = !state.resolved;
   if (deadlineHit) {
     state.status = "exception";
-    await acts.persistStatus(key, "exception", { reason: "monitoring-timeout" });
+    await acts.persistStatus(orgId, key, "exception", { reason: "monitoring-timeout" });
     return state;
   }
 
   // Resolved → draft reversion, then close.
   state.status = "reverting";
-  await acts.persistStatus(key, "reverting");
+  await acts.persistStatus(orgId, key, "reverting");
   state.status = "closed";
-  await acts.persistStatus(key, "closed");
+  await acts.persistStatus(orgId, key, "closed");
   return state;
 }
 
@@ -441,14 +462,13 @@ export async function pollFeedsWorkflow(): Promise<{ polled: number; opened: num
 }
 
 /**
- * The audit-anchor workflow (PHASE6 §6.2). One run = one external anchor of the audit chain
- * head. A separate hourly Temporal Schedule fires it (`scripts/start-schedule.ts`) so wholesale
- * chain rewrites stay detectable even to someone holding the HMAC key.
+ * The audit-anchor workflow (PHASE6 §6.2). One run = one external anchor of EVERY organization's
+ * chain head (per-org since §6.5 pass 2 — with one chain per tenant, a single "head hash" is
+ * ambiguous). A separate hourly Temporal Schedule fires it (`scripts/start-schedule.ts`) so
+ * wholesale chain rewrites stay detectable even to someone holding the HMAC key.
  */
-export async function anchorAuditWorkflow(): Promise<{
-  maxAuditId: number;
-  headHash: string;
-  sink: string;
-} | null> {
+export async function anchorAuditWorkflow(): Promise<
+  { orgId: string; maxAuditId: number; headHash: string; sink: string }[]
+> {
   return acts.anchorAuditChain();
 }

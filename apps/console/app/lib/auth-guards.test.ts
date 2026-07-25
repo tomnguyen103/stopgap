@@ -29,6 +29,10 @@ function principal(roles: Role[]): Principal {
     label: roles.length > 0 ? "dr@hospital.test" : "anonymous",
     roles,
     authenticated: roles.length > 0,
+    // Every principal carries the tenant it acts in (PHASE6 §6.5). Not optional and not blank:
+    // the guards return the principal to the caller, which passes `orgId` straight to `withOrgDb`,
+    // and a fixture with an empty value would type-check while the real path threw.
+    orgId: "00000000-0000-0000-0000-0000000000a1",
   };
 }
 

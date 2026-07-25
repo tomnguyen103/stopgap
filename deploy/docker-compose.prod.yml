@@ -11,8 +11,36 @@
 # Caddy, which is where the basic-auth gate lives.
 name: stopgap-prod
 
+# TWO DATABASE ROLES, and the split is the whole of tenant isolation (PHASE6 §6.5).
+#
+# `stopgap` is the POSTGRES_USER the image creates, and it is a SUPERUSER: every row-level security
+# policy migration 0013 installs is skipped for it, `FORCE ROW LEVEL SECURITY` included. An app
+# connecting as it has the policies and none of the protection. `stopgap_app` is a plain login role
+# created by the `app-role-init` service below (deploy/postgres/app-role.sql) holding neither
+# SUPERUSER nor BYPASSRLS, so the policies actually apply to it.
+#
+# The application connects as `stopgap_app`. The OWNER url goes to two places and only two: the
+# migration job (which must CREATE tables, and whose ownership is what makes the app role's default
+# privileges work), and `DATABASE_URL_MAINTENANCE` — the second pool `withBypassDb` uses for the
+# jobs that are genuinely cross-tenant (the OIDC/API-key authentication bootstrap, hourly audit
+# anchoring, `pnpm verify-audit`, the Prometheus scrape). Those jobs cannot work on the app role and
+# do not silently degrade if they are pointed at it: they refuse to run.
+#
+# BOTH PASSWORDS MUST BE URL-SAFE, and the env example says so rather than this file percent-encoding
+# them. They are interpolated RAW into a connection URL here, while `app-role.sql` sets the same
+# value through psql's `:'app_pw'` quoting — so a password containing `@ / : # ?` is set correctly in
+# Postgres and then MIS-PARSED here: `@` ends the userinfo early, `/` ends the authority, and the
+# result is an authentication failure pointing nowhere near the cause. Compose has no percent-encode
+# function, so encoding would mean either a shell-substitution hack that is harder to read than the
+# rule it enforces, or two variables (raw + encoded) that can drift apart. Constraining GENERATION
+# instead is the smaller contract: `openssl rand -hex 32` (and base64url) emit only characters that
+# are safe in both places, which is exactly what deploy/.env.prod.example instructs.
+x-db-app-url: &db-app-url postgres://stopgap_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD to a generated secret}@postgres:5432/stopgap
+x-db-owner-url: &db-owner-url postgres://stopgap:${POSTGRES_PASSWORD}@postgres:5432/stopgap
+
 x-app-env: &app-env
-  DATABASE_URL: postgres://stopgap:${POSTGRES_PASSWORD}@postgres:5432/stopgap
+  DATABASE_URL: *db-app-url
+  DATABASE_URL_MAINTENANCE: *db-owner-url
   TEMPORAL_ADDRESS: temporal:7233
   TEMPORAL_NAMESPACE: default
   TEMPORAL_TASK_QUEUE: stopgap-cases
@@ -106,6 +134,41 @@ services:
     entrypoint: ["sh", "-c", "ollama pull ${OLLAMA_MODEL:-mistral}"]
     restart: "no"
 
+  # The non-superuser application role (PHASE6 §6.5). One-shot, idempotent, runs on every `up` —
+  # deliberately not an /docker-entrypoint-initdb.d script, which fires only on a first boot with an
+  # empty volume and would therefore skip every existing deployment. Ordered BEFORE `migrate` so the
+  # `ALTER DEFAULT PRIVILEGES` is in place when the migration creates tables: privileges are
+  # per-object and are not retroactively inherited, so a role created afterwards would be unable to
+  # read anything a later migration adds.
+  app-role-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./postgres/app-role.sql:/app-role.sql:ro
+    command:
+      [
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-h",
+        "postgres",
+        "-U",
+        "stopgap",
+        "-d",
+        "stopgap",
+        "-v",
+        "app_pw=${APP_DB_PASSWORD:?set APP_DB_PASSWORD to a generated secret}",
+        "-v",
+        "owner=stopgap",
+        "-f",
+        "/app-role.sql",
+      ]
+    restart: "no"
+
   # Schema migration as a one-shot: the app and worker must not race each other applying it.
   migrate:
     build:
@@ -115,7 +178,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    environment: *app-env
+      app-role-init:
+        condition: service_completed_successfully
+    # The OWNER url, overriding the app-env default. Migrations CREATE and ALTER tables, which
+    # `stopgap_app` deliberately cannot do; and the owner has to be the role the app's default
+    # privileges were granted "FOR ROLE" of, or every table a future migration adds is unreadable.
+    environment:
+      <<: *app-env
+      DATABASE_URL: *db-owner-url
     command: ["pnpm", "--filter", "@stopgap/db", "migrate"]
     restart: "no"
 

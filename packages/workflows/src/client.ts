@@ -44,10 +44,22 @@ export async function withTemporalClient<T>(fn: (client: Client) => Promise<T>):
 }
 
 /**
- * Start (or return the existing) durable case workflow for a shortage. The workflow id is
- * derived from the dedup key, so re-detecting the same shortage is idempotent: the conflict
- * policy rejects a start while a case for that drug is still running, and we treat that as
- * "already open".
+ * Start (or return the existing) durable case workflow for a shortage. The workflow id is derived
+ * from the OWNING ORG and the dedup key (PHASE6 §6.5), so re-detecting the same shortage is
+ * idempotent: the conflict policy rejects a start while a case for that drug is still running, and
+ * we treat that as "already open".
+ *
+ * WHY THE ORG BELONGS IN THE ID. Temporal ids are unique per namespace, not per tenant. Before
+ * this pass every hospital short on heparin computed `case-heparin`, so the SECOND tenant's
+ * detection would collide with the FIRST tenant's running workflow and be reported as "already
+ * open" — one org silently suppressing another org's clinical case. `org-<orgId>-case-<key>` makes
+ * the two independent, which is the engine-side half of the `(org_id, workflow_id)` unique index.
+ *
+ * `existingWorkflowId` is how a case that PREDATES the format change keeps working. Its row holds
+ * the old `case-<key>` id and its workflow answers to that id — Temporal cannot rename an
+ * execution — so a recurrence must reuse the stored value rather than mint a new one, or the same
+ * drug would end up with two workflows and one case row pointing at only one of them. Callers that
+ * already read the case row pass `row.workflowId`; callers opening a genuinely new case omit it.
  *
  * Reuse is allowed once the previous case reached a terminal state. Shortages recur — the
  * same drug goes short again months later — and that recurrence is exactly when the protocol
@@ -56,14 +68,16 @@ export async function withTemporalClient<T>(fn: (client: Client) => Promise<T>):
  */
 export async function startCase(
   client: Client,
+  orgId: string,
   record: ShortageRecord,
   sources: ShortageRecord["source"][] = [record.source],
+  existingWorkflowId?: string,
 ): Promise<{ workflowId: string; started: boolean }> {
-  const workflowId = workflowIdForKey(record.key);
+  const workflowId = existingWorkflowId ?? workflowIdForKey(orgId, record.key);
   try {
     // By name, never by function reference: see SHORTAGE_CASE_WORKFLOW.
     await client.workflow.start<typeof shortageCaseWorkflow>(SHORTAGE_CASE_WORKFLOW, {
-      args: [{ record, sources }],
+      args: [{ orgId, record, sources }],
       taskQueue: getEnv().TEMPORAL_TASK_QUEUE,
       workflowId,
       workflowIdReusePolicy: "ALLOW_DUPLICATE",
@@ -76,14 +90,24 @@ export async function startCase(
   }
 }
 
+/**
+ * Signal a review decision to a case's workflow.
+ *
+ * Takes the workflow id the CASE ROW carries, never a recomputed one (PHASE6 §6.5). Ids minted
+ * before this pass are `case-<key>`; ids minted after are `org-<orgId>-case-<key>`, and the running
+ * execution answers only to the id it was started with. Recomputing here would therefore signal a
+ * workflow that does not exist for every pre-migration case — a silent no-op on the one path a
+ * pharmacist uses to approve clinical guidance. Callers resolve the case with
+ * `getCaseByKey(db, orgId, key)` and pass `row.workflowId`, which is correct for both eras.
+ */
 export async function submitReview(
   client: Client,
-  key: string,
+  workflowId: string,
   decision: ReviewDecision,
   reviewer?: string,
   reviewerUserId?: string,
 ): Promise<void> {
-  const handle = client.workflow.getHandle(workflowIdForKey(key));
+  const handle = client.workflow.getHandle(workflowId);
   // Overlay the caller-supplied identity onto the decision. The authenticated console passes
   // both a label and a real `users.id`; the CLI/MCP callers pass only a claimed label.
   const signed: ReviewDecision = {
@@ -96,19 +120,20 @@ export async function submitReview(
 
 /**
  * Resolve an exception-queue case: the pharmacist's guidance becomes an approved protocol
- * version and the case continues from where it parked (PROJECT_PLAN §3B).
+ * version and the case continues from where it parked (PROJECT_PLAN §3B). Addressed by the case
+ * row's stored workflow id — see `submitReview` for why that is not recomputed.
  */
 export async function resolveException(
   client: Client,
-  key: string,
+  workflowId: string,
   resolution: ExceptionResolution,
 ): Promise<void> {
-  const handle = client.workflow.getHandle(workflowIdForKey(key));
+  const handle = client.workflow.getHandle(workflowId);
   await handle.signal(exceptionResolvedSignal, resolution);
 }
 
-export async function markResolved(client: Client, key: string): Promise<void> {
-  const handle = client.workflow.getHandle(workflowIdForKey(key));
+export async function markResolved(client: Client, workflowId: string): Promise<void> {
+  const handle = client.workflow.getHandle(workflowId);
   await handle.signal(resolvedSignal);
 }
 
@@ -119,10 +144,10 @@ export async function markResolved(client: Client, key: string): Promise<void> {
  */
 export async function acknowledgeCase(
   client: Client,
-  key: string,
+  workflowId: string,
   ack: CaseAcknowledgment,
 ): Promise<void> {
-  const handle = client.workflow.getHandle(workflowIdForKey(key));
+  const handle = client.workflow.getHandle(workflowId);
   await handle.signal(acknowledgeSignal, ack);
 }
 
@@ -151,7 +176,7 @@ export async function checkTemporal(): Promise<boolean> {
   }
 }
 
-export async function getCaseState(client: Client, key: string): Promise<CaseState> {
-  const handle = client.workflow.getHandle(workflowIdForKey(key));
+export async function getCaseState(client: Client, workflowId: string): Promise<CaseState> {
+  const handle = client.workflow.getHandle(workflowId);
   return handle.query(stateQuery);
 }

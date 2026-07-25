@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { getDb } from "./client.js";
+import { getDb, type Db } from "./client.js";
 
 /**
  * Operational gauges for the Prometheus scrape (PHASE6 §6.4). Like `metrics.ts` (the KPI
@@ -25,9 +25,31 @@ export interface OpsMetrics {
   criticalUnacked: { count: number; maxAgeSeconds: number };
 }
 
-export async function getOpsMetrics(): Promise<OpsMetrics> {
-  const db = getDb();
-
+/**
+ * `orgId` UNDEFINED means DEPLOYMENT-WIDE (PHASE6 §6.5): the org predicates are omitted and the
+ * aggregates cover every tenant in one pass. That is what the unauthenticated Prometheus scrape
+ * asks for — see `packages/observability/src/metrics.ts` for why the per-org series it used to emit
+ * were a tenant-enumeration leak on a route with no authentication.
+ *
+ * Computed as ONE aggregate rather than by summing per-org results, because two of these numbers
+ * cannot be reconstructed from per-org ones: the oldest unacked critical case is a max (recoverable)
+ * but the average ack latency is a mean, and averaging N per-tenant means describes nobody's
+ * response time unless every tenant acked the same number of cases.
+ *
+ * A caller passing `undefined` must be on a connection that can SEE every tenant — the maintenance
+ * pool. On an org-scoped connection the policies filter the rows away and the aggregates come back
+ * as zeros; the scrape route notes this and the app-role warning in `client.ts` is what surfaces it.
+ */
+export async function getOpsMetrics(
+  orgId: string | undefined,
+  db: Db = getDb(),
+): Promise<OpsMetrics> {
+  // A `true` predicate rather than a branch per query: the deployment-wide and per-org forms differ
+  // only in this clause, and duplicating the SQL to express that would be two copies to keep in
+  // step every time one of the aggregates changes.
+  const caseOrg = orgId === undefined ? sql`true` : sql`org_id = ${orgId}`;
+  const ackOrg = orgId === undefined ? sql`true` : sql`acknowledgments.org_id = ${orgId}`;
+  const caseJoinOrg = orgId === undefined ? sql`true` : sql`cases.org_id = ${orgId}`;
   // Three independent queries, issued concurrently: a scrape costs the slowest one, not their sum.
   // One round trip for the case-derived scalars. `date_trunc('day', now() at time zone 'utc')`
   // matches the UTC-day convention the spend ledger already uses, so "opened today" means the
@@ -57,8 +79,13 @@ export async function getOpsMetrics(): Promise<OpsMetrics> {
         end
       ) as critical_unacked_max_age
     from cases
+    where ${caseOrg}
   `);
 
+  // No org predicate: `feed_records` is a GLOBAL table (see `schema.ts`). Feed staleness is a
+  // property of the external source and of this deployment's poller, identical for every tenant,
+  // so scoping it per org would report the same number N times and imply an isolation that the
+  // underlying fact does not have.
   const feedQuery = db.execute<{ source: string; seconds_stale: string }>(sql`
     select source, extract(epoch from (now() - max(fetched_at))) as seconds_stale
     from feed_records
@@ -70,12 +97,16 @@ export async function getOpsMetrics(): Promise<OpsMetrics> {
   // one per tier.
   const ackAggQuery = db.execute<{ avg_seconds: string | null }>(sql`
     with first_ack as (
-      select case_id, min(ack_at) as ack_at from acknowledgments group by case_id
+      select case_id, min(ack_at) as ack_at
+      from acknowledgments
+      where ${ackOrg}
+      group by case_id
     )
     select avg(extract(epoch from (first_ack.ack_at - cases.opened_at))) as avg_seconds
     from first_ack
     join cases on cases.id = first_ack.case_id
     where first_ack.ack_at >= cases.opened_at
+      and ${caseJoinOrg}
   `);
 
   const [[caseAgg], feed, [ackAgg]] = await Promise.all([caseAggQuery, feedQuery, ackAggQuery]);

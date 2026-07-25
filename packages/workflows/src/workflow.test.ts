@@ -26,6 +26,13 @@ import { diffResolutions } from "./feed-resolution.js";
 
 const TASK_QUEUE = "test-cases";
 
+/**
+ * The tenant every case in this file runs in (PHASE6 §6.5). A real uuid, not a placeholder string:
+ * `CaseInput.orgId` is what the activities pass to `withOrgDb`, which rejects a non-uuid at the
+ * boundary — a fixture that used "test-org" would pass here and fail against the real activities.
+ */
+const TEST_ORG_ID = "aaaaaaaa-0000-0000-0000-0000000000a1";
+
 function heparin(): ShortageRecord {
   return {
     source: "openfda",
@@ -80,10 +87,12 @@ const mockActivities: typeof activities = {
   sendComms: async () => ({ delivered: true }),
   recordDecision: async () => {},
   pollAndOpenCases: async () => ({ polled: 0, opened: 0, resolved: 0 }),
-  anchorAuditChain: async () => ({ maxAuditId: 7, headHash: "deadbeef", sink: "file" }),
+  anchorAuditChain: async () => [
+    { orgId: TEST_ORG_ID, maxAuditId: 7, headHash: "deadbeef", sink: "file" },
+  ],
   // Memory hit only for the drug whose name says so, so every other case exercises the
   // agent-research path exactly as before.
-  lookupProtocol: async (key: string) =>
+  lookupProtocol: async (_orgId: string, key: string) =>
     /remembered/i.test(key)
       ? { versionId: "v-1", version: 3, body: "remembered protocol", alternatives: ["alt-remembered"] }
       : undefined,
@@ -155,7 +164,7 @@ async function withWorker<T>(fn: () => Promise<T>): Promise<T> {
 describe("shortageCaseWorkflow (time-skipped)", () => {
   it("resumes a multi-week case: approve → monitor weeks → resolve → close", async () => {
     await withWorker(async () => {
-      const input: CaseInput = { record: heparin(), sources: ["openfda"] };
+      const input: CaseInput = { orgId: TEST_ORG_ID, record: heparin(), sources: ["openfda"] };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
         args: [input],
         taskQueue: TASK_QUEUE,
@@ -188,7 +197,7 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
     await withWorker(async () => {
       const record = { ...heparin(), genericName: "Immune Globulin", key: "immune globulin" };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record, sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-exc-${Date.now()}`,
       });
@@ -201,7 +210,7 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
     await withWorker(async () => {
       const record = { ...heparin(), genericName: "Provider Outage Drug", key: "provider outage drug" };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record, sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-outage-${Date.now()}`,
       });
@@ -217,7 +226,7 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
     await withWorker(async () => {
       const record = { ...heparin(), genericName: "Low Alt Confidence Drug", key: "low alt confidence drug" };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record, sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-lowconf-${Date.now()}`,
       });
@@ -230,7 +239,7 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
     await withWorker(async () => {
       const record = { ...heparin(), genericName: "Low Impact Confidence Drug", key: "low impact confidence drug" };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record, sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-lowimpactconf-${Date.now()}`,
       });
@@ -243,7 +252,7 @@ describe("shortageCaseWorkflow (time-skipped)", () => {
   it("auto-escalates to exception when a case is never resolved (90-day timeout)", async () => {
     await withWorker(async () => {
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: heparin(), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: heparin(), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-timeout-${Date.now()}`,
       });
@@ -262,7 +271,7 @@ describe("organizational memory (time-skipped)", () => {
       const before = recordedProtocols.length;
       const record = { ...heparin(), genericName: "Remembered Drug", key: "remembered drug" };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record, sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-mem-${Date.now()}`,
       });
@@ -286,7 +295,7 @@ describe("organizational memory (time-skipped)", () => {
     await withWorker(async () => {
       const before = recordedProtocols.length;
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: heparin(), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: heparin(), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-writeback-${Date.now()}`,
       });
@@ -314,7 +323,7 @@ describe("organizational memory (time-skipped)", () => {
       const before = recordedProtocols.length;
       const record = { ...heparin(), genericName: "Immune Globulin", key: "immune globulin" };
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record, sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-excloop-${Date.now()}`,
       });
@@ -366,7 +375,11 @@ describe("anchorAuditWorkflow (time-skipped)", () => {
         taskQueue: TASK_QUEUE,
         workflowId: `wf-anchor-${Date.now()}`,
       });
-      expect(await handle.result()).toEqual({ maxAuditId: 7, headHash: "deadbeef", sink: "file" });
+      // One anchor row PER ORG since PHASE6 §6.5 pass 2 — with a chain per tenant, a single
+      // "head hash" is ambiguous, so the activity returns a list rather than one row.
+      expect(await handle.result()).toEqual([
+        { orgId: TEST_ORG_ID, maxAuditId: 7, headHash: "deadbeef", sink: "file" },
+      ]);
     });
   }, 60_000);
 });
@@ -384,7 +397,7 @@ describe("escalation ladder (time-skipped)", () => {
       // happened — and on a case that later escalates, would let it skip the ladder entirely.
       const key = "moderate-preack";
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: { ...heparin(), genericName: `Moderate ${key}`, key, ndcs: ["1"] }, sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: { ...heparin(), genericName: `Moderate ${key}`, key, ndcs: ["1"] }, sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-esc-preack-${Date.now()}`,
       });
@@ -405,7 +418,7 @@ describe("escalation ladder (time-skipped)", () => {
       // exactly what a positional timestamp array would do.
       const key = "critical-tier0rejects";
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: criticalRecord(key), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-esc-tier0rejects-${Date.now()}`,
       });
@@ -429,7 +442,7 @@ describe("escalation ladder (time-skipped)", () => {
       // acknowledged (no row, no audit entry), so the director and admin still have to be paged.
       const key = "critical-ackfails";
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: criticalRecord(key), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-esc-ackfails-${Date.now()}`,
       });
@@ -453,7 +466,7 @@ describe("escalation ladder (time-skipped)", () => {
     await withWorker(async () => {
       const key = "critical-noack";
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: criticalRecord(key), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-esc-noack-${Date.now()}`,
       });
@@ -478,7 +491,7 @@ describe("escalation ladder (time-skipped)", () => {
     await withWorker(async () => {
       const key = "critical-ack";
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: criticalRecord(key), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-esc-ack-${Date.now()}`,
       });
@@ -518,7 +531,7 @@ describe("escalation ladder (time-skipped)", () => {
     const workflowId = `wf-esc-durable-${Date.now()}`;
     await withWorker(async () => {
       await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: criticalRecord(key), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId,
       });
@@ -542,7 +555,7 @@ describe("escalation ladder (time-skipped)", () => {
     await withWorker(async () => {
       const key = "critical-nondeliver";
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: criticalRecord(key), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-esc-nd-${Date.now()}`,
       });
@@ -561,7 +574,7 @@ describe("escalation ladder (time-skipped)", () => {
     await withWorker(async () => {
       const key = "critical-lateack";
       const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: criticalRecord(key), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: criticalRecord(key), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId: `wf-esc-late-${Date.now()}`,
       });
@@ -600,7 +613,7 @@ describe("feed-resolution auto-detect (time-skipped)", () => {
    */
   async function driveToMonitoring(workflowId: string) {
     const handle = await env.client.workflow.start(shortageCaseWorkflow, {
-      args: [{ record: heparin(), sources: ["openfda"] }],
+      args: [{ orgId: TEST_ORG_ID, record: heparin(), sources: ["openfda"] }],
       taskQueue: TASK_QUEUE,
       workflowId,
     });
@@ -617,6 +630,7 @@ describe("feed-resolution auto-detect (time-skipped)", () => {
       const threshold = 3;
       const inMemory: OpenMonitoringCase = {
         caseId: "c",
+        workflowId: `org-${TEST_ORG_ID}-case-heparin-sodium`,
         key: heparin().key,
         source: "openfda",
         sourceId: heparin().sourceId,
@@ -647,7 +661,16 @@ describe("feed-resolution auto-detect (time-skipped)", () => {
       const present = { currentKeys: new Set([heparin().key]), resolvedKeys: new Set<string>() };
       for (let poll = 0; poll < 5; poll += 1) {
         const diff = diffResolutions(
-          [{ caseId: "c", key: heparin().key, source: "openfda", sourceId: "x", feedMissCount: 0 }],
+          [
+            {
+              caseId: "c",
+              workflowId: `org-${TEST_ORG_ID}-case-heparin-sodium`,
+              key: heparin().key,
+              source: "openfda",
+              sourceId: "x",
+              feedMissCount: 0,
+            },
+          ],
           present,
           3,
           new Date().toISOString(),
@@ -668,6 +691,7 @@ describe("feed-resolution auto-detect (time-skipped)", () => {
       const threshold = 3;
       const inMemory: OpenMonitoringCase = {
         caseId: "c",
+        workflowId: `org-${TEST_ORG_ID}-case-heparin-sodium`,
         key: heparin().key,
         source: "openfda",
         sourceId: heparin().sourceId,
@@ -688,7 +712,7 @@ describe("feed-resolution auto-detect (time-skipped)", () => {
       // a fresh run started (a new run id on the same workflow id) is the reopen proof; the new
       // run's own lifecycle is covered by the other cases in this file.
       const second = await env.client.workflow.start(shortageCaseWorkflow, {
-        args: [{ record: heparin(), sources: ["openfda"] }],
+        args: [{ orgId: TEST_ORG_ID, record: heparin(), sources: ["openfda"] }],
         taskQueue: TASK_QUEUE,
         workflowId,
         workflowIdReusePolicy: "ALLOW_DUPLICATE",

@@ -11,6 +11,8 @@ import type { OpenMonitoringCase } from "@stopgap/db";
 /** Evidence recorded in the `case.feed_resolved` audit entry. */
 export interface ResolutionEvidence {
   caseId: string;
+  /** The case row's stored Temporal id — what the resolution signal is addressed to. */
+  workflowId: string;
   key: string;
   /** `feed-resolved`: the feed said so explicitly. `feed-absent`: N polls with no listing. */
   reason: "feed-resolved" | "feed-absent";
@@ -67,6 +69,7 @@ export function diffResolutions(
     if (snapshot.resolvedKeys.has(c.key)) {
       diff.toResolve.push({
         caseId: c.caseId,
+        workflowId: c.workflowId,
         key: c.key,
         reason: "feed-resolved",
         source: c.source,
@@ -81,6 +84,7 @@ export function diffResolutions(
     if (misses >= threshold) {
       diff.toResolve.push({
         caseId: c.caseId,
+        workflowId: c.workflowId,
         key: c.key,
         reason: "feed-absent",
         source: c.source,

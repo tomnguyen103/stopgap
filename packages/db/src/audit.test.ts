@@ -21,11 +21,17 @@ interface EntryFields {
   runId?: string;
   eventKey?: string;
   actorUserId?: string;
+  /** v4-hashed (PHASE6 §6.5). Ignored by v1-v3, whose byte layouts are frozen. */
+  orgId?: string;
 }
 
 const TS = "2026-07-24T00:00:00.000Z";
 
-type Scheme = "v1" | "v2" | "v3";
+type Scheme = "v1" | "v2" | "v3" | "v4";
+
+/** Two distinct tenants, for the per-org chain tests (PHASE6 §6.5). */
+const ORG_A = "00000000-0000-0000-0000-0000000000a1";
+const ORG_B = "00000000-0000-0000-0000-0000000000b2";
 
 /** Build a valid chain of rows under the given per-row schemes. */
 function buildChain(entries: (EntryFields & { scheme: Scheme })[], hmacKey?: string): VerifiableRow[] {
@@ -54,6 +60,7 @@ function buildChain(entries: (EntryFields & { scheme: Scheme })[], hmacKey?: str
       runId,
       eventKey,
       actorUserId: e.actorUserId ?? null,
+      orgId: e.orgId ?? null,
     });
     prevHash = hash;
   });
@@ -340,5 +347,130 @@ describe("buildTimestampRequest", () => {
 
   it("rejects a digest that is not 32 bytes", () => {
     expect(() => buildTimestampRequest("00")).toThrow(/32-byte/);
+  });
+});
+
+describe("v4 binds orgId into the HMAC (PHASE6 §6.5)", () => {
+  const v4Entry = (orgId: string): EntryFields & { scheme: Scheme } => ({
+    scheme: "v4",
+    caseId: "c1",
+    actor: "pharmacist-1",
+    action: "review.approve",
+    detail: { note: "ok" },
+    actorUserId: "u-1",
+    orgId,
+  });
+
+  it("accepts a v4 chain carrying orgId", () => {
+    const rows = buildChain([v4Entry(ORG_A)], KEY);
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("fails a v4 row MOVED to another org without recomputing the hash", () => {
+    // The attack v4 closes: a DB writer edits one column and the row belongs to a different
+    // hospital, with the chain still reporting green. It cannot, because org_id is in the HMAC.
+    const rows = buildChain([v4Entry(ORG_A)], KEY);
+    rows[0]!.orgId = ORG_B;
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.brokenAtId).toBe(1);
+    expect(result.reason).toBe("hash-mismatch");
+  });
+
+  it("v3 ignores orgId — moving a legacy v3 row does NOT break it (only v4 binds the tenant)", () => {
+    // This is what makes migration 0013's backfill safe: every historical row was stamped with the
+    // seed org and not one hash changed. The weakness is real and is precisely why v4 exists.
+    const rows = buildChain(
+      [{ scheme: "v3", caseId: "c1", actor: "system", action: "case.detected", detail: {}, actorUserId: "u-1", orgId: ORG_A }],
+      KEY,
+    );
+    rows[0]!.orgId = ORG_B;
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+
+  it("fails a v4 row whose HMAC key is absent (missing-hmac-key, like v2/v3)", () => {
+    const rows = buildChain([v4Entry(ORG_A)], KEY);
+    const result = verifyChainRows(rows);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("missing-hmac-key");
+  });
+
+  it("catches a v4 → v3 relabel as a DOWNGRADE, not merely a hash mismatch", () => {
+    // Relabelling v4 as v3 is how an attacker would try to strip the tenant binding: recompute
+    // the row under the (weaker) v3 payload, re-chain the tail, and the hashes all line up. The
+    // monotonic scheme rank is what still refuses it.
+    const rows = buildChain([v4Entry(ORG_A), { ...v4Entry(ORG_A), action: "comms.sent" }], KEY);
+    const victim = rows[1]!;
+    victim.scheme = "v3";
+    victim.hash = computeAuditHash(
+      "v3",
+      victim.prevHash,
+      {
+        caseId: victim.caseId ?? undefined,
+        actor: victim.actor,
+        action: victim.action,
+        detail: victim.detail,
+        ts: victim.ts as string,
+        runId: victim.runId,
+        eventKey: victim.eventKey,
+        actorUserId: victim.actorUserId ?? undefined,
+      },
+      KEY,
+    );
+    const result = verifyChainRows(rows, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("scheme-downgrade");
+    expect(result.brokenAtId).toBe(2);
+  });
+
+  it("accepts a climbing v1 → v2 → v3 → v4 chain", () => {
+    const rows = buildChain(
+      [
+        { scheme: "v1", caseId: "c1", actor: "system", action: "case.detected", detail: {} },
+        { scheme: "v2", caseId: "c1", actor: "system", action: "case.assessing", detail: {} },
+        { scheme: "v3", caseId: "c1", actor: "system", action: "case.researching", detail: {}, actorUserId: "u-1" },
+        { scheme: "v4", caseId: "c1", actor: "system", action: "comms.sent", detail: {}, actorUserId: "u-1", orgId: ORG_A },
+      ],
+      KEY,
+    );
+    expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
+  });
+});
+
+describe("chains are independent per org (PHASE6 §6.5)", () => {
+  const chainFor = (orgId: string, note: string) =>
+    buildChain(
+      [
+        { scheme: "v4", caseId: "c1", actor: "system", action: "case.detected", detail: { note }, actorUserId: "u-1", orgId },
+        { scheme: "v4", caseId: "c1", actor: "system", action: "comms.sent", detail: { note }, actorUserId: "u-1", orgId },
+      ],
+      KEY,
+    );
+
+  it("a NEW org's chain starts at GENESIS_HASH rather than at another org's head", () => {
+    const b = chainFor(ORG_B, "b");
+    expect(b[0]!.prevHash).toBe(GENESIS_HASH);
+    expect(verifyChainRows(b, KEY)).toEqual({ ok: true });
+  });
+
+  it("org B verifies while org A is BROKEN — one tenant's tampering cannot fail another's audit", () => {
+    // The reason `verifyAuditChain` takes an org and filters on it: a single global chain would
+    // make a break anywhere a break everywhere, and an org could not be told whether ITS history
+    // is intact.
+    const a = chainFor(ORG_A, "a");
+    const b = chainFor(ORG_B, "b");
+    a[1]!.detail = { note: "tampered" };
+    expect(verifyChainRows(a, KEY).ok).toBe(false);
+    expect(verifyChainRows(b, KEY)).toEqual({ ok: true });
+  });
+
+  it("two orgs' rows verified TOGETHER break at the crossover (why the reader filters by org)", () => {
+    // Feeding the verifier an unfiltered, deployment-wide row set is a correct answer to the
+    // wrong question: org B's first row chains to GENESIS, not to org A's head.
+    const merged = [...chainFor(ORG_A, "a"), ...chainFor(ORG_B, "b")].map((r, i) => ({ ...r, id: i + 1 }));
+    const result = verifyChainRows(merged, KEY);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("prev-hash-mismatch");
+    expect(result.brokenAtId).toBe(3);
   });
 });

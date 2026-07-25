@@ -1,7 +1,15 @@
-import { listProtocols } from "@stopgap/db";
+import { listProtocols, withOrgDb } from "@stopgap/db";
 import { authenticateApiRequest } from "../../../lib/api-auth";
 import { jsonOk, parseOr400 } from "../../../lib/api-response";
 import { listQuerySchema, protocolListSchema } from "../../../lib/api-schemas";
+
+/**
+ * TENANT SCOPE (PHASE6 §6.5): the KEY's org, `auth.key.orgId`, and never anything from the request.
+ * A key is issued into one organization and can never act outside it — see `lib/api-auth.ts` for
+ * why deriving the tenant from the credential rather than from a parameter is what makes the public
+ * API tenant-safe. `withOrgDb` sets `app.current_org` for the transaction, so RLS backs the
+ * explicit filters rather than merely coexisting with them.
+ */
 
 /**
  * `GET /api/v1/protocols` (PHASE6 §6.7 — "REST over … protocols (list/get/versions)") — scope
@@ -33,7 +41,8 @@ export async function GET(request: Request): Promise<Response> {
   });
   if (!query.ok) return query.response;
 
-  const rows = await listProtocols(query.data.limit);
+  const orgId = auth.key.orgId;
+  const rows = await withOrgDb(orgId, (db) => listProtocols(orgId, query.data.limit, db));
   return jsonOk(
     protocolListSchema.parse({
       protocols: rows.map((row) => ({

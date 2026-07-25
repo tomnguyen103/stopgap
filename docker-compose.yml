@@ -21,6 +21,51 @@ services:
       timeout: 5s
       retries: 10
 
+  # The non-superuser application role (PHASE6 §6.5). One-shot, idempotent, runs on every `up` —
+  # NOT an /docker-entrypoint-initdb.d script, which would only fire on a first boot with an empty
+  # volume and so would skip every developer who already has data. See deploy/postgres/app-role.sql
+  # for what it grants and why each grant is needed.
+  #
+  # WHAT THIS DOES AND DOES NOT DO FOR LOCAL DEV. It creates `stopgap_app` and makes it usable, so
+  # `pnpm test:rls` (which REFUSES to run as a role the policies do not apply to) works with no
+  # manual SQL. It does not repoint the app: in this stack the console and worker run on the HOST,
+  # so their `DATABASE_URL` comes from `packages/core/src/env.ts`, whose zero-config default is
+  # still the `stopgap` superuser — the single-role development configuration. That configuration
+  # does not enforce isolation, and nothing here pretends otherwise: the pool logs a loud warning at
+  # startup and `/api/readyz` reports `rlsEnforced: false`. To develop against the enforcing shape,
+  # put this pair in your local .env (see docs/multi-tenancy.md):
+  #   DATABASE_URL=postgres://stopgap_app:stopgap_app@localhost:5433/stopgap
+  #   DATABASE_URL_MAINTENANCE=postgres://stopgap:stopgap@localhost:5433/stopgap
+  # The password here is a DEV-ONLY throwaway, like every other credential in this file.
+  app-role-init:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: stopgap
+    volumes:
+      - ./deploy/postgres/app-role.sql:/app-role.sql:ro
+    command:
+      [
+        "psql",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-h",
+        "postgres",
+        "-U",
+        "stopgap",
+        "-d",
+        "stopgap",
+        "-v",
+        "app_pw=stopgap_app",
+        "-v",
+        "owner=stopgap",
+        "-f",
+        "/app-role.sql",
+      ]
+    restart: "no"
+
   temporal:
     image: temporalio/auto-setup:1.25.2
     restart: unless-stopped

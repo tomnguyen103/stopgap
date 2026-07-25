@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
-import { getDb } from "./client.js";
+import { eq, sql } from "drizzle-orm";
+import { getDb, type Db } from "./client.js";
 import { auditLog, cases } from "./schema.js";
 
 /**
@@ -30,9 +30,7 @@ export interface Kpis {
 
 const STALE_CASE_DAYS = 90;
 
-export async function getKpis(): Promise<Kpis> {
-  const db = getDb();
-
+export async function getKpis(orgId: string, db: Db = getDb()): Promise<Kpis> {
   const [counts] = await db
     .select({
       total: sql<string>`count(*)`,
@@ -41,7 +39,8 @@ export async function getKpis(): Promise<Kpis> {
       terminal: sql<string>`count(*) filter (where ${cases.status} in ('closed', 'rejected'))`,
       dropped: sql<string>`count(*) filter (where ${cases.status} not in ('closed', 'rejected') and ${cases.updatedAt} < now() - interval '${sql.raw(String(STALE_CASE_DAYS))} days')`,
     })
-    .from(cases);
+    .from(cases)
+    .where(eq(cases.orgId, orgId));
 
   // Detection-to-approval latency from the audit trail rather than case timestamps:
   // `cases.updatedAt` moves on with every later transition, so it cannot answer "how long did
@@ -61,6 +60,8 @@ export async function getKpis(): Promise<Kpis> {
        and approved.action = 'case.approved'
        and approved.ts >= detected.ts
       where detected.action = 'case.detected'
+        and detected.org_id = ${orgId}
+        and approved.org_id = ${orgId}
       order by detected.case_id, detected.run_id, approved.ts
     )
     select percentile_cont(0.5) within group (order by hours) as median_hours from pairs
@@ -70,6 +71,7 @@ export async function getKpis(): Promise<Kpis> {
     select count(*) filter (where action in ('review.approve', 'review.edit', 'review.reject')) as reviewed,
            count(*) filter (where action = 'review.approve') as unedited
     from ${auditLog}
+    where org_id = ${orgId}
   `);
 
   const reviewed = Number(review?.reviewed ?? 0);

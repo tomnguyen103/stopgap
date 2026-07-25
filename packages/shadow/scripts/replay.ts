@@ -5,8 +5,13 @@
  *   pnpm --filter @stopgap/shadow replay -- --limit 10
  *
  * Observational only: no case is touched, no comms sent, no protocol written.
+ *
+ * The ledger is per-organization (PHASE6 §6.5) — promotion gates read these aggregates, and one
+ * hospital must not promote an agent on another hospital's evidence. A CLI has no session, so the
+ * tenant comes from `STOPGAP_ORG_ID` and defaults to the seed org. Defaulting is honest here, unlike
+ * in a request path: the operator running this command is choosing the deployment it points at.
  */
-import { closeDb } from "@stopgap/db";
+import { SEED_ORG_ID, closeDb } from "@stopgap/db";
 import { initObservability, flushTracing } from "@stopgap/observability";
 import { REPLAY_CORPUS } from "../src/corpus.js";
 import { runShadowEntry } from "../src/run.js";
@@ -23,15 +28,18 @@ if (limitArg !== -1) {
   }
 }
 const entries = REPLAY_CORPUS.slice(0, limit);
+const orgId = process.env.STOPGAP_ORG_ID ?? SEED_ORG_ID;
 
 initObservability("stopgap-shadow-replay");
-console.log(`[shadow] replaying ${entries.length}/${REPLAY_CORPUS.length} corpus entries`);
+console.log(
+  `[shadow] replaying ${entries.length}/${REPLAY_CORPUS.length} corpus entries into org ${orgId}`,
+);
 
 try {
   let done = 0;
   for (const entry of entries) {
     try {
-      await runShadowEntry(entry);
+      await runShadowEntry(orgId, entry);
     } catch (err) {
       // One bad entry must not abandon the replay — the ledger is a sample, not a transaction.
       console.error(`[shadow] ${entry.id} failed:`, err instanceof Error ? err.message : err);

@@ -6,7 +6,47 @@ import { z } from "zod";
  * a sensible local-dev default so the local gate runs with zero configuration.
  */
 const EnvSchema = z.object({
+  /**
+   * Which deployment shape this process is running in. Only ever compared against `"production"`,
+   * and kept as a free-form string rather than an enum because it is not ours to constrain — Node,
+   * Next.js and the test runner all set it, and a value we did not anticipate must not crash the
+   * parse of every OTHER variable.
+   *
+   * It exists here for exactly one decision: configuration that is OPTIONAL in development and
+   * MANDATORY in production (today, `DATABASE_URL_MAINTENANCE`). Defaulting to "development" keeps
+   * the zero-config local gate green — a developer never has to set it — while a real deployment,
+   * which Node already sets to "production", gets the strict behaviour without opting in.
+   */
+  NODE_ENV: z.string().default("development"),
   DATABASE_URL: z.string().default("postgres://stopgap:stopgap@localhost:5433/stopgap"),
+  /**
+   * SECOND connection string, for the handful of jobs that are genuinely deployment-wide and must
+   * read across tenants (PHASE6 §6.5): the OIDC/API-key authentication bootstrap, audit anchoring,
+   * `pnpm verify-audit`, and the Prometheus scrape. It must name a role holding BYPASSRLS (or a
+   * superuser); `DATABASE_URL` must name a role that holds NEITHER, or the row-level security
+   * policies are installed and enforcing nothing.
+   *
+   * WHY TWO URLS RATHER THAN ONE. RLS is a property of the CONNECTED ROLE, not of the statement, so
+   * "bypass the policies for this one query" is not expressible — `withBypassDb` can only bypass
+   * anything if it holds a different connection. One pool means exactly one of the two properties
+   * is available: run as the app role and sign-in, REST auth and anchoring all break; run as the
+   * superuser and isolation is theatre. Two pools is what makes both true at once.
+   *
+   * UNSET IS THE SINGLE-ROLE DEVELOPMENT CONFIGURATION, and it is not a working production one.
+   * `withBypassDb` then falls back to the ordinary pool, so the deployment is correct only if that
+   * pool ALREADY bypasses RLS — i.e. the zero-config local stack, where `DATABASE_URL` names the
+   * compose superuser and the policies do not apply to it. The fallback is not silent: the pool
+   * logs a loud warning when the app connection turns out to bypass RLS, and `/api/readyz` reports
+   * it as a named check, so "isolation is not being enforced here" is visible rather than assumed.
+   *
+   * Empty-string preprocess, like every other optional secret: `DATABASE_URL_MAINTENANCE=` in an
+   * env file is how "not configured" is written, and an empty string would otherwise be handed to
+   * `postgres()` as a connection string and fail at connect time instead of falling back.
+   */
+  DATABASE_URL_MAINTENANCE: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 
   TEMPORAL_ADDRESS: z.string().default("localhost:7233"),
   TEMPORAL_NAMESPACE: z.string().default("default"),

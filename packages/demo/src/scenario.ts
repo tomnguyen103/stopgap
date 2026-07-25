@@ -1,6 +1,6 @@
 import { getEnv } from "@stopgap/core/env";
 import type { ShortageRecord } from "@stopgap/core";
-import { getDb, reserveDemoRun } from "@stopgap/db";
+import { reserveDemoRun, withOrgDb } from "@stopgap/db";
 
 /**
  * "Run a shortage" — the one mutation a demo visitor is allowed (PROJECT_PLAN §11).
@@ -17,6 +17,11 @@ import { getDb, reserveDemoRun } from "@stopgap/db";
  * The limit is deployment-wide, not per visitor: with no auth layer there is no honest way to
  * tell two visitors apart (an IP is not a person), and a per-IP limit would read as a
  * stronger guarantee than it is. One busy visitor can therefore use up the hour's runs.
+ *
+ * "Deployment-wide" now means PER TENANT (PHASE6 §6.5): `demo_runs` carries an `org_id`, so the
+ * hourly budget is counted within the org the visitor is looking at. That is the correct reading of
+ * the intent — the limit exists to bound what one org's public demo can spend on real agent calls —
+ * and the alternative would let a second tenant's demo traffic exhaust the first tenant's quota.
  */
 
 export interface DemoDrug {
@@ -65,6 +70,7 @@ export type DemoRunResult = { ok: true; workflowId: string; started: boolean } |
  * happen.
  */
 export async function prepareDemoRun(
+  orgId: string,
   key: string,
 ): Promise<{ ok: true; record: ShortageRecord } | DemoRunRefusal> {
   const drug = findDemoDrug(key);
@@ -76,7 +82,7 @@ export async function prepareDemoRun(
   const since = new Date(Date.now() - 60 * 60 * 1000);
   // Count-and-reserve in one atomic step: a separate check-then-record lets concurrent
   // requests all pass the check and blow past the cap.
-  const { allowed } = await reserveDemoRun(getDb(), drug.key, since, limit);
+  const { allowed } = await withOrgDb(orgId, (db) => reserveDemoRun(db, orgId, drug.key, since, limit));
   if (!allowed) {
     return {
       ok: false,

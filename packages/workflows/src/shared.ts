@@ -16,9 +16,78 @@ export const ANCHOR_AUDIT_WORKFLOW = "anchorAuditWorkflow";
 
 /** Input to a shortage case workflow: the (possibly merged) detected shortage. */
 export interface CaseInput {
+  /**
+   * The tenant this case belongs to (PHASE6 §6.5). Carried in the workflow INPUT, not looked up
+   * inside an activity, because a Temporal workflow has no session and no request: the org is
+   * decided once by whoever started the case (the per-org feed poll, or a console action running
+   * as a signed-in user) and must then be stable for the case's whole multi-week life. An activity
+   * that re-derived it would be free to derive a different answer after a redeploy, and every
+   * audit entry it wrote would land in a different hospital's chain.
+   *
+   * It is also what every activity below passes to `withOrgDb`, so a case started for org A
+   * physically cannot read or write org B's rows.
+   *
+   * REQUIRED, AND THE COMPATIBILITY DECISION IS STATED HERE. Every execution STARTED BEFORE the
+   * multi-tenancy deploy has an input in its history with no `orgId` at all. `MAX_MONITORING_MS` is
+   * 90 days, so in-flight executions are not an edge case for this workflow — they are its normal
+   * state, and a deploy lands in the middle of dozens of them. Making the field required and reading
+   * it unconditionally would hand those replays `undefined`, which then fails `withOrgDb`'s uuid
+   * guard on EVERY subsequent activity: real running cases, broken by the deploy, at the point a
+   * pharmacist next touches them.
+   *
+   * The type stays REQUIRED — new callers must supply an org, and a missing one must not be
+   * expressible in new code — and the old shape is handled at the one place it can be handled
+   * deterministically: `resolveCaseOrgId` below, gated on Temporal's `patched()`. Pre-patch history
+   * takes `SEED_ORG_ID`, which is not a guess: migration 0013 backfilled every pre-existing row —
+   * including the `cases` row each of those executions is tracking — into exactly that org.
+   */
+  orgId: string;
   record: ShortageRecord;
   /** Feeds that contributed to this shortage (provenance). */
   sources: ShortageRecord["source"][];
+}
+
+/**
+ * Temporal patch id for the org-qualified `CaseInput` (PHASE6 §6.5).
+ *
+ * A patch id is part of the workflow's durable history and can never be renamed — `patched(id)`
+ * writes a marker under this exact string, and a rename would make every already-marked execution
+ * look unpatched again. Declared as a constant so the workflow and its tests name the same one.
+ */
+export const ORG_QUALIFIED_CASE_INPUT_PATCH = "org-qualified-case-input";
+
+/**
+ * The org every pre-multi-tenancy row was backfilled into by migration 0013.
+ *
+ * DUPLICATED FROM `SEED_ORG_ID` in `packages/db/src/orgs.ts` rather than imported, because this
+ * module is bundled into Temporal's deterministic workflow sandbox and `@stopgap/db` pulls in a
+ * Postgres driver. `packages/workflows/src/shared.test.ts` asserts the two literals are equal, so
+ * the copy cannot drift from the value the migration actually wrote.
+ */
+export const SEED_ORG_ID = "00000000-0000-0000-0000-0000000000a1";
+
+/**
+ * Which org a running case belongs to, correct in BOTH history eras (PHASE6 §6.5).
+ *
+ * `isPatched` is the result of `patched(ORG_QUALIFIED_CASE_INPUT_PATCH)`, which the workflow
+ * evaluates once at the top of its run. It is true for every execution started on or after this
+ * deploy (Temporal writes the marker) and false while replaying an execution whose history predates
+ * it — so the branch is decided by durable history, not by whether the field happens to be present,
+ * and is therefore deterministic across replays.
+ *
+ * Pre-patch executions fall back to `SEED_ORG_ID`. Post-patch executions read `input.orgId` with NO
+ * fallback: after this deploy an input without an org is a bug in the caller, and quietly resolving
+ * it to the seed tenant would write one hospital's clinical case into another's chain — far worse
+ * than the loud uuid failure `withOrgDb` raises.
+ *
+ * Pure and exported so the two eras are testable without constructing Temporal histories.
+ */
+export function resolveCaseOrgId(input: CaseInput, isPatched: boolean): string {
+  if (isPatched) return input.orgId;
+  // The `??` is not dead code the type system can prove away: this branch exists precisely for
+  // deserialized history payloads that predate the field, which arrive as `undefined` at runtime
+  // whatever the declared type says.
+  return (input.orgId as string | undefined) ?? SEED_ORG_ID;
 }
 
 /** Result of the impact assessment activity (Zod-validated, schema owned by @stopgap/agents). */
@@ -131,6 +200,8 @@ export interface ProtocolMemoryHit {
 
 /** Input for writing a case's approved outcome back into the protocol store. */
 export interface RecordProtocolInput {
+  /** The tenant whose protocol store this version belongs to (PHASE6 §6.5). */
+  orgId: string;
   key: string;
   title: string;
   body: string;

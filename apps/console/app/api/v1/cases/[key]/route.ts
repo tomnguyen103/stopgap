@@ -1,7 +1,15 @@
-import { getCaseByWorkflowId, getDb, workflowIdForKey } from "@stopgap/db";
+import { getCaseByKey, withOrgDb } from "@stopgap/db";
 import { authenticateApiRequest } from "../../../../lib/api-auth";
 import { jsonError, jsonOk } from "../../../../lib/api-response";
 import { caseDetailSchema } from "../../../../lib/api-schemas";
+
+/**
+ * TENANT SCOPE (PHASE6 §6.5): the KEY's org, `auth.key.orgId`, and never anything from the request.
+ * A key is issued into one organization and can never act outside it — see `lib/api-auth.ts` for
+ * why deriving the tenant from the credential rather than from a parameter is what makes the public
+ * API tenant-safe. `withOrgDb` sets `app.current_org` for the transaction, so RLS backs the
+ * explicit filters rather than merely coexisting with them.
+ */
 
 /**
  * `GET /api/v1/cases/{key}` (PHASE6 §6.7) — one case, scope `cases:read`.
@@ -30,7 +38,10 @@ export async function GET(
   if (!auth.ok) return auth.response;
 
   const { key } = await params;
-  const row = await getCaseByWorkflowId(getDb(), workflowIdForKey(key));
+  const orgId = auth.key.orgId;
+  // BY KEY, never by a recomputed workflow id (PHASE6 §6.5): a case opened before ids became
+  // org-qualified still stores `case-<key>`, so recomputing would 404 on cases that exist.
+  const row = await withOrgDb(orgId, (db) => getCaseByKey(db, orgId, key));
   if (!row) return jsonError(404, "not_found", `no case for key "${key}"`);
 
   return jsonOk(
