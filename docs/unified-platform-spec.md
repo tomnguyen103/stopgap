@@ -148,7 +148,7 @@ The existing four-role rank (`viewer` < `pharmacist` < `pharmacy_director` < `ad
 
 The identity provider is stood up for real: added to the local compose stack and the deployment stack, with a realm seeding one user per role so that the matrix is demonstrable from a clean checkout. The honest-non-configuration stance is preserved unchanged — with secrets absent, no one can sign in, requests resolve to an anonymous viewer, and every mutating action is still refused. Fail-closed, never fail-open.
 
-One pure addition to the authorization module: a function mapping a role to its landing route. It takes a role and returns a route group identifier, with no session, database or framework dependency. This is what makes per-role routing unit-testable without a browser.
+One pure addition to the authorization module: a function mapping roles to a landing route. It takes the caller's held roles, resolves the highest of them by the same rank `rolesAllow` uses, and returns that role's route, with no session, database or framework dependency. Highest-role resolution lives here rather than in the middleware for the same reason the rest of the matrix does: it is pure rank arithmetic, so routing and permission cannot disagree about which role a multi-role user effectively holds, and per-role routing is unit-testable without a browser.
 
 ### Console structure — route groups per role
 

@@ -59,6 +59,15 @@ export type ListParamsInput = string | URLSearchParams | Record<string, string |
  */
 const MAX_QUERY_LENGTH = 200;
 
+/**
+ * Upper bound on the page number, for the same reason `pageSizes` is an allow-list: `page` reaches
+ * an OFFSET, and Postgres computes and discards every row it skips. Bounding rows-per-request while
+ * leaving the offset unbounded leaves the knob intact — `?page=9007199254740991` is one URL away
+ * from a full scan. Ten thousand pages is far past any list a human pages through; beyond it the
+ * value degrades to page 1 like every other out-of-range parameter here.
+ */
+const MAX_PAGE = 10_000;
+
 function toSearchParams(input: ListParamsInput): URLSearchParams {
   if (typeof input === "string") return new URLSearchParams(input);
   if (input instanceof URLSearchParams) return input;
@@ -83,13 +92,17 @@ function parsePositiveInt(raw: string | null): number | null {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-/** Values the schema allows, in the order given, without repeats. */
+/**
+ * Values the schema allows, in the SCHEMA's declared order, without repeats.
+ *
+ * Schema order rather than URL order is what makes the state canonical: `?severity=high&
+ * severity=critical` and `?severity=critical&severity=high` name the same filter set, so they must
+ * parse equal and re-serialise to the same bytes. Following the URL's order instead would make one
+ * shared link two different cache keys, and two views that compare unequal while showing identical
+ * rows.
+ */
 function allowedValues(raw: readonly string[], allowed: readonly string[]): string[] {
-  const out: string[] = [];
-  for (const value of raw) {
-    if (allowed.includes(value) && !out.includes(value)) out.push(value);
-  }
-  return out;
+  return allowed.filter((value) => raw.includes(value));
 }
 
 /** Read list state out of a URL. Total: any input yields valid state. */
@@ -105,7 +118,8 @@ export function parseListParams(input: ListParamsInput, schema: ListParamsSchema
   const rawDir = params.get("dir")?.toLowerCase();
   const dir: SortDir = rawDir === "asc" || rawDir === "desc" ? rawDir : schema.defaultDir;
 
-  const page = parsePositiveInt(params.get("page")) ?? 1;
+  const rawPage = parsePositiveInt(params.get("page"));
+  const page = rawPage !== null && rawPage <= MAX_PAGE ? rawPage : 1;
 
   const rawPageSize = parsePositiveInt(params.get("pageSize"));
   const pageSize =
@@ -131,9 +145,9 @@ export function parseListParams(input: ListParamsInput, schema: ListParamsSchema
  * time, and repeated round-trips never accrete parameters.
  *
  * Emission order is fixed (`q`, `sort`, `dir`, `page`, `pageSize`, then filters in the order the
- * schema declares them) rather than following the caller's object key order, so two callers holding
- * equal state always produce byte-identical URLs — which is what makes a filtered link stable
- * enough to share and to cache.
+ * schema declares them, each filter's VALUES also in schema order) rather than following the
+ * caller's object key or value order, so two callers holding equal state always produce
+ * byte-identical URLs — which is what makes a filtered link stable enough to share and to cache.
  */
 export function serializeListParams(params: ListParams, schema: ListParamsSchema): string {
   const out = new URLSearchParams();
@@ -141,7 +155,7 @@ export function serializeListParams(params: ListParams, schema: ListParamsSchema
   if (params.q !== null && params.q.trim() !== "") out.set("q", params.q.trim().slice(0, MAX_QUERY_LENGTH));
   if (params.sort !== schema.defaultSort && schema.sortKeys.includes(params.sort)) out.set("sort", params.sort);
   if (params.dir !== schema.defaultDir) out.set("dir", params.dir);
-  if (params.page > 1) out.set("page", String(params.page));
+  if (params.page > 1 && params.page <= MAX_PAGE) out.set("page", String(params.page));
   if (params.pageSize !== schema.defaultPageSize && schema.pageSizes.includes(params.pageSize)) {
     out.set("pageSize", String(params.pageSize));
   }

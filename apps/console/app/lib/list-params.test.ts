@@ -102,6 +102,12 @@ describe("parseListParams — pagination", () => {
     expect(parseListParams(`page=${bad}`, schema).page).toBe(1);
   });
 
+  it.each(["10001", "9007199254740991"])("clamps an absurd page (%s) to 1", (absurd) => {
+    // `page` reaches an OFFSET. Bounding `pageSize` alone leaves `?page=9007199254740991` costing
+    // the database a full scan for a page no user asked for, so the offset is bounded too.
+    expect(parseListParams(`page=${absurd}`, schema).page).toBe(1);
+  });
+
   it("reads a page size the schema offers", () => {
     expect(parseListParams("pageSize=100", schema).pageSize).toBe(100);
   });
@@ -148,6 +154,14 @@ describe("parseListParams — filters", () => {
   it("de-duplicates repeated identical values", () => {
     expect(parseListParams("severity=high&severity=high", schema).filters).toEqual({ severity: ["high"] });
   });
+
+  it("orders values by the schema's declaration, not by the URL", () => {
+    // Two links naming the same filter set must parse to equal state, or "same view" depends on
+    // the order a colleague happened to click the checkboxes in.
+    expect(parseListParams("severity=high&severity=critical", schema).filters).toEqual({
+      severity: ["critical", "high"],
+    });
+  });
 });
 
 describe("serializeListParams", () => {
@@ -166,6 +180,13 @@ describe("serializeListParams", () => {
   it("emits repeated params for a multi-value filter", () => {
     const out = serializeListParams({ ...defaults, filters: { severity: ["critical", "high"] } }, schema);
     expect(out).toBe("severity=critical&severity=high");
+  });
+
+  it("orders output deterministically regardless of input value order", () => {
+    // Equal state must serialise byte-identically, or one shared link becomes two cache keys.
+    const a = serializeListParams({ ...defaults, filters: { severity: ["critical", "high"] } }, schema);
+    const b = serializeListParams({ ...defaults, filters: { severity: ["high", "critical"] } }, schema);
+    expect(a).toBe(b);
   });
 
   it("orders output deterministically regardless of input key order", () => {
