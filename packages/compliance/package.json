@@ -1,5 +1,5 @@
 {
-  "name": "@stopgap/comms",
+  "name": "@stopgap/compliance",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,10 +8,6 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@stopgap/compliance": "workspace:*",
-    "@stopgap/core": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.0.0"
