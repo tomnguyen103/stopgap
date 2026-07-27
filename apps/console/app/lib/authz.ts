@@ -66,6 +66,54 @@ export function isActionAllowed(roles: Role[], action: ConsoleAction): boolean {
   return rolesAllow(roles, ACTION_MIN_ROLE[action]);
 }
 
+/**
+ * Where each role lands after sign-in (unified-platform-spec, Phase F).
+ *
+ * Every role gets its own dashboard, so the post-sign-in redirect needs a role → route map. It
+ * lives here, beside the rank, because resolving it is pure rank arithmetic and belongs in the
+ * same unit-tested file as the rest of the matrix — the middleware that consumes it stays a
+ * one-line wrapper, and per-role routing never needs a browser to be proven.
+ *
+ * This is ROUTING, not authorization. Landing on a route is not permission to act there: every
+ * page read and every server action still calls its own guard, exactly as before. The two concerns
+ * are deliberately not merged — a future dashboard that a role can *see* but only partly *use* is
+ * normal, and would be unrepresentable if the landing map doubled as policy.
+ *
+ * Routes are root-relative by construction. The value is fed to a redirect, so a protocol-relative
+ * or absolute value here would be an open redirect; the suite asserts the shape rather than
+ * trusting review to catch a future edit.
+ */
+export const ROLE_LANDING_ROUTE: Record<Role, string> = {
+  viewer: "/overview",
+  pharmacist: "/queue",
+  pharmacy_director: "/oversight",
+  admin: "/admin",
+};
+
+/**
+ * The dashboard a caller lands on: the route of their HIGHEST role, mirroring `rolesAllow`'s
+ * "any role may satisfy" rule so routing and permission can never disagree about which role a
+ * multi-role user effectively holds.
+ *
+ * Total by construction — it always returns a route:
+ *  - no roles at all (the anonymous visitor `STOPGAP_DEMO_MODE` resolves) lands on the viewer
+ *    dashboard, which is what makes the public demo and the lowest-privilege surface one thing to
+ *    build rather than two;
+ *  - a role this build does not know is skipped rather than thrown on. Roles are unioned from IdP
+ *    realm claims and local grants, so an IdP can legitimately present a realm role a given deploy
+ *    has never heard of; a throw here would turn that into a failed sign-in redirect instead of a
+ *    harmless degrade to `viewer`.
+ */
+export function roleLandingRoute(roles: readonly Role[]): string {
+  let best: Role = "viewer";
+  for (const role of roles) {
+    const rank = RANK[role];
+    if (rank === undefined) continue;
+    if (rank > RANK[best]) best = role;
+  }
+  return ROLE_LANDING_ROUTE[best];
+}
+
 /** Thrown when a caller lacks the role an action requires. The server action surfaces it. */
 export class AuthorizationError extends Error {
   constructor(
