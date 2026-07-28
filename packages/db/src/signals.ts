@@ -1,7 +1,36 @@
 import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
-import type { NormalizedSignal } from "@stopgap/ingest";
+
 import { riskScoreSnapshots, riskSignals, type RiskSignalRow } from "./schema.js";
 import type { Db } from "./client.js";
+
+/**
+ * The shape this module needs from a normalized signal.
+ *
+ * Declared structurally rather than imported from `@stopgap/ingest`, so the persistence layer does
+ * not depend on the ingestion layer for a type. `NormalizedSignal` satisfies it; anything else
+ * that can honestly fill these fields may too.
+ */
+export interface PersistableSignal {
+  source: string;
+  sourceId: string;
+  riskDomain: string;
+  entityType: string;
+  entityIdentifier: string;
+  title: string;
+  summary: string;
+  severity: string;
+  severityScore: number;
+  confidence: number;
+  observedAt: string;
+  publishedAt: string;
+  lastFetchedAt: string;
+  staleness: string;
+  sourceResolved: boolean;
+  evidenceUrl: string;
+  raw: unknown;
+  dedupeKey: string;
+  matchHints: { ndcs: string[]; rxcuis: string[]; names: string[] };
+}
 
 /**
  * Reading and writing normalized signals, per tenant (ticket 06).
@@ -28,19 +57,28 @@ export const FEED_ABSENT_THRESHOLD = 3;
 export async function upsertSignals(
   db: Db,
   orgId: string,
-  signals: NormalizedSignal[],
+  signals: PersistableSignal[],
 ): Promise<number> {
   if (signals.length === 0) return 0;
   for (const signal of signals) {
-    if (signal.dedupeKey.split(":")[0] !== orgId) {
-      // A signal normalized for another tenant must never be written into this one. RLS would
-      // refuse it anyway (WITH CHECK on org_id), but failing here names the actual mistake —
-      // "you normalized with the wrong context" — instead of surfacing as SQLSTATE 42501.
+    if (!signal.dedupeKey.startsWith(`${orgId}:`)) {
+      // A signal normalized for ANOTHER tenant must never be written into this one.
+      //
+      // This check is the only thing that catches it. RLS will not: the insert below writes this
+      // function's own `orgId` into the row, so `WITH CHECK` sees a row that belongs where it is
+      // being put and passes — while the row's dedupe key still says it was computed for someone
+      // else, which is a silent cross-tenant mix-up rather than a refused write.
       throw new Error(`signal ${signal.dedupeKey} was not normalized for org ${orgId}`);
     }
-    await db
-      .insert(riskSignals)
-      .values({
+  }
+
+  // ONE statement for the whole batch, not one per signal. A poll writes every signal a feed
+  // returned, for every tenant, inside a single transaction — a round trip per row turns a
+  // 200-signal feed across 50 tenants into 10,000 of them.
+  await db
+    .insert(riskSignals)
+    .values(
+      signals.map((signal) => ({
         orgId,
         source: signal.source,
         sourceId: signal.sourceId,
@@ -62,28 +100,31 @@ export async function upsertSignals(
         raw: signal.raw as Record<string, unknown>,
         dedupeKey: signal.dedupeKey,
         matchHints: signal.matchHints,
-      })
-      .onConflictDoUpdate({
-        target: [riskSignals.orgId, riskSignals.dedupeKey],
-        set: {
-          title: signal.title,
-          summary: signal.summary,
-          severity: signal.severity,
-          severityScore: signal.severityScore.toString(),
-          confidence: signal.confidence.toString(),
-          observedAt: new Date(signal.observedAt),
-          publishedAt: new Date(signal.publishedAt),
-          lastFetchedAt: new Date(signal.lastFetchedAt),
-          staleness: signal.staleness,
-          sourceResolved: signal.sourceResolved,
-          feedMissCount: 0,
-          evidenceUrl: signal.evidenceUrl,
-          raw: signal.raw as Record<string, unknown>,
-          matchHints: signal.matchHints,
-          updatedAt: new Date(),
-        },
-      });
-  }
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [riskSignals.orgId, riskSignals.dedupeKey],
+      // `excluded` is the row this statement TRIED to insert — the only way to restate a batch
+      // without a statement per row.
+      set: {
+        title: sql`excluded.title`,
+        summary: sql`excluded.summary`,
+        severity: sql`excluded.severity`,
+        severityScore: sql`excluded.severity_score`,
+        confidence: sql`excluded.confidence`,
+        observedAt: sql`excluded.observed_at`,
+        publishedAt: sql`excluded.published_at`,
+        lastFetchedAt: sql`excluded.last_fetched_at`,
+        staleness: sql`excluded.staleness`,
+        sourceResolved: sql`excluded.source_resolved`,
+        // Present in the feed right now — the one fact that resets the absence counter.
+        feedMissCount: sql`0`,
+        evidenceUrl: sql`excluded.evidence_url`,
+        raw: sql`excluded.raw`,
+        matchHints: sql`excluded.match_hints`,
+        updatedAt: sql`now()`,
+      },
+    });
   return signals.length;
 }
 
@@ -178,7 +219,14 @@ export interface ScoreSnapshotInput {
   band: string;
   components: Record<string, number>;
   scorerVersion: string;
-  computedAt?: Date;
+  /**
+   * REQUIRED, not defaulted to the clock.
+   *
+   * It is part of the row's identity, so a default of `new Date()` would make every restatement a
+   * new instant and the conflict target could never fire — turning "re-running one poll's scoring
+   * restates a row" into "appends a duplicate history entry", which is the opposite claim.
+   */
+  computedAt: Date;
 }
 
 /**
@@ -193,29 +241,32 @@ export async function recordScoreSnapshots(
   snapshots: ScoreSnapshotInput[],
 ): Promise<number> {
   if (snapshots.length === 0) return 0;
-  for (const s of snapshots) {
-    const computedAt = s.computedAt ?? new Date();
-    await db
-      .insert(riskScoreSnapshots)
-      .values({
+  await db
+    .insert(riskScoreSnapshots)
+    .values(
+      snapshots.map((s) => ({
         orgId,
         signalId: s.signalId,
         score: s.score.toString(),
         band: s.band,
         components: s.components,
         scorerVersion: s.scorerVersion,
-        computedAt,
-      })
-      .onConflictDoUpdate({
-        target: [
-          riskScoreSnapshots.orgId,
-          riskScoreSnapshots.signalId,
-          riskScoreSnapshots.scorerVersion,
-          riskScoreSnapshots.computedAt,
-        ],
-        set: { score: s.score.toString(), band: s.band, components: s.components },
-      });
-  }
+        computedAt: s.computedAt,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [
+        riskScoreSnapshots.orgId,
+        riskScoreSnapshots.signalId,
+        riskScoreSnapshots.scorerVersion,
+        riskScoreSnapshots.computedAt,
+      ],
+      set: {
+        score: sql`excluded.score`,
+        band: sql`excluded.band`,
+        components: sql`excluded.components`,
+      },
+    });
   return snapshots.length;
 }
 
@@ -232,7 +283,9 @@ export async function latestScoresForSignals(
     .where(
       and(eq(riskScoreSnapshots.orgId, orgId), inArray(riskScoreSnapshots.signalId, signalIds)),
     )
-    .orderBy(desc(riskScoreSnapshots.computedAt));
+    // `id` breaks the tie: the unique index permits two scorer versions at one instant, so
+    // ordering on the timestamp alone would let the planner pick either one.
+    .orderBy(desc(riskScoreSnapshots.computedAt), desc(riskScoreSnapshots.id));
   const out = new Map<string, { score: number; band: string; scorerVersion: string }>();
   // Rows arrive newest-first, so the FIRST row seen for a signal is its latest snapshot.
   for (const row of rows) {

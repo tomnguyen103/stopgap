@@ -864,6 +864,8 @@ export const riskScoreSnapshots = pgTable(
       t.computedAt,
     ),
     index("risk_score_snapshots_rank_idx").on(t.orgId, t.computedAt, t.score),
+    // `latestScoresForSignals` reads by signal; without this it walks the tenant's whole history.
+    index("risk_score_snapshots_signal_idx").on(t.orgId, t.signalId, t.computedAt),
   ],
 );
 

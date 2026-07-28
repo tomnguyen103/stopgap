@@ -158,6 +158,8 @@ vi.mock("@stopgap/ingest", () => ({
     normalize: (_raw: unknown, ctx: { orgId: string; fetchedAt: string }) =>
       stubSignal(ctx.orgId, ctx.fetchedAt),
   },
+  // Returns nothing — so the poll must NOT vouch for it in the miss sweep. An empty answer is
+  // indistinguishable from a quiet failure (ASHP answers `[]` with no auth key).
   ashpShortageConnector: { source: "ashp_shortage", fetch: async () => [], normalize: () => null },
   openFdaDrugRecallConnector: {
     source: "openfda_drug_recall",
@@ -308,19 +310,18 @@ describe("the scheduled feed poll (no session, no case)", () => {
   /**
    * A feed OUTAGE is not a feed saying the hazard ended.
    *
-   * The miss sweep is scoped to the sources this poll actually reached. Both recall connectors
-   * return empty here, but they returned WITHOUT throwing, so they are swept; a source that threw
-   * would be absent from the list and its existing signals left untouched.
+   * The miss sweep is scoped to the feeds this poll can VOUCH for — the ones that returned at
+   * least one row. ASHP answers `[]` with no auth key and openFDA answers 404 for an empty result
+   * set exactly as it does for a bad path, so "returned nothing" cannot be told apart from
+   * "failed quietly", and treating it as absence would retire live signals on a key expiry.
    */
-  it("sweeps misses only for the feeds the poll actually reached", async () => {
+  it("sweeps misses only for feeds that returned something, never for a silent one", async () => {
     await pollAndOpenCases();
     for (const sweep of missSweeps) {
-      expect(sweep.sources).toEqual([
-        "openfda_shortage",
-        "ashp_shortage",
-        "openfda_drug_recall",
-        "openfda_device_recall",
-      ]);
+      // ONLY openFDA shortages returned a row, so it is the only source the poll can tell apart
+      // from a broken one. A feed that answered with nothing is left out rather than having its
+      // signals counted as missing.
+      expect(sweep.sources).toEqual(["openfda_shortage"]);
     }
     expect(missSweeps.map((s) => s.orgId)).toEqual([ORG_A, ORG_B]);
   });
