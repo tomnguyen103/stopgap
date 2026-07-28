@@ -1,5 +1,7 @@
 # 10 — Compliance guard
 
+PR batch: A
+
 **What to build:** The product claims it never handles protected health information and never gives clinical advice. This makes that claim enforceable at runtime rather than asserted in prose. Generated text is screened before it leaves the system's control — both before it reaches a screen and before it is sent anywhere — and a violation is reported with enough detail to act on rather than as a bare refusal.
 
 **Blocked by:** None — can start immediately

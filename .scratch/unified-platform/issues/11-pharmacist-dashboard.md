@@ -1,5 +1,7 @@
 # 11 — Pharmacist dashboard
 
+PR batch: B
+
 **What to build:** The pharmacist's working surface. They sign in and their review queue is already in front of them, ranked by risk rather than by age, filterable and sortable so they can work through one category at a time. Opening a case shows the drafted protocol beside the evidence that produced it and the alternatives with their stated confidence, so the judgement can be made without leaving the page. They approve, edit or reject — and an edit is recorded as distinct from a plain approval, because the audit trail should reflect what actually happened.
 
 **Blocked by:** 03, 07, 09, 10

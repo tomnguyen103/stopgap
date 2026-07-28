@@ -15,3 +15,11 @@ export {
   type IdentifierType,
 } from "./rows.js";
 export { planImport, type ImportPlan, type RowError } from "./import.js";
+export {
+  MATCHABLE_IDENTIFIER_TYPES,
+  matchSignalToItems,
+  type MatchCandidate,
+  type MatchableIdentifierType,
+  type SignalMatch,
+  type SignalMatchHints,
+} from "./match.js";

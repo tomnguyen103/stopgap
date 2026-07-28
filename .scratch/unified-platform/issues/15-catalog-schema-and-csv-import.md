@@ -1,5 +1,7 @@
 # 15 — Catalog schema and CSV import
 
+PR batch: A
+
 **What to build:** The platform learns what this hospital actually stocks. An administrator uploads the facility's catalog — items with their many identifiers, suppliers and their sites, facilities, inventory levels and procurement history — and the platform stops guessing. This is the single largest ticket in the programme and the one that turns simulated impact assessment into real analysis.
 
 Import must be safe to get wrong: a bad file reports precisely which rows failed and why, leaves nothing behind, and a corrected re-upload does not duplicate what already landed.

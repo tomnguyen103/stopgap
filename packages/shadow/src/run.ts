@@ -1,4 +1,4 @@
-import { assessImpact, researchAlternatives } from "@stopgap/agents";
+import { assessImpact, NO_CATALOG_DATA, researchAlternatives } from "@stopgap/agents";
 import { recordShadowRun, withOrgDb } from "@stopgap/db";
 import { routeModel } from "@stopgap/providers";
 import type { ReplayEntry } from "./corpus.js";
@@ -30,7 +30,7 @@ export async function runShadowEntry(orgId: string, entry: ReplayEntry): Promise
     );
   }
   const start = Date.now();
-  const impact = await assessImpact(entry.record);
+  const impact = await assessImpact(entry.record, NO_CATALOG_DATA);
   const research = await researchAlternatives(entry.record);
   const latencyMs = Date.now() - start;
 

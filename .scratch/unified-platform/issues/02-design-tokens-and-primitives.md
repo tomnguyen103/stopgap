@@ -1,5 +1,7 @@
 # 02 — Design tokens and shared primitives
 
+PR batch: B
+
 **What to build:** The console's existing dark identity becomes a real design system rather than a single hand-written stylesheet, so the four dashboards can be built from shared parts instead of bespoke markup. The current palette — surface, panel, line, text, muted, accent and the severity ramp — is declared as the token layer, and a small set of presentational primitives is built on those tokens.
 
 **Blocked by:** None — can start immediately

@@ -1,5 +1,7 @@
 # 17 — Administrator dashboard
 
+PR batch: C
+
 **What to build:** The administrator's operations surface. They land on what still needs configuring and whether the system is healthy. From here they load and inspect the facility's catalog, see which items are sole-sourced, check whether any data feed has gone quiet, and manage the access that everything else depends on.
 
 **Blocked by:** 03, 15, 16

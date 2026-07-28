@@ -1,5 +1,7 @@
 # 08 — Viewer dashboard
 
+PR batch: B
+
 **What to build:** The first real dashboard. Someone with read-only access — including an anonymous demo visitor — opens the console and sees the facility's current exposure at a glance: how many cases are open, awaiting review and in the exception queue, which cases carry the most risk, and what signals the system is reacting to. They can search, filter, sort and page through those signals, and share the exact view they are looking at as a link.
 
 Crucially, this ships while the score is still incomplete, and says so. Stock-level and supplier-concentration components stay dark until catalog data lands, and the dashboard states that rather than presenting a partial number as whole.

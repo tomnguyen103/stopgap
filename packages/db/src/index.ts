@@ -179,3 +179,9 @@ export type {
   NewShadowRunRow,
   DailyBriefRow,
 } from "./schema.js";
+export {
+  BURN_WINDOW_DAYS,
+  catalogExposure,
+  matchSignalToCatalog,
+  type CatalogExposureReading,
+} from "./matching.js";
