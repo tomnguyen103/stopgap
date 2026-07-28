@@ -311,6 +311,9 @@ importers:
       '@stopgap/alerts':
         specifier: workspace:*
         version: link:../alerts
+      '@stopgap/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@stopgap/comms':
         specifier: workspace:*
         version: link:../comms

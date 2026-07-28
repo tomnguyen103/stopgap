@@ -27,6 +27,7 @@
     "@stopgap/comms": "workspace:*",
     "@stopgap/scorer": "workspace:*",
     "@stopgap/alerts": "workspace:*",
+    "@stopgap/catalog": "workspace:*",
     "@stopgap/compliance": "workspace:*"
   },
   "devDependencies": {
