@@ -2,6 +2,7 @@ import { isRole, type Role } from "@stopgap/core";
 import { SEED_ORG_ID, getUserRoles, upsertUserByOidc, withOrgDb } from "@stopgap/db";
 import NextAuth, { type NextAuthResult } from "next-auth";
 import { authConfig } from "./auth.config";
+import { resolveRoles } from "./app/lib/role-claims";
 import { isSignInAllowed } from "./app/lib/sign-in-guard";
 
 /**
@@ -17,18 +18,6 @@ import { isSignInAllowed } from "./app/lib/sign-in-guard";
  * silently provisioning a clinician into the wrong hospital) and it is not in this PR.
  */
 const DEFAULT_PROVISIONING_ORG_ID = SEED_ORG_ID;
-
-/**
- * Roles a caller holds come from EITHER source, unioned: locally-granted roles in `user_roles`
- * (the admin-managed store) and realm roles asserted by the IdP token (`realm_access.roles`,
- * how the seeded Keycloak demo users get theirs without a manual grant). Both are filtered to
- * the known `Role` set, so an unrecognized IdP role is ignored rather than trusted.
- */
-function realmRolesFrom(profile: unknown): Role[] {
-  const claim = (profile as { realm_access?: { roles?: unknown } })?.realm_access?.roles;
-  if (!Array.isArray(claim)) return [];
-  return claim.filter((r): r is Role => typeof r === "string" && isRole(r));
-}
 
 /**
  * Node-runtime Auth.js instance (PHASE6 §6.1). Spreads the edge-safe `authConfig` and adds the
@@ -72,7 +61,9 @@ const nextAuth = NextAuth({
         // above was for. Reading roles unscoped would have been the one place a grant could be
         // resolved without any tenant in the picture.
         const dbRoles = await withOrgDb(user.orgId, (db) => getUserRoles(db, user.orgId, user.id));
-        token.roles = Array.from(new Set([...dbRoles, ...realmRolesFrom(profile)]));
+        // Local grants unioned with the IdP's realm claims, both filtered to the roles this build
+        // knows — the rule lives in `role-claims.ts` so it is unit-tested without a live realm.
+        token.roles = resolveRoles(dbRoles, profile);
         if (typeof profile.email === "string") token.email = profile.email;
         if (typeof profile.name === "string") token.name = profile.name;
       }
