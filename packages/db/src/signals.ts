@@ -47,6 +47,24 @@ export interface PersistableSignal {
 export const FEED_ABSENT_THRESHOLD = 3;
 
 /**
+ * Collapse a batch onto one row per dedupe key, keeping the LAST occurrence.
+ *
+ * Not tidiness — `ON CONFLICT DO UPDATE` refuses to touch the same row twice in one statement
+ * ("command cannot affect row a second time"), so a single repeated key aborts the whole tenant's
+ * write rather than the one row. A feed can legitimately produce the repeat: the openFDA mapper
+ * derives its `sourceId` from a hash of (generic name, presentation), and two records that agree
+ * on both are the same signal reported twice.
+ *
+ * Last wins, because the feed orders its own records and the later one is the more recent
+ * statement of the same hazard.
+ */
+export function dedupeByKey<T extends { dedupeKey: string }>(signals: T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const signal of signals) byKey.set(signal.dedupeKey, signal);
+  return [...byKey.values()];
+}
+
+/**
  * Insert or restate this tenant's signals, keyed on the contract's dedupe key.
  *
  * `feedMissCount` is reset to 0 on every upsert: the signal is in the feed right now, which is the
@@ -60,7 +78,8 @@ export async function upsertSignals(
   signals: PersistableSignal[],
 ): Promise<number> {
   if (signals.length === 0) return 0;
-  for (const signal of signals) {
+  const unique = dedupeByKey(signals);
+  for (const signal of unique) {
     if (!signal.dedupeKey.startsWith(`${orgId}:`)) {
       // A signal normalized for ANOTHER tenant must never be written into this one.
       //
@@ -78,7 +97,7 @@ export async function upsertSignals(
   await db
     .insert(riskSignals)
     .values(
-      signals.map((signal) => ({
+      unique.map((signal) => ({
         orgId,
         source: signal.source,
         sourceId: signal.sourceId,
@@ -125,7 +144,7 @@ export async function upsertSignals(
         updatedAt: sql`now()`,
       },
     });
-  return signals.length;
+  return unique.length;
 }
 
 /**
@@ -277,25 +296,31 @@ export async function latestScoresForSignals(
   signalIds: string[],
 ): Promise<Map<string, { score: number; band: string; scorerVersion: string }>> {
   if (signalIds.length === 0) return new Map();
+  // DISTINCT ON, not "read the history and keep the first of each in JS": this table is append-only
+  // by design, so every score ever recorded for these signals would otherwise cross the wire on
+  // every dashboard render and be discarded. Postgres does the same work against
+  // `risk_score_snapshots_signal_idx` and returns one row per signal.
+  //
+  // `id` still breaks the tie: the unique index permits two scorer versions at one instant, so
+  // ordering on the timestamp alone would let the planner pick either one.
   const rows = await db
-    .select()
+    .selectDistinctOn([riskScoreSnapshots.signalId])
     .from(riskScoreSnapshots)
     .where(
       and(eq(riskScoreSnapshots.orgId, orgId), inArray(riskScoreSnapshots.signalId, signalIds)),
     )
-    // `id` breaks the tie: the unique index permits two scorer versions at one instant, so
-    // ordering on the timestamp alone would let the planner pick either one.
-    .orderBy(desc(riskScoreSnapshots.computedAt), desc(riskScoreSnapshots.id));
+    .orderBy(
+      riskScoreSnapshots.signalId,
+      desc(riskScoreSnapshots.computedAt),
+      desc(riskScoreSnapshots.id),
+    );
   const out = new Map<string, { score: number; band: string; scorerVersion: string }>();
-  // Rows arrive newest-first, so the FIRST row seen for a signal is its latest snapshot.
   for (const row of rows) {
-    if (!out.has(row.signalId)) {
-      out.set(row.signalId, {
-        score: Number(row.score),
-        band: row.band,
-        scorerVersion: row.scorerVersion,
-      });
-    }
+    out.set(row.signalId, {
+      score: Number(row.score),
+      band: row.band,
+      scorerVersion: row.scorerVersion,
+    });
   }
   return out;
 }

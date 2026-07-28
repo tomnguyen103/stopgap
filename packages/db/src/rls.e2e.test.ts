@@ -205,10 +205,15 @@ const TENANT_TABLES: TenantTable[] = [
   {
     name: "risk_score_snapshots",
     readOthers: (tx) => tx`select id from risk_score_snapshots where id = ${ID.scoreB}`,
+    // The snapshot points at the org's OWN signal. `risk_score_snapshots` FKs `signal_id` alone,
+    // and referential integrity checks bypass RLS, so a fixture pairing one org's id with another
+    // org's signal would insert cleanly — writing a cross-tenant pairing into the suite that is
+    // supposed to prove tenants stay apart. What this row must isolate is the `org_id` column.
     insertAs: (tx, org) =>
       tx`insert into risk_score_snapshots (org_id, signal_id, score, band, components,
                                            scorer_version)
-         values (${org}, ${ID.signalA}, 1, 'low', '{}'::jsonb, ${"v-" + org.slice(0, 4)})`,
+         values (${org}, ${org === ORG_A ? ID.signalA : ID.signalB}, 1, 'low', '{}'::jsonb,
+                 ${"v-" + org.slice(0, 4)})`,
     readAll: (tx) => tx`select id from risk_score_snapshots`,
     updateOthers: (tx) =>
       tx`update risk_score_snapshots set band = 'hijacked' where id = ${ID.scoreB} returning id`,

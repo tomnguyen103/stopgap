@@ -57,6 +57,7 @@ ALTER TABLE "risk_score_snapshots" ADD CONSTRAINT "risk_score_snapshots_signal_i
 ALTER TABLE "risk_signals" ADD CONSTRAINT "risk_signals_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "risk_score_snapshots_point_uq" ON "risk_score_snapshots" USING btree ("org_id","signal_id","scorer_version","computed_at");--> statement-breakpoint
 CREATE INDEX "risk_score_snapshots_rank_idx" ON "risk_score_snapshots" USING btree ("org_id","computed_at","score");--> statement-breakpoint
+CREATE INDEX "risk_score_snapshots_signal_idx" ON "risk_score_snapshots" USING btree ("org_id","signal_id","computed_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "risk_signals_dedupe_uq" ON "risk_signals" USING btree ("org_id","dedupe_key");--> statement-breakpoint
 CREATE INDEX "risk_signals_domain_idx" ON "risk_signals" USING btree ("org_id","risk_domain","published_at");--> statement-breakpoint
 CREATE INDEX "risk_signals_entity_idx" ON "risk_signals" USING btree ("org_id","entity_identifier");--> statement-breakpoint
