@@ -26,6 +26,8 @@ const {
   CONSOLE_ACTIONS,
   roleSatisfies,
   roleLandingRoute,
+  canViewGroup,
+  DASHBOARD_GROUPS,
   ROLE_LANDING_ROUTE,
 } = await import("./authz");
 
@@ -115,7 +117,9 @@ describe("requireRole (server-enforced guard)", () => {
 
   it("REFUSES a pharmacist approving a protocol version (privilege escalation fails server-side)", async () => {
     resolvePrincipal.mockResolvedValue(principal(["pharmacist"]));
-    await expect(requireRole("approve_protocol_version")).rejects.toBeInstanceOf(AuthorizationError);
+    await expect(requireRole("approve_protocol_version")).rejects.toBeInstanceOf(
+      AuthorizationError,
+    );
   });
 
   it("REFUSES a pharmacist managing users", async () => {
@@ -125,7 +129,9 @@ describe("requireRole (server-enforced guard)", () => {
 
   it("lets a pharmacy_director approve a protocol version", async () => {
     resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
-    await expect(requireRole("approve_protocol_version")).resolves.toMatchObject({ authenticated: true });
+    await expect(requireRole("approve_protocol_version")).resolves.toMatchObject({
+      authenticated: true,
+    });
   });
 
   it("REFUSES a pharmacy_director managing users", async () => {
@@ -147,7 +153,9 @@ describe("requireRole (server-enforced guard)", () => {
 
   it("honours a multi-role user by their highest role", async () => {
     resolvePrincipal.mockResolvedValue(principal(["viewer", "pharmacy_director"]));
-    await expect(requireRole("approve_protocol_version")).resolves.toMatchObject({ authenticated: true });
+    await expect(requireRole("approve_protocol_version")).resolves.toMatchObject({
+      authenticated: true,
+    });
     await expect(requireRole("manage_users")).rejects.toBeInstanceOf(AuthorizationError);
   });
 });
@@ -182,7 +190,9 @@ describe("role landing route", () => {
   });
 
   it("lands a multi-role user on their HIGHEST role's dashboard", () => {
-    expect(roleLandingRoute(["viewer", "pharmacy_director"])).toBe(ROLE_LANDING_ROUTE.pharmacy_director);
+    expect(roleLandingRoute(["viewer", "pharmacy_director"])).toBe(
+      ROLE_LANDING_ROUTE.pharmacy_director,
+    );
     expect(roleLandingRoute(["admin", "viewer", "pharmacist"])).toBe(ROLE_LANDING_ROUTE.admin);
   });
 
@@ -200,7 +210,9 @@ describe("role landing route", () => {
     // Roles are unioned from IdP realm claims and local grants; an IdP can present a realm role
     // this build has never heard of. Routing must degrade, not 500 the sign-in redirect.
     expect(roleLandingRoute(["not_a_role" as Role])).toBe(ROLE_LANDING_ROUTE.viewer);
-    expect(roleLandingRoute(["not_a_role" as Role, "pharmacist"])).toBe(ROLE_LANDING_ROUTE.pharmacist);
+    expect(roleLandingRoute(["not_a_role" as Role, "pharmacist"])).toBe(
+      ROLE_LANDING_ROUTE.pharmacist,
+    );
   });
 
   it("never returns an external or protocol-relative destination", () => {
@@ -211,5 +223,60 @@ describe("role landing route", () => {
       expect(route.startsWith("/")).toBe(true);
       expect(route.startsWith("//")).toBe(false);
     }
+  });
+});
+
+/**
+ * Ticket 03 — which dashboard groups a caller may SEE.
+ *
+ * Visibility, never permission. Every assertion here is about what renders; what a caller may DO
+ * is `assertRoleFor`, tested above, and reaching a route changes none of it.
+ */
+describe("canViewGroup", () => {
+  it("admits a caller to their own group and to every group below it", () => {
+    expect(DASHBOARD_GROUPS.every((g) => canViewGroup(["admin"], g))).toBe(true);
+    expect(canViewGroup(["pharmacy_director"], "viewer")).toBe(true);
+    expect(canViewGroup(["pharmacy_director"], "pharmacist")).toBe(true);
+    expect(canViewGroup(["pharmacy_director"], "pharmacy_director")).toBe(true);
+  });
+
+  it("refuses a group above the caller's rank", () => {
+    expect(canViewGroup(["viewer"], "pharmacist")).toBe(false);
+    expect(canViewGroup(["pharmacist"], "pharmacy_director")).toBe(false);
+    expect(canViewGroup(["pharmacy_director"], "admin")).toBe(false);
+  });
+
+  it("takes the HIGHEST role, like every other rule in this module", () => {
+    expect(canViewGroup(["viewer", "pharmacy_director"], "pharmacist")).toBe(true);
+  });
+
+  it("lets the anonymous visitor reach the viewer surface, and nothing above it", () => {
+    expect(canViewGroup([], "viewer")).toBe(true);
+    expect(canViewGroup([], "pharmacist")).toBe(false);
+  });
+
+  it("skips a role this build does not know rather than throwing", () => {
+    // An IdP may legitimately present a realm role a given deploy has never heard of; a throw here
+    // would turn that into a failed sign-in rather than a harmless degrade to `viewer`.
+    const roles = ["not_a_role", "pharmacist"] as unknown as Role[];
+    expect(canViewGroup(roles, "pharmacist")).toBe(true);
+    expect(canViewGroup(roles, "admin")).toBe(false);
+  });
+
+  /**
+   * The property that makes the root redirect terminate.
+   *
+   * `/` sends a caller to `roleLandingRoute(roles)`; that route's group layout then asks
+   * `canViewGroup`. If any role could be sent somewhere it may not see, the two would bounce the
+   * request between them forever.
+   */
+  it("never sends a caller to a landing route their own roles cannot view", () => {
+    for (const group of DASHBOARD_GROUPS) {
+      const landing = roleLandingRoute([group]);
+      const owner = DASHBOARD_GROUPS.find((g) => ROLE_LANDING_ROUTE[g] === landing);
+      expect(owner).toBeDefined();
+      expect(canViewGroup([group], owner!)).toBe(true);
+    }
+    expect(canViewGroup([], "viewer")).toBe(true);
   });
 });

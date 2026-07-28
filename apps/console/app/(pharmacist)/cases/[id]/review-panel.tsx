@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { resolveExceptionCase, reviewCase } from "../../lib/actions";
+import { resolveExceptionCase, reviewCase } from "../../../lib/actions";
 
 /**
  * The HITL gate (PROJECT_PLAN §2). A case sitting in `awaiting_review` blocks its workflow

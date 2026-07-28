@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { Role } from "@stopgap/core";
-import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../lib/actions";
+import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../../lib/actions";
 
 /**
  * Role management UI (PHASE6 §6.1). A thin client over the admin server actions — each role is a

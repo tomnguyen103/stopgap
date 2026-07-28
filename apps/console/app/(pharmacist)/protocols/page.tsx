@@ -1,5 +1,5 @@
-import { getProtocols } from "../lib/data";
-import { Card, Table } from "../components/ui";
+import { getProtocols } from "../../lib/data";
+import { Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 

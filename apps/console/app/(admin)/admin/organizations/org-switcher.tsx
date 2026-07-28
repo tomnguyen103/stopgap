@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setActiveOrgAction } from "../../lib/actions";
+import { setActiveOrgAction } from "../../../lib/actions";
 
 /**
  * The admin active-org switch (PHASE6 §6.5) — a thin client over `setActiveOrgAction`.

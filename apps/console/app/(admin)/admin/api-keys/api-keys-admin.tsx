@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { issueApiKeyAction, revokeApiKeyAction } from "../../lib/actions";
+import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
 
 /**
  * API key management UI (PHASE6 §6.7). A thin client over the admin server actions, which re-check

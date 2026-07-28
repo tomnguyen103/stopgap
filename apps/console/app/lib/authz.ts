@@ -12,7 +12,10 @@ import { ROLES, type Role } from "@stopgap/core";
  */
 
 /** viewer < pharmacist < pharmacy_director < admin — the index in `ROLES` is the rank. */
-const RANK: Record<Role, number> = Object.fromEntries(ROLES.map((r, i) => [r, i])) as Record<Role, number>;
+const RANK: Record<Role, number> = Object.fromEntries(ROLES.map((r, i) => [r, i])) as Record<
+  Role,
+  number
+>;
 
 /**
  * Mutating actions the console/API gates — one entry per action a server action actually
