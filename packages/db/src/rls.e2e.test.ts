@@ -65,6 +65,23 @@ const ID = {
   ackB: "bbbb0007-0000-0000-0000-000000000007",
   keyA: "aaaa0008-0000-0000-0000-000000000008",
   keyB: "bbbb0008-0000-0000-0000-000000000008",
+  // Ticket 15 — the eight catalog tables.
+  itemA: "aaaa0009-0000-0000-0000-000000000009",
+  itemB: "bbbb0009-0000-0000-0000-000000000009",
+  identA: "aaaa0010-0000-0000-0000-000000000010",
+  identB: "bbbb0010-0000-0000-0000-000000000010",
+  suppA: "aaaa0011-0000-0000-0000-000000000011",
+  suppB: "bbbb0011-0000-0000-0000-000000000011",
+  siteA: "aaaa0012-0000-0000-0000-000000000012",
+  siteB: "bbbb0012-0000-0000-0000-000000000012",
+  isupA: "aaaa0013-0000-0000-0000-000000000013",
+  isupB: "bbbb0013-0000-0000-0000-000000000013",
+  facA: "aaaa0014-0000-0000-0000-000000000014",
+  facB: "bbbb0014-0000-0000-0000-000000000014",
+  invA: "aaaa0015-0000-0000-0000-000000000015",
+  invB: "bbbb0015-0000-0000-0000-000000000015",
+  procA: "aaaa0016-0000-0000-0000-000000000016",
+  procB: "bbbb0016-0000-0000-0000-000000000016",
 } as const;
 
 /**
@@ -81,7 +98,10 @@ const db = postgres(DATABASE_URL, { max: 2, onnotice: () => undefined });
 const maint = postgres(MAINTENANCE_URL, { max: 2, onnotice: () => undefined });
 
 /** Run `fn` in a transaction scoped to one tenant — the production `withOrgDb` shape. */
-async function asOrg<T>(orgId: string, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+async function asOrg<T>(
+  orgId: string,
+  fn: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
   return db.begin(async (tx) => {
     await tx`select set_config('app.current_org', ${orgId}, true)`;
     return fn(tx);
@@ -105,6 +125,14 @@ async function seedOrg(
     demoId: string;
     ackId: string;
     keyId: string;
+    itemId: string;
+    identId: string;
+    suppId: string;
+    siteId: string;
+    isupId: string;
+    facId: string;
+    invId: string;
+    procId: string;
   },
   suffix: string,
 ) {
@@ -131,6 +159,26 @@ async function seedOrg(
     await tx`insert into audit_log (org_id, case_id, actor, action, prev_hash, hash, run_id, event_key)
              values (${orgId}, ${ids.caseId}, 'system', 'case.detected', ${"0".repeat(64)},
                      ${"h-" + suffix}, ${"run-" + suffix}, 'case.detected')`;
+
+    // Ticket 15 — one row in every catalog table, seeded from inside this org's own scope so the
+    // seed itself exercises WITH CHECK before any isolation assertion runs.
+    await tx`insert into items (id, org_id, sku, name, generic_name)
+             values (${ids.itemId}, ${orgId}, ${"sku-" + suffix}, ${"Item " + suffix}, ${"generic-" + suffix})`;
+    await tx`insert into item_identifiers (id, org_id, item_id, type, value)
+             values (${ids.identId}, ${orgId}, ${ids.itemId}, 'ndc', ${"ndc-" + suffix})`;
+    await tx`insert into suppliers (id, org_id, code, name)
+             values (${ids.suppId}, ${orgId}, ${"sup-" + suffix}, ${"Supplier " + suffix})`;
+    await tx`insert into supplier_sites (id, org_id, supplier_id, code, name)
+             values (${ids.siteId}, ${orgId}, ${ids.suppId}, ${"site-" + suffix}, 'Site')`;
+    await tx`insert into item_suppliers (id, org_id, item_id, supplier_id, site_id, preferred)
+             values (${ids.isupId}, ${orgId}, ${ids.itemId}, ${ids.suppId}, ${ids.siteId}, true)`;
+    await tx`insert into facilities (id, org_id, code, name)
+             values (${ids.facId}, ${orgId}, ${"fac-" + suffix}, ${"Facility " + suffix})`;
+    await tx`insert into inventory_snapshots (id, org_id, facility_id, item_id, on_hand, captured_at)
+             values (${ids.invId}, ${orgId}, ${ids.facId}, ${ids.itemId}, 42, '2026-07-01T00:00:00Z')`;
+    await tx`insert into procurement_events (id, org_id, facility_id, item_id, supplier_id, ordered_at, quantity)
+             values (${ids.procId}, ${orgId}, ${ids.facId}, ${ids.itemId}, ${ids.suppId},
+                     '2026-07-01T00:00:00Z', 10)`;
   });
 }
 
@@ -160,13 +208,99 @@ interface TenantTable {
 
 const TENANT_TABLES: TenantTable[] = [
   {
+    name: "items",
+    readOthers: (tx) => tx`select id from items where id = ${ID.itemB}`,
+    insertAs: (tx, org) =>
+      tx`insert into items (org_id, sku, name) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
+    readAll: (tx) => tx`select id from items`,
+    updateOthers: (tx) =>
+      tx`update items set name = 'hijacked' where id = ${ID.itemB} returning id`,
+    deleteOthers: (tx) => tx`delete from items where id = ${ID.itemB} returning id`,
+  },
+  {
+    name: "item_identifiers",
+    readOthers: (tx) => tx`select id from item_identifiers where id = ${ID.identB}`,
+    insertAs: (tx, org) =>
+      tx`insert into item_identifiers (org_id, item_id, type, value)
+         values (${org}, ${ID.itemA}, 'ndc', ${"x-" + org.slice(0, 4)})`,
+    readAll: (tx) => tx`select id from item_identifiers`,
+    updateOthers: (tx) =>
+      tx`update item_identifiers set value = 'hijacked' where id = ${ID.identB} returning id`,
+    deleteOthers: (tx) => tx`delete from item_identifiers where id = ${ID.identB} returning id`,
+  },
+  {
+    name: "suppliers",
+    readOthers: (tx) => tx`select id from suppliers where id = ${ID.suppB}`,
+    insertAs: (tx, org) =>
+      tx`insert into suppliers (org_id, code, name) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
+    readAll: (tx) => tx`select id from suppliers`,
+    updateOthers: (tx) =>
+      tx`update suppliers set name = 'hijacked' where id = ${ID.suppB} returning id`,
+    deleteOthers: (tx) => tx`delete from suppliers where id = ${ID.suppB} returning id`,
+  },
+  {
+    name: "supplier_sites",
+    readOthers: (tx) => tx`select id from supplier_sites where id = ${ID.siteB}`,
+    insertAs: (tx, org) =>
+      tx`insert into supplier_sites (org_id, supplier_id, code)
+         values (${org}, ${ID.suppA}, ${"x-" + org.slice(0, 4)})`,
+    readAll: (tx) => tx`select id from supplier_sites`,
+    updateOthers: (tx) =>
+      tx`update supplier_sites set name = 'hijacked' where id = ${ID.siteB} returning id`,
+    deleteOthers: (tx) => tx`delete from supplier_sites where id = ${ID.siteB} returning id`,
+  },
+  {
+    name: "item_suppliers",
+    readOthers: (tx) => tx`select id from item_suppliers where id = ${ID.isupB}`,
+    insertAs: (tx, org) =>
+      tx`insert into item_suppliers (org_id, item_id, supplier_id) values (${org}, ${ID.itemA}, ${ID.suppA})`,
+    readAll: (tx) => tx`select id from item_suppliers`,
+    updateOthers: (tx) =>
+      tx`update item_suppliers set preferred = false where id = ${ID.isupB} returning id`,
+    deleteOthers: (tx) => tx`delete from item_suppliers where id = ${ID.isupB} returning id`,
+  },
+  {
+    name: "facilities",
+    readOthers: (tx) => tx`select id from facilities where id = ${ID.facB}`,
+    insertAs: (tx, org) =>
+      tx`insert into facilities (org_id, code, name) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
+    readAll: (tx) => tx`select id from facilities`,
+    updateOthers: (tx) =>
+      tx`update facilities set name = 'hijacked' where id = ${ID.facB} returning id`,
+    deleteOthers: (tx) => tx`delete from facilities where id = ${ID.facB} returning id`,
+  },
+  {
+    name: "inventory_snapshots",
+    readOthers: (tx) => tx`select id from inventory_snapshots where id = ${ID.invB}`,
+    insertAs: (tx, org) =>
+      tx`insert into inventory_snapshots (org_id, facility_id, item_id, on_hand, captured_at)
+         values (${org}, ${ID.facA}, ${ID.itemA}, 1, '2026-01-01T00:00:00Z')`,
+    readAll: (tx) => tx`select id from inventory_snapshots`,
+    updateOthers: (tx) =>
+      tx`update inventory_snapshots set on_hand = 0 where id = ${ID.invB} returning id`,
+    deleteOthers: (tx) => tx`delete from inventory_snapshots where id = ${ID.invB} returning id`,
+  },
+  {
+    name: "procurement_events",
+    readOthers: (tx) => tx`select id from procurement_events where id = ${ID.procB}`,
+    insertAs: (tx, org) =>
+      tx`insert into procurement_events (org_id, facility_id, item_id, ordered_at, quantity)
+         values (${org}, ${ID.facA}, ${ID.itemA}, '2026-01-01T00:00:00Z', 1)`,
+    readAll: (tx) => tx`select id from procurement_events`,
+    updateOthers: (tx) =>
+      tx`update procurement_events set quantity = 0 where id = ${ID.procB} returning id`,
+    deleteOthers: (tx) => tx`delete from procurement_events where id = ${ID.procB} returning id`,
+  },
+
+  {
     name: "cases",
     readOthers: (tx) => tx`select id from cases where id = ${ID.caseB}`,
     insertAs: (tx, org) =>
       tx`insert into cases (org_id, workflow_id, key, generic_name, source, source_id)
          values (${org}, ${"case-x-" + org.slice(0, 4)}, 'x', 'X', 'openfda', 'sx')`,
     readAll: (tx) => tx`select id from cases`,
-    updateOthers: (tx) => tx`update cases set last_note = 'hijacked' where id = ${ID.caseB} returning id`,
+    updateOthers: (tx) =>
+      tx`update cases set last_note = 'hijacked' where id = ${ID.caseB} returning id`,
     deleteOthers: (tx) => tx`delete from cases where id = ${ID.caseB} returning id`,
   },
   {
@@ -175,7 +309,8 @@ const TENANT_TABLES: TenantTable[] = [
     insertAs: (tx, org) =>
       tx`insert into protocols (org_id, key, title) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
     readAll: (tx) => tx`select id from protocols`,
-    updateOthers: (tx) => tx`update protocols set title = 'hijacked' where id = ${ID.protocolB} returning id`,
+    updateOthers: (tx) =>
+      tx`update protocols set title = 'hijacked' where id = ${ID.protocolB} returning id`,
     deleteOthers: (tx) => tx`delete from protocols where id = ${ID.protocolB} returning id`,
   },
   {
@@ -185,7 +320,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into protocol_versions (org_id, protocol_id, version, body, authored_by)
          values (${org}, ${ID.protocolA}, 99, 'x', 'agent')`,
     readAll: (tx) => tx`select id from protocol_versions`,
-    updateOthers: (tx) => tx`update protocol_versions set body = 'hijacked' where id = ${ID.versionB} returning id`,
+    updateOthers: (tx) =>
+      tx`update protocol_versions set body = 'hijacked' where id = ${ID.versionB} returning id`,
     deleteOthers: (tx) => tx`delete from protocol_versions where id = ${ID.versionB} returning id`,
   },
   {
@@ -196,7 +332,8 @@ const TENANT_TABLES: TenantTable[] = [
                                   agreement, severity_agreed, latency_ms, usd_cost, provider, model_id)
          values (${org}, 'cx', 'x', 'high', 'high', 1.0, true, 1, 0.001, 'test', 'm')`,
     readAll: (tx) => tx`select id from shadow_runs`,
-    updateOthers: (tx) => tx`update shadow_runs set model_id = 'hijacked' where id = ${ID.shadowB} returning id`,
+    updateOthers: (tx) =>
+      tx`update shadow_runs set model_id = 'hijacked' where id = ${ID.shadowB} returning id`,
     deleteOthers: (tx) => tx`delete from shadow_runs where id = ${ID.shadowB} returning id`,
   },
   {
@@ -206,7 +343,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into audit_log (org_id, actor, action, prev_hash, hash, run_id, event_key)
          values (${org}, 'system', 'x', ${"0".repeat(64)}, ${"hx-" + org.slice(0, 4)}, 'rx', 'x')`,
     readAll: (tx) => tx`select id from audit_log`,
-    updateOthers: (tx) => tx`update audit_log set hash = 'hijacked' where org_id = ${ORG_B} returning id`,
+    updateOthers: (tx) =>
+      tx`update audit_log set hash = 'hijacked' where org_id = ${ORG_B} returning id`,
     deleteOthers: (tx) => tx`delete from audit_log where org_id = ${ORG_B} returning id`,
   },
   {
@@ -215,7 +353,8 @@ const TENANT_TABLES: TenantTable[] = [
     insertAs: (tx, org) =>
       tx`insert into users (org_id, oidc_subject) values (${org}, ${"sub-x-" + org.slice(0, 4)})`,
     readAll: (tx) => tx`select id from users`,
-    updateOthers: (tx) => tx`update users set display_name = 'hijacked' where id = ${ID.userB} returning id`,
+    updateOthers: (tx) =>
+      tx`update users set display_name = 'hijacked' where id = ${ID.userB} returning id`,
     deleteOthers: (tx) => tx`delete from users where id = ${ID.userB} returning id`,
   },
   {
@@ -223,7 +362,8 @@ const TENANT_TABLES: TenantTable[] = [
     readOthers: (tx) => tx`select id from demo_runs where id = ${ID.demoB}`,
     insertAs: (tx, org) => tx`insert into demo_runs (org_id, key) values (${org}, 'x')`,
     readAll: (tx) => tx`select id from demo_runs`,
-    updateOthers: (tx) => tx`update demo_runs set key = 'hijacked' where id = ${ID.demoB} returning id`,
+    updateOthers: (tx) =>
+      tx`update demo_runs set key = 'hijacked' where id = ${ID.demoB} returning id`,
     deleteOthers: (tx) => tx`delete from demo_runs where id = ${ID.demoB} returning id`,
   },
   {
@@ -233,7 +373,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into acknowledgments (org_id, case_id, user_id, step)
          values (${org}, ${ID.caseA}, ${ID.userA}, 99)`,
     readAll: (tx) => tx`select id from acknowledgments`,
-    updateOthers: (tx) => tx`update acknowledgments set step = 42 where id = ${ID.ackB} returning id`,
+    updateOthers: (tx) =>
+      tx`update acknowledgments set step = 42 where id = ${ID.ackB} returning id`,
     deleteOthers: (tx) => tx`delete from acknowledgments where id = ${ID.ackB} returning id`,
   },
   {
@@ -243,7 +384,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into api_keys (org_id, name, key_hash, key_prefix)
          values (${org}, 'x', ${"hash-x-" + org.slice(0, 4)}, 'sk_live_xxxxxx')`,
     readAll: (tx) => tx`select id from api_keys`,
-    updateOthers: (tx) => tx`update api_keys set revoked_at = now() where id = ${ID.keyB} returning id`,
+    updateOthers: (tx) =>
+      tx`update api_keys set revoked_at = now() where id = ${ID.keyB} returning id`,
     deleteOthers: (tx) => tx`delete from api_keys where id = ${ID.keyB} returning id`,
   },
 ];
@@ -278,6 +420,14 @@ beforeAll(async () => {
       demoId: ID.demoA,
       ackId: ID.ackA,
       keyId: ID.keyA,
+      itemId: ID.itemA,
+      identId: ID.identA,
+      suppId: ID.suppA,
+      siteId: ID.siteA,
+      isupId: ID.isupA,
+      facId: ID.facA,
+      invId: ID.invA,
+      procId: ID.procA,
     },
     "a",
   );
@@ -292,6 +442,14 @@ beforeAll(async () => {
       demoId: ID.demoB,
       ackId: ID.ackB,
       keyId: ID.keyB,
+      itemId: ID.itemB,
+      identId: ID.identB,
+      suppId: ID.suppB,
+      siteId: ID.siteB,
+      isupId: ID.isupB,
+      facId: ID.facB,
+      invId: ID.invB,
+      procId: ID.procB,
     },
     "b",
   );
@@ -310,6 +468,16 @@ afterAll(async () => {
       await tx`delete from api_keys where org_id = ${org}`;
       await tx`delete from cases where org_id = ${org}`;
       await tx`delete from users where org_id = ${org}`;
+      // Catalog teardown runs child-first: the FKs cascade, but an explicit order keeps the
+      // failure message useful if a policy ever stops one of these deletes from reaching a row.
+      await tx`delete from procurement_events where org_id = ${org}`;
+      await tx`delete from inventory_snapshots where org_id = ${org}`;
+      await tx`delete from item_suppliers where org_id = ${org}`;
+      await tx`delete from item_identifiers where org_id = ${org}`;
+      await tx`delete from supplier_sites where org_id = ${org}`;
+      await tx`delete from suppliers where org_id = ${org}`;
+      await tx`delete from facilities where org_id = ${org}`;
+      await tx`delete from items where org_id = ${org}`;
     });
   }
   // `audit_anchors` takes no writes from a tenant connection at all (migration 0014), so its rows
@@ -422,8 +590,14 @@ describe("an unscoped session sees NOTHING (fail-closed)", () => {
  */
 describe("the audit chain is per-org", () => {
   it("each org sees only its own chain, so verification is a per-tenant question", async () => {
-    const a = await asOrg(ORG_A, (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`);
-    const b = await asOrg(ORG_B, (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`);
+    const a = await asOrg(
+      ORG_A,
+      (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`,
+    );
+    const b = await asOrg(
+      ORG_B,
+      (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`,
+    );
     expect(a.length).toBeGreaterThan(0);
     expect(b.length).toBeGreaterThan(0);
     expect(a.every((r) => r.org_id === ORG_A)).toBe(true);
@@ -438,7 +612,10 @@ describe("the audit chain is per-org", () => {
     // Both fixtures were seeded with prev_hash = GENESIS. The point of asserting it here rather
     // than in a unit test is that org B's first row was written while org A already HAD rows: a
     // global chain would have linked it to org A's head, which is the bug per-org chaining fixes.
-    const [first] = await asOrg(ORG_B, (tx) => tx`select prev_hash from audit_log order by id limit 1`);
+    const [first] = await asOrg(
+      ORG_B,
+      (tx) => tx`select prev_hash from audit_log order by id limit 1`,
+    );
     expect(first?.prev_hash).toBe("0".repeat(64));
   });
 
@@ -475,8 +652,14 @@ describe("audit_anchors carry an org (migration 0014)", () => {
    * anchor rows, with `verifyAnchors`'s application-level org filter as the only thing in the way.
    */
   it("a tenant cannot read, rewrite or delete another tenant's anchors", async () => {
-    const headA = await asOrg(ORG_A, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
-    const headB = await asOrg(ORG_B, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
+    const headA = await asOrg(
+      ORG_A,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
+    const headB = await asOrg(
+      ORG_B,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
     // Written on the maintenance path (unscoped here) — which is how anchoring actually runs.
     // Each anchor test tags its rows with its own `sink` so the two can coexist until `afterAll`
     // tears them down; `audit_anchors.id` is a `bigserial`, so there is no deterministic id to key
@@ -509,8 +692,14 @@ describe("audit_anchors carry an org (migration 0014)", () => {
   });
 
   it("anchors from two orgs stay attributable to their own chains", async () => {
-    const headA = await asOrg(ORG_A, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
-    const headB = await asOrg(ORG_B, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
+    const headA = await asOrg(
+      ORG_A,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
+    const headB = await asOrg(
+      ORG_B,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
     expect(headA[0]).toBeDefined();
     expect(headB[0]).toBeDefined();
     // `audit_anchors` takes only READS from a tenant (migration 0014); writes belong to the

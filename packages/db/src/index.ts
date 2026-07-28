@@ -115,6 +115,7 @@ export {
   type IssueApiKeyInput,
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
+export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
 export type {
   OrganizationRow,
   NewOrganizationRow,

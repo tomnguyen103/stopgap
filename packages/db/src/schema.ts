@@ -100,7 +100,10 @@ export const cases = pgTable(
      * from the current run, making the per-poll counter update idempotent under retry.
      */
     lastFeedPollRun: text("last_feed_poll_run"),
-    ndcs: jsonb("ndcs").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    ndcs: jsonb("ndcs")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     lastNote: text("last_note"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -176,7 +179,9 @@ export const users = pgTable(
     // The cost is real and accepted: a pharmacist covering two facilities needs two IdP subjects
     // today. The fix, if it is ever wanted, is a `user_organizations` join table plus an org
     // picker after sign-in — a feature with its own UI, not a silently relaxed index.
-    uniqueIndex("users_oidc_subject_uq").on(t.oidcSubject).where(sql`${t.oidcSubject} is not null`),
+    uniqueIndex("users_oidc_subject_uq")
+      .on(t.oidcSubject)
+      .where(sql`${t.oidcSubject} is not null`),
     index("users_org_idx").on(t.orgId),
   ],
 );
@@ -228,7 +233,10 @@ export const escalationPolicies = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     severity: text("severity").notNull(),
-    steps: jsonb("steps").$type<EscalationStep[]>().notNull().default(sql`'[]'::jsonb`),
+    steps: jsonb("steps")
+      .$type<EscalationStep[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("escalation_policies_severity_uq").on(t.severity)],
@@ -377,44 +385,48 @@ export const auditLog = pgTable(
  * 0014 also gives it RLS, with a deliberately ASYMMETRIC policy — SELECT only, no write policy at
  * all. See the index/policy block at the bottom of this table for what that buys and why.
  */
-export const auditAnchors = pgTable("audit_anchors", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
-  /**
-   * The tenant whose chain head this anchor pins (PHASE6 §6.5, migration 0014). NOT NULL:
-   * migration 0014 backfills every pre-existing anchor to the seed org, which is the tenant whose
-   * chain those anchors were in fact taken over — before 0013 there was only one.
-   */
-  orgId: uuid("org_id")
-    .notNull()
-    .references(() => organizations.id),
-  /** When this anchor was taken (the head it pins is the chain as of this moment). */
-  ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
-  /** Highest `audit_log.id` covered by this anchor, WITHIN `orgId`'s chain. */
-  maxAuditId: bigint("max_audit_id", { mode: "number" }).notNull(),
-  /** Hash of row `maxAuditId` at anchor time — the value re-verification compares against. */
-  headHash: text("head_hash").notNull(),
-  /** Where the anchor was written: `file` (always) or `tsa` (RFC 3161 token obtained). */
-  sink: text("sink").notNull(),
-  /** Reference into the sink — the anchor file path, or the base64 TSA token. Nullable. */
-  sinkRef: text("sink_ref"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [
-  // Verification reads anchors newest-first per org; the org leads so one tenant's history check
-  // does not walk every other tenant's anchors first.
-  index("audit_anchors_org_idx").on(t.orgId, t.id),
-  // RLS: SELECT-only, since migration 0014. This table is a hybrid and the asymmetry is the design.
-  // READS are scoped like any tenant table — an org may see the anchors that pin its own chain and
-  // nothing else, because anchor metadata (when a tenant last appended, how much history it has) is
-  // still that tenant's information. WRITES are left entirely to the maintenance (BYPASSRLS) role:
-  // there is no INSERT/UPDATE/DELETE policy, so an org-scoped connection cannot touch a row at all.
-  //
-  // That is what keeps BOTH properties. A tenant cannot opt out of being anchored (it cannot delete
-  // or rewrite its anchors, and cannot stop the maintenance role writing new ones), and it also
-  // cannot reach another tenant's anchors — which, before this, it could: with no policy at all, an
-  // ordinary org-scoped connection could UPDATE or DELETE every other hospital's anchor rows, and
-  // `verifyAnchors`'s explicit org filter was the only thing standing between a tenant and every
-  // other tenant's integrity metadata.
-]);
+export const auditAnchors = pgTable(
+  "audit_anchors",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    /**
+     * The tenant whose chain head this anchor pins (PHASE6 §6.5, migration 0014). NOT NULL:
+     * migration 0014 backfills every pre-existing anchor to the seed org, which is the tenant whose
+     * chain those anchors were in fact taken over — before 0013 there was only one.
+     */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** When this anchor was taken (the head it pins is the chain as of this moment). */
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    /** Highest `audit_log.id` covered by this anchor, WITHIN `orgId`'s chain. */
+    maxAuditId: bigint("max_audit_id", { mode: "number" }).notNull(),
+    /** Hash of row `maxAuditId` at anchor time — the value re-verification compares against. */
+    headHash: text("head_hash").notNull(),
+    /** Where the anchor was written: `file` (always) or `tsa` (RFC 3161 token obtained). */
+    sink: text("sink").notNull(),
+    /** Reference into the sink — the anchor file path, or the base64 TSA token. Nullable. */
+    sinkRef: text("sink_ref"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Verification reads anchors newest-first per org; the org leads so one tenant's history check
+    // does not walk every other tenant's anchors first.
+    index("audit_anchors_org_idx").on(t.orgId, t.id),
+    // RLS: SELECT-only, since migration 0014. This table is a hybrid and the asymmetry is the design.
+    // READS are scoped like any tenant table — an org may see the anchors that pin its own chain and
+    // nothing else, because anchor metadata (when a tenant last appended, how much history it has) is
+    // still that tenant's information. WRITES are left entirely to the maintenance (BYPASSRLS) role:
+    // there is no INSERT/UPDATE/DELETE policy, so an org-scoped connection cannot touch a row at all.
+    //
+    // That is what keeps BOTH properties. A tenant cannot opt out of being anchored (it cannot delete
+    // or rewrite its anchors, and cannot stop the maintenance role writing new ones), and it also
+    // cannot reach another tenant's anchors — which, before this, it could: with no policy at all, an
+    // ordinary org-scoped connection could UPDATE or DELETE every other hospital's anchor rows, and
+    // `verifyAnchors`'s explicit org filter was the only thing standing between a tenant and every
+    // other tenant's integrity metadata.
+  ],
+);
 
 /**
  * Raw feed records for dedup + provenance; `(source, sourceId)` is unique.
@@ -497,7 +509,10 @@ export const protocolVersions = pgTable(
     state: text("state").notNull().default("draft"),
     body: text("body").notNull(),
     /** Alternatives the protocol authorizes, in the order a pharmacist should consider them. */
-    alternatives: jsonb("alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    alternatives: jsonb("alternatives")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** The case whose resolution produced this version — the provenance link. */
     sourceCaseId: uuid("source_case_id").references(() => cases.id),
     /** "agent" for an agent-drafted version, a pharmacist id once a human edits/approves. */
@@ -552,9 +567,15 @@ export const shadowRuns = pgTable(
     key: text("key").notNull(),
     drugClass: text("drug_class"),
     proposedSeverity: text("proposed_severity").notNull(),
-    proposedAlternatives: jsonb("proposed_alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    proposedAlternatives: jsonb("proposed_alternatives")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     baselineSeverity: text("baseline_severity").notNull(),
-    baselineAlternatives: jsonb("baseline_alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    baselineAlternatives: jsonb("baseline_alternatives")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** 0-1 agreement against the human baseline (see @stopgap/shadow scoring). */
     agreement: numeric("agreement", { precision: 4, scale: 3 }).notNull(),
     severityAgreed: boolean("severity_agreed").notNull(),
@@ -662,7 +683,10 @@ export const apiKeys = pgTable(
      * characters are the point: the namespace alone is identical on every row.
      */
     keyPrefix: text("key_prefix").notNull(),
-    scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    scopes: jsonb("scopes")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     rateLimitPerHour: integer("rate_limit_per_hour").notNull().default(1000),
     createdByUserId: uuid("created_by_user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -711,7 +735,218 @@ export const apiKeyRequests = pgTable(
   (t) => [index("api_key_requests_key_at_idx").on(t.apiKeyId, t.at)],
 );
 
+/**
+ * ---------------------------------------------------------------------------------------------
+ * The facility catalog (ticket 15). Eight TENANT tables — what this hospital actually stocks.
+ * ---------------------------------------------------------------------------------------------
+ *
+ * Every table here carries `orgId` and an `<table>_org_isolation` policy (migration 0015). None of
+ * it is a shared external fact: two hospitals stocking the same drug hold genuinely different
+ * items, different suppliers, different contract prices and different shelves. Applying the
+ * §6.5 test — "would two orgs disagree about this row" — every one of them is tenant data, and
+ * the answer is not close.
+ *
+ * Every unique index is org-leading, so it doubles as the org-filter index and so that uniqueness
+ * means "unique WITHIN this hospital". A deployment-wide unique on `sku` or `supplier_code` would
+ * let the first tenant to upload a catalog claim those codes forever.
+ */
+
+/** One stocked product, as this facility records it. `sku` is the facility's own code for it. */
+export const items = pgTable(
+  "items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    sku: text("sku").notNull(),
+    name: text("name").notNull(),
+    /** Normalized generic name where the file gave one — the join to shortage signals. */
+    genericName: text("generic_name"),
+    unit: text("unit"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("items_sku_uq").on(t.orgId, t.sku),
+    index("items_generic_idx").on(t.orgId, t.genericName),
+  ],
+);
+
+/**
+ * The several identifiers one item carries at once.
+ *
+ * A separate table rather than columns on `items`, because facilities record products differently
+ * across systems and the set is open — a purchasing system knows a GTIN, a pharmacy system an NDC,
+ * an EHR an RxCUI, and the same physical product carries all three. Columns would force a schema
+ * change for each new system; rows do not.
+ */
+export const itemIdentifiers = pgTable(
+  "item_identifiers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    /** `ndc` | `rxcui` | `gtin` | `hibc` | `sku` — the vocabulary in `@stopgap/catalog`. */
+    type: text("type").notNull(),
+    value: text("value").notNull(),
+  },
+  (t) => [
+    // One (type, value) pair points at ONE item within a tenant. This is the key a corrected
+    // re-upload matches on, which is why it is unique rather than merely indexed.
+    uniqueIndex("item_identifiers_value_uq").on(t.orgId, t.type, t.value),
+    index("item_identifiers_item_idx").on(t.orgId, t.itemId),
+  ],
+);
+
+/** A vendor this facility buys from. */
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("suppliers_code_uq").on(t.orgId, t.code)],
+);
+
+/** A vendor's individual site. Sole-source exposure is about SITES, not about companies. */
+export const supplierSites = pgTable(
+  "supplier_sites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name"),
+    country: text("country"),
+    leadTimeDays: integer("lead_time_days"),
+  },
+  (t) => [uniqueIndex("supplier_sites_code_uq").on(t.orgId, t.supplierId, t.code)],
+);
+
+/** Which suppliers can supply which item, and on what terms. */
+export const itemSuppliers = pgTable(
+  "item_suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    /** The specific site, when the file named one. */
+    siteId: uuid("site_id").references(() => supplierSites.id, { onDelete: "set null" }),
+    contractPrice: numeric("contract_price", { precision: 14, scale: 4 }),
+    preferred: boolean("preferred").notNull().default(false),
+  },
+  (t) => [
+    // One link per (item, supplier) pair — the site is an attribute of the link, not part of its
+    // identity. Including a NULLABLE site in the key would let the same pair appear twice, once
+    // with a site and once without, because NULL is never equal to itself in a unique index.
+    uniqueIndex("item_suppliers_pair_uq").on(t.orgId, t.itemId, t.supplierId),
+    index("item_suppliers_supplier_idx").on(t.orgId, t.supplierId),
+  ],
+);
+
+/** A place that holds stock — a hospital site, a ward store, a central pharmacy. */
+export const facilities = pgTable(
+  "facilities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    code: text("code").notNull(),
+    name: text("name"),
+  },
+  (t) => [uniqueIndex("facilities_code_uq").on(t.orgId, t.code)],
+);
+
+/**
+ * On-hand stock at a point in time.
+ *
+ * A SNAPSHOT rather than a mutable level: "how much do we hold" is a question with a date on it,
+ * and overwriting yesterday's count would destroy the only evidence of how fast a drug is moving —
+ * which is the input a burn-rate reading needs.
+ */
+export const inventorySnapshots = pgTable(
+  "inventory_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    facilityId: uuid("facility_id")
+      .notNull()
+      .references(() => facilities.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    onHand: numeric("on_hand", { precision: 14, scale: 3 }).notNull(),
+    unit: text("unit"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // Re-uploading a corrected file must UPDATE the count for that facility, item and moment
+    // rather than add a second one — the natural key of a snapshot is when it was taken.
+    uniqueIndex("inventory_snapshots_point_uq").on(t.orgId, t.facilityId, t.itemId, t.capturedAt),
+    index("inventory_snapshots_item_idx").on(t.orgId, t.itemId, t.capturedAt),
+  ],
+);
+
+/** What was ordered, from whom, and when. */
+export const procurementEvents = pgTable(
+  "procurement_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    facilityId: uuid("facility_id")
+      .notNull()
+      .references(() => facilities.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }).notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+    unitCost: numeric("unit_cost", { precision: 14, scale: 4 }),
+  },
+  (t) => [
+    uniqueIndex("procurement_events_point_uq").on(t.orgId, t.facilityId, t.itemId, t.orderedAt),
+    index("procurement_events_item_idx").on(t.orgId, t.itemId, t.orderedAt),
+  ],
+);
+
 export type OrganizationRow = typeof organizations.$inferSelect;
+export type CatalogItemRow = typeof items.$inferSelect;
+export type NewCatalogItemRow = typeof items.$inferInsert;
+export type ItemIdentifierRow = typeof itemIdentifiers.$inferSelect;
+export type SupplierRow = typeof suppliers.$inferSelect;
+export type SupplierSiteRow = typeof supplierSites.$inferSelect;
+export type ItemSupplierRow = typeof itemSuppliers.$inferSelect;
+export type FacilityRow = typeof facilities.$inferSelect;
+export type InventorySnapshotRow = typeof inventorySnapshots.$inferSelect;
+export type ProcurementEventRow = typeof procurementEvents.$inferSelect;
 export type NewOrganizationRow = typeof organizations.$inferInsert;
 export type EscalationPolicyRow = typeof escalationPolicies.$inferSelect;
 export type AcknowledgmentRow = typeof acknowledgments.$inferSelect;

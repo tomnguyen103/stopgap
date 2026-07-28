@@ -71,10 +71,18 @@ export function toRecord(header: string[], row: CsvRow): Record<string, string> 
   return record;
 }
 
+/**
+ * The byte-order mark Excel writes by default.
+ *
+ * Written as an escape rather than as the character itself: left literal it is an invisible glyph
+ * in the source that a reviewer cannot see and a linter flags as irregular whitespace.
+ */
+const BOM = "\u{FEFF}";
+
 function splitRows(text: string): CsvRow[] {
-  // A UTF-8 BOM is what Excel writes by default, and it would otherwise become part of the first
-  // header name — making every lookup of that column miss for reasons invisible on screen.
-  const input = text.replace(/^﻿/, "");
+  // Left in place, the BOM becomes part of the FIRST header name — so every lookup of that column
+  // misses, for a reason that is invisible on screen.
+  const input = text.startsWith(BOM) ? text.slice(1) : text;
   const rows: CsvRow[] = [];
   let cells: string[] = [];
   let cell = "";
