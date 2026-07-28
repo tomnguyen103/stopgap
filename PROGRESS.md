@@ -315,7 +315,7 @@ Recorded as they are made, so the reasoning survives the pull request that carri
 - **openFDA publishes no device-shortages endpoint, so ticket 05 delivers device RECALLS** (#14).
   The spec named a device-shortage feed. `https://api.fda.gov/device/shortages.json` returns 404 —
   verified live, not inferred from the documentation, which lists the resource without shipping it.
-  The connector therefore reads `/device/recall.json`, which does exist and answers a question the
+  The connector therefore reads `/device/enforcement.json`, which does exist and answers a question the
   platform actually asks: a recalled device is unavailable supply by another route. Recorded here
   rather than silently substituted, because a reader comparing the spec to the code would otherwise
   find a feed named one thing and doing another and have no way to tell whether that was a decision

@@ -106,10 +106,23 @@ function headline(text: string, max = 120): string {
  * (payload, context, configuration) rather than of ambient time or network — still deterministic,
  * which is what the offline gate and the scorer need.
  */
-function evidenceUrl(path: string, recallNumber: string): string {
+function evidenceUrl(path: string, sourceId: string): string {
   const base = getEnv().OPENFDA_BASE_URL.replace(/\/+$/, "");
-  return `${base}/${path}/enforcement.json?search=recall_number:%22${encodeURIComponent(recallNumber)}%22`;
+  // A SYNTHETIC id is ours, not the provider's, so searching `recall_number` for it returns
+  // nothing — a link that looks like evidence and resolves to an empty result set is worse than
+  // an unfiltered one, because a reader concludes the recall was withdrawn rather than that we
+  // never had its number. Those records link to the endpoint itself, which is the honest claim:
+  // this came from here, and the provider gave no identifier to point at.
+  if (isSyntheticSourceId(sourceId)) return `${base}/${path}/enforcement.json`;
+  return `${base}/${path}/enforcement.json?search=recall_number:%22${encodeURIComponent(sourceId)}%22`;
 }
+
+/** The `sha256-…` shape `enforcementSourceId` mints when the provider gave no identifier. */
+function isSyntheticSourceId(sourceId: string): boolean {
+  return sourceId.startsWith(SYNTHETIC_ID_PREFIX);
+}
+
+const SYNTHETIC_ID_PREFIX = "sha256-";
 
 /**
  * The record's stable identity.
@@ -125,7 +138,7 @@ function enforcementSourceId(raw: OpenFdaEnforcementResult): string {
   const given = raw.recall_number?.trim() || raw.event_id?.trim();
   if (given) return given;
   const material = `${raw.product_description ?? ""}:${raw.recalling_firm ?? ""}:${raw.recall_initiation_date ?? ""}`;
-  return `sha256-${createHash("sha256").update(material).digest("hex").slice(0, 16)}`;
+  return `${SYNTHETIC_ID_PREFIX}${createHash("sha256").update(material).digest("hex").slice(0, 16)}`;
 }
 
 function normalizeEnforcement(

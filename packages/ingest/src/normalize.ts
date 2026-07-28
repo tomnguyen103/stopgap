@@ -78,9 +78,20 @@ export function unique<T>(xs: T[]): T[] {
   return [...new Set(xs)];
 }
 
-/** Distinct non-blank strings, for identifier and name lists that arrive with gaps in them. */
+/**
+ * Distinct non-blank strings, TRIMMED, for identifier and name lists that arrive with gaps in them.
+ *
+ * Trimming before the distinct pass, not after: feeds pad values inconsistently, so `" ABC "` and
+ * `"ABC"` are one identifier that would otherwise survive as two. Two spellings of one NDC means a
+ * catalog match that hits on one poll and misses on the next.
+ */
 export function uniqueNonBlank(xs: (string | undefined)[]): string[] {
-  return unique(xs.filter((x): x is string => typeof x === "string" && x.trim().length > 0));
+  return unique(
+    xs
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0),
+  );
 }
 
 /** Stable content hash of a normalized payload, for skip-if-unchanged dedup. */

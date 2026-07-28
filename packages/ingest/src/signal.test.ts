@@ -251,6 +251,20 @@ describe("severity", () => {
     );
   });
 
+  it("links an id-less recall to the ENDPOINT, never to a search for our own synthetic id", () => {
+    // The provider gave neither a recall number nor an event id, so the source id is a content
+    // hash we minted. Searching `recall_number` for it returns an empty result set, and an
+    // evidence link that resolves to nothing reads as "this recall was withdrawn" rather than as
+    // "we never had its number".
+    const idLess = openFdaDeviceRecallConnector.normalize(
+      { ...DEVICE_RECALL, recall_number: undefined, event_id: undefined },
+      CONTEXT,
+    );
+    expect(idLess.sourceId).toMatch(/^sha256-/);
+    expect(idLess.evidenceUrl).not.toContain("recall_number:");
+    expect(idLess.evidenceUrl).toContain("/device/enforcement.json");
+  });
+
   it("grades the recorded recalls by their own classification", () => {
     const device = openFdaDeviceRecallConnector.normalize(DEVICE_RECALL, CONTEXT);
     expect(device.severity).toBe("critical");
