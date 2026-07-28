@@ -39,6 +39,8 @@ export {
   updateCaseStatus,
   listCases,
   listOpenMonitoringCases,
+  listCasesAwaitingHuman,
+  AWAITING_HUMAN_STATUSES,
   bumpFeedMiss,
   resetFeedMiss,
   workflowIdForKey,
@@ -117,9 +119,10 @@ export {
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export {
   recordDailyBrief,
-  latestDailyBrief,
+  previousDailyBrief,
   listDailyBriefs,
-  getDailyBrief,
+  DEGRADED_REASONS,
+  type DegradedReason,
   type DailyBriefInput,
 } from "./briefs.js";
 export {

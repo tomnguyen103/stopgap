@@ -11,6 +11,14 @@ import { cases, type CaseRow } from "./schema.js";
 export const MONITORING_STATUSES: readonly CaseStatus[] = ["monitoring"];
 
 /**
+ * Statuses in which a case is WAITING ON A HUMAN — a drafted protocol nobody has approved, and a
+ * case the machine refused to decide. Distinct from `MONITORING_STATUSES`, which is post-approval
+ * feed-watching: a monitoring case needs nothing from anybody, so reporting it as "needs review"
+ * would bury the two that do.
+ */
+export const AWAITING_HUMAN_STATUSES: readonly CaseStatus[] = ["awaiting_review", "exception"];
+
+/**
  * ORG SCOPING (PHASE6 §6.5) — the rationale for every `orgId` parameter in this file and in
  * `protocols.ts`, `shadow.ts`, `demo-runs.ts`, `metrics.ts`, `ops-metrics.ts`, `escalation.ts`,
  * `api-keys.ts` and `users.ts`.
@@ -234,4 +242,16 @@ export async function bumpFeedMiss(db: Db, orgId: string, caseId: string, runId:
 /** Reset a case's miss counter to zero (key reappeared, or resolution fired). */
 export async function resetFeedMiss(db: Db, orgId: string, caseId: string): Promise<void> {
   await db.update(cases).set({ feedMissCount: 0 }).where(and(eq(cases.orgId, orgId), eq(cases.id, caseId)));
+}
+
+/** Cases in this tenant that are waiting on a person, newest first. */
+export async function listCasesAwaitingHuman(
+  db: Db,
+  orgId: string,
+): Promise<{ key: string; status: string }[]> {
+  return db
+    .select({ key: cases.key, status: cases.status })
+    .from(cases)
+    .where(and(eq(cases.orgId, orgId), inArray(cases.status, [...AWAITING_HUMAN_STATUSES])))
+    .orderBy(desc(cases.openedAt));
 }

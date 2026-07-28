@@ -892,7 +892,7 @@ export const riskScoreSnapshots = pgTable(
  * One hospital's account of what moved in its own supply picture — nothing about it is a shared
  * fact, so §6.5 puts it here without argument.
  *
- * `blockedReason` is the honest-failure column. A brief that the compliance guard refused is
+ * `degradedReason` is the honest-failure column. A brief that the compliance guard refused is
  * RECORDED as refused rather than dropped: a director who sees no brief cannot tell "nothing
  * happened" from "the system produced something it would not show you", and those need different
  * responses. Same for a provider outage — the row says the brief degraded, and to what.
