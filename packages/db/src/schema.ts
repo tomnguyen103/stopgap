@@ -886,7 +886,239 @@ export const riskScoreSnapshots = pgTable(
   ],
 );
 
+
+/**
+ * ---------------------------------------------------------------------------------------------
+ * The facility catalog (ticket 15). Eight TENANT tables — what this hospital actually stocks.
+ * ---------------------------------------------------------------------------------------------
+ *
+ * Every table here carries `orgId` and an `<table>_org_isolation` policy (migration 0015). None of
+ * it is a shared external fact: two hospitals stocking the same drug hold genuinely different
+ * items, different suppliers, different contract prices and different shelves. Applying the
+ * §6.5 test — "would two orgs disagree about this row" — every one of them is tenant data, and
+ * the answer is not close.
+ *
+ * Every unique index is org-leading, so it doubles as the org-filter index and so that uniqueness
+ * means "unique WITHIN this hospital". A deployment-wide unique on `sku` or `supplier_code` would
+ * let the first tenant to upload a catalog claim those codes forever.
+ */
+
+/** One stocked product, as this facility records it. `sku` is the facility's own code for it. */
+export const items = pgTable(
+  "items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    sku: text("sku").notNull(),
+    name: text("name").notNull(),
+    /** Normalized generic name where the file gave one — the join to shortage signals. */
+    genericName: text("generic_name"),
+    unit: text("unit"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("items_sku_uq").on(t.orgId, t.sku),
+    index("items_generic_idx").on(t.orgId, t.genericName),
+  ],
+);
+
+/**
+ * The several identifiers one item carries at once.
+ *
+ * A separate table rather than columns on `items`, because facilities record products differently
+ * across systems and the set is open — a purchasing system knows a GTIN, a pharmacy system an NDC,
+ * an EHR an RxCUI, and the same physical product carries all three. Columns would force a schema
+ * change for each new system; rows do not.
+ */
+export const itemIdentifiers = pgTable(
+  "item_identifiers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    /** `ndc` | `rxcui` | `gtin` | `hibc` | `sku` — the vocabulary in `@stopgap/catalog`. */
+    type: text("type").notNull(),
+    value: text("value").notNull(),
+  },
+  (t) => [
+    // One (type, value) pair points at ONE item within a tenant. This is the key a corrected
+    // re-upload matches on, which is why it is unique rather than merely indexed.
+    uniqueIndex("item_identifiers_value_uq").on(t.orgId, t.type, t.value),
+    index("item_identifiers_item_idx").on(t.orgId, t.itemId),
+  ],
+);
+
+/** A vendor this facility buys from. */
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("suppliers_code_uq").on(t.orgId, t.code)],
+);
+
+/** A vendor's individual site. Sole-source exposure is about SITES, not about companies. */
+export const supplierSites = pgTable(
+  "supplier_sites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name"),
+    country: text("country"),
+    leadTimeDays: integer("lead_time_days"),
+  },
+  (t) => [uniqueIndex("supplier_sites_code_uq").on(t.orgId, t.supplierId, t.code)],
+);
+
+/** Which suppliers can supply which item, and on what terms. */
+export const itemSuppliers = pgTable(
+  "item_suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    /** The specific site, when the file named one. */
+    siteId: uuid("site_id").references(() => supplierSites.id, { onDelete: "set null" }),
+    contractPrice: numeric("contract_price", { precision: 14, scale: 4 }),
+    preferred: boolean("preferred").notNull().default(false),
+  },
+  (t) => [
+    // One link per (item, supplier) pair — the site is an attribute of the link, not part of its
+    // identity. Including a NULLABLE site in the key would let the same pair appear twice, once
+    // with a site and once without, because NULL is never equal to itself in a unique index.
+    uniqueIndex("item_suppliers_pair_uq").on(t.orgId, t.itemId, t.supplierId),
+    index("item_suppliers_supplier_idx").on(t.orgId, t.supplierId),
+  ],
+);
+
+/** A place that holds stock — a hospital site, a ward store, a central pharmacy. */
+export const facilities = pgTable(
+  "facilities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    code: text("code").notNull(),
+    name: text("name"),
+  },
+  (t) => [uniqueIndex("facilities_code_uq").on(t.orgId, t.code)],
+);
+
+/**
+ * On-hand stock at a point in time.
+ *
+ * A SNAPSHOT rather than a mutable level: "how much do we hold" is a question with a date on it,
+ * and overwriting yesterday's count would destroy the only evidence of how fast a drug is moving —
+ * which is the input a burn-rate reading needs.
+ */
+export const inventorySnapshots = pgTable(
+  "inventory_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    facilityId: uuid("facility_id")
+      .notNull()
+      .references(() => facilities.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    onHand: numeric("on_hand", { precision: 14, scale: 3 }).notNull(),
+    unit: text("unit"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // Re-uploading a corrected file must UPDATE the count for that facility, item and moment
+    // rather than add a second one — the natural key of a snapshot is when it was taken.
+    uniqueIndex("inventory_snapshots_point_uq").on(t.orgId, t.facilityId, t.itemId, t.capturedAt),
+    index("inventory_snapshots_item_idx").on(t.orgId, t.itemId, t.capturedAt),
+  ],
+);
+
+/** What was ordered, from whom, and when. */
+export const procurementEvents = pgTable(
+  "procurement_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    facilityId: uuid("facility_id")
+      .notNull()
+      .references(() => facilities.id, { onDelete: "cascade" }),
+    itemId: uuid("item_id")
+      .notNull()
+      .references(() => items.id, { onDelete: "cascade" }),
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    /**
+     * The purchase-order reference, `''` when the file carried none.
+     *
+     * Part of the natural key, and NOT NULL with an empty-string default rather than nullable,
+     * because NULL is not equal to itself in a unique index — a nullable column here would let the
+     * same order be imported twice and would defeat the whole point of the key.
+     */
+    orderRef: text("order_ref").notNull().default(""),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }).notNull(),
+    quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+    unitCost: numeric("unit_cost", { precision: 14, scale: 4 }),
+  },
+  (t) => [
+    // An event's identity is NOT just its timestamp. Two genuine orders of the same item at the
+    // same facility on the same date are ordinary — and common once a file gives dates rather than
+    // datetimes — so the purchase-order reference is part of the key. Where a file carries no
+    // reference the two orders are indistinguishable in the data, and the import restates one row
+    // rather than inventing a difference the file does not contain.
+    uniqueIndex("procurement_events_point_uq").on(
+      t.orgId,
+      t.facilityId,
+      t.itemId,
+      t.orderedAt,
+      t.orderRef,
+    ),
+    index("procurement_events_item_idx").on(t.orgId, t.itemId, t.orderedAt),
+  ],
+);
+
 export type OrganizationRow = typeof organizations.$inferSelect;
+export type CatalogItemRow = typeof items.$inferSelect;
+export type NewCatalogItemRow = typeof items.$inferInsert;
+export type ItemIdentifierRow = typeof itemIdentifiers.$inferSelect;
+export type SupplierRow = typeof suppliers.$inferSelect;
+export type SupplierSiteRow = typeof supplierSites.$inferSelect;
+export type ItemSupplierRow = typeof itemSuppliers.$inferSelect;
+export type FacilityRow = typeof facilities.$inferSelect;
+export type InventorySnapshotRow = typeof inventorySnapshots.$inferSelect;
+export type ProcurementEventRow = typeof procurementEvents.$inferSelect;
+
 export type RiskSignalRow = typeof riskSignals.$inferSelect;
 export type NewRiskSignalRow = typeof riskSignals.$inferInsert;
 export type RiskScoreSnapshotRow = typeof riskScoreSnapshots.$inferSelect;

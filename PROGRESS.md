@@ -286,12 +286,12 @@ is never merged without its review.
 
 | # | Ticket | State | PR |
 | --- | --- | --- | --- |
-| — | Role landing route + pure list-state module (foundation for 03, 08) | parked on refill | #11 |
+| — | Role landing route + pure list-state module (foundation for 03, 08) | **merged** | #11 |
 | 01 | Keycloak with seeded per-role users | draft, awaiting refill | #12 |
 | 02 | Design tokens and shared primitives | not started | — |
 | 03 | Route groups and per-role landing | blocked by 01, 02 | — |
 | 04 | Browser smoke tier | blocked by 03 | — |
-| 05 | Normalized signal contract, recall and device feeds | not started | — |
+| 05 | Normalized signal contract, recall and device feeds | draft, awaiting refill | #14 |
 | 06 | Risk signal and snapshot persistence | blocked by 05 | — |
 | 07 | Deterministic risk scorer | blocked by 06 | — |
 | 08 | Viewer dashboard | blocked by 03, 07 | — |
@@ -312,6 +312,15 @@ is never merged without its review.
 
 Recorded as they are made, so the reasoning survives the pull request that carried it.
 
+- **openFDA publishes no device-shortages endpoint** (#14). `/device/shortages.json` answers 404
+  with "Cannot GET", verified live against api.fda.gov, so ticket 05 delivers device **recalls**
+  off `/device/enforcement.json` instead. Recalls are the hazard this pipeline exists to prevent
+  substituting into, so the coverage is the one that matters; the spec's Open decisions section
+  records the substitution when #14 merges.
+- **The new connectors are not wired into the poll workflow yet** (#14). A normalized signal has
+  nowhere to land until ticket 06 creates `risk_signal` and its policies, and polling the
+  enforcement endpoints to discard the results would spend provider quota for no observable
+  effect. Ticket 06 owns the wiring.
 - **Highest-role resolution belongs in the pure authorization module, not the middleware** (#11).
   The spec first described a single-role landing function with the rank arithmetic in middleware.
   In `authz.ts` instead, routing and permission cannot disagree about which role a multi-role user

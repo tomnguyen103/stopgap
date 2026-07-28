@@ -10,19 +10,26 @@ import { defineConfig } from "vitest/config";
  *
  *   pnpm test:rls
  *
- * Two suites, with different connection requirements — both stated in each file's header:
+ * Three suites, with different connection requirements — both stated in each file's header:
  *  - `rls.e2e.test.ts` needs `DATABASE_URL` to name a role the policies APPLY to, and refuses to
  *    run otherwise (a green isolation suite under a superuser proves nothing);
  *  - `migrations.e2e.test.ts` needs `DATABASE_URL_MAINTENANCE` to name the OWNER, because it
  *    creates and drops a throwaway database and applies the migrations as the role a deployment
- *    genuinely migrates as.
+ *    genuinely migrates as;
+ *  - `catalog.e2e.test.ts` (ticket 15) needs `DATABASE_URL` to name the APPLICATION role, for the
+ *    same reason `rls.e2e.test.ts` does: it asserts that one tenant's catalog import is invisible
+ *    to another, and under the owner that assertion passes without proving anything.
  *
  * `fileParallelism` is off: the suites seed and tear down fixed row ids, so two files racing over
  * the same rows would produce failures that look like isolation bugs and are not.
  */
 export default defineConfig({
   test: {
-    include: ["packages/db/src/rls.e2e.test.ts", "packages/db/src/migrations.e2e.test.ts"],
+    include: [
+      "packages/db/src/rls.e2e.test.ts",
+      "packages/db/src/migrations.e2e.test.ts",
+      "packages/db/src/catalog.e2e.test.ts",
+    ],
     fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 60_000,
