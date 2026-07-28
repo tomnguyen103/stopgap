@@ -315,5 +315,64 @@ describe("a domain the weight table does not list", () => {
     expect(domainRankWeight(1)).toBe(0.5);
     expect(domainRankWeight(2)).toBe(0.25);
     expect(domainRankWeight(5)).toBeGreaterThan(0);
+describe("catalog completion (ticket 16)", () => {
+  const CASES: { name: string; daysOnHand?: number; supplierSiteCount?: number }[] = [
+    { name: "well stocked, many suppliers", daysOnHand: 120, supplierSiteCount: 6 },
+    { name: "well stocked, sole source", daysOnHand: 120, supplierSiteCount: 1 },
+    { name: "nearly out, many suppliers", daysOnHand: 1, supplierSiteCount: 6 },
+    { name: "nearly out, sole source", daysOnHand: 0, supplierSiteCount: 1 },
+    { name: "stock known, suppliers not", daysOnHand: 30 },
+    { name: "suppliers known, stock not", supplierSiteCount: 2 },
+  ];
+
+  it.each(CASES)(
+    "rescoring after a catalog import never LOWERS the total ($name)",
+    ({ daysOnHand, supplierSiteCount }) => {
+      // The guarantee the ticket asks for, and the reason it holds: an unavailable component
+      // contributes 0 points, and switching it on can only add. A pharmacist who watched a signal
+      // sit at 41 must never find it at 33 because the facility uploaded its catalog — that reads
+      // as the risk receding when all that changed is that the system learned more.
+      for (const severityScore of [0.1, 0.5, 0.95]) {
+        for (const sourceResolved of [false, true]) {
+          const s = signal({ severityScore, sourceResolved });
+          const before = scoreSignals({ signals: [s], evaluatedAt: AT });
+          const after = scoreSignals({
+            signals: [s],
+            catalog: { daysOnHand, supplierSiteCount },
+            evaluatedAt: AT,
+          });
+          expect(after.score).toBeGreaterThanOrEqual(before.score);
+        }
+      }
+    },
+  );
+
+  it("marks the two catalog components available once the data lands", () => {
+    const result = scoreSignals({
+      signals: [signal()],
+      catalog: { daysOnHand: 5, supplierSiteCount: 1 },
+      evaluatedAt: AT,
+    });
+    const byName = Object.fromEntries(result.components.map((c) => [c.name, c]));
+    expect(byName.daysOnHand?.available).toBe(true);
+    expect(byName.soleSource?.available).toBe(true);
+    // With every component computable, the whole budget is reachable — a score is now comparable
+    // against the full scale rather than against a partial one.
+    expect(result.reachableMax).toBe(
+      Object.values(COMPONENT_BUDGET).reduce((sum, max) => sum + max, 0),
+    );
+  });
+
+  it("keeps a component UNAVAILABLE rather than zero when the catalog cannot answer", () => {
+    // "This facility has no supplier data" and "this item has no supplier" are different facts.
+    const result = scoreSignals({
+      signals: [signal()],
+      catalog: { daysOnHand: 5 },
+      evaluatedAt: AT,
+    });
+    const byName = Object.fromEntries(result.components.map((c) => [c.name, c]));
+    expect(byName.soleSource?.available).toBe(false);
+    expect(byName.soleSource?.points).toBe(0);
+    expect(byName.soleSource?.unavailableReason).toBeDefined();
   });
 });

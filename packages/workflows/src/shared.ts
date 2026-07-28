@@ -90,8 +90,15 @@ export function resolveCaseOrgId(input: CaseInput, isPatched: boolean): string {
   return (input.orgId as string | undefined) ?? SEED_ORG_ID;
 }
 
-/** Result of the impact assessment activity (Zod-validated, schema owned by @stopgap/agents). */
-export type ImpactResult = ImpactAssessment;
+/**
+ * Result of the impact assessment activity (Zod-validated, schema owned by @stopgap/agents), plus
+ * the one figure the model no longer produces.
+ *
+ * `affectedFormularyItems` is COUNTED FROM THE CATALOG (ticket 16), not estimated. It sits beside
+ * the model's output rather than inside the schema so the boundary is visible in the type: what
+ * the model judged, and what the database measured.
+ */
+export type ImpactResult = ImpactAssessment & { affectedFormularyItems: number };
 
 /** Result of the alternatives research activity (Zod-validated, schema owned by @stopgap/agents). */
 export type ResearchResult = AlternativesResearch;

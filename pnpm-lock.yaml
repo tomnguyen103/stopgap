@@ -103,6 +103,9 @@ importers:
 
   packages/catalog:
     dependencies:
+      '@stopgap/ingest':
+        specifier: workspace:*
+        version: link:../ingest
       zod:
         specifier: ^3.24.0
         version: 3.25.76

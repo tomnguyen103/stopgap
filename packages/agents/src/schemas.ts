@@ -21,8 +21,13 @@ const confidenceScore = z.preprocess(
 
 export const ImpactAssessment = z.object({
   severity: Severity,
-  /** Estimated formulary items affected by this shortage. */
-  affectedFormularyItems: z.number().int().min(0),
+  /*
+   * `affectedFormularyItems` used to live here as a MODEL ESTIMATE and was removed with ticket 16.
+   * The catalog now knows the answer: it is the count of this facility's own items the signal
+   * matched. Asking a model to guess a number the database holds produces a figure that is
+   * indistinguishable from a real one to the reader and wrong whenever it disagrees — and the
+   * reader has no way to tell which. It is attached by the activity, from the match, instead.
+   */
   /** One or two sentences explaining the severity call. */
   rationale: z.string().min(1),
   /** Model's self-reported confidence in this assessment, 0 (guessing) to 1 (certain). */
