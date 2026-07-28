@@ -44,9 +44,15 @@ importers:
       '@stopgap/demo':
         specifier: workspace:*
         version: link:../../packages/demo
+      '@stopgap/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       '@stopgap/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@stopgap/scorer':
+        specifier: workspace:*
+        version: link:../../packages/scorer
       '@stopgap/shadow':
         specifier: workspace:*
         version: link:../../packages/shadow

@@ -101,6 +101,24 @@ describe("paths", () => {
     }
   });
 
+  /**
+   * A client generated from this document has to be able to PAGE and FILTER, not merely to fetch
+   * page one (ticket 19: "generates a working client"). The three console-vocabulary lists
+   * therefore have to publish those parameters — a spec that documented only the response shape
+   * would generate a client that silently cannot reach row 51.
+   */
+  it("publishes the console list vocabulary on the signal, score and catalog lists", () => {
+    for (const path of ["/api/v1/signals", "/api/v1/scores", "/api/v1/catalog/items"]) {
+      const parameters = (doc.paths?.[path]?.get as { parameters?: { name: string }[] })?.parameters ?? [];
+      const names = parameters.map((p) => p.name);
+      for (const expected of ["q", "sort", "dir", "page", "pageSize"]) {
+        expect(names, `${path} does not document ?${expected}`).toContain(expected);
+      }
+    }
+    const scoreParams = (doc.paths?.["/api/v1/scores"]?.get as { parameters?: { name: string }[] })?.parameters ?? [];
+    expect(scoreParams.map((p) => p.name)).toContain("band");
+  });
+
   it("documents 401/403/429 on every authenticated operation", () => {
     for (const [path, method] of IMPLEMENTED_OPERATIONS) {
       const responses = (doc.paths?.[path]?.[method] as { responses?: Record<string, unknown> })?.responses ?? {};

@@ -21,7 +21,19 @@ import { apiKeyRequests, apiKeys, type ApiKeyRow } from "./schema.js";
  * behind the single `protocols:write` scope, so "may this integration change patient-facing
  * guidance" is one checkbox an admin can reason about, not a matrix they must assemble correctly.
  */
-export const API_SCOPES = ["cases:read", "protocols:read", "protocols:write", "shadow:read"] as const;
+export const API_SCOPES = [
+  "cases:read",
+  "protocols:read",
+  "protocols:write",
+  "shadow:read",
+  // Ticket 19. Three scopes rather than one `platform:read`, because the three answer different
+  // questions and an integrator should be able to hold the narrowest one that does their job: a
+  // supply-planning client needs the catalog and nothing about clinical risk, a monitoring client
+  // needs scores and never the facility's stock levels.
+  "signals:read",
+  "scores:read",
+  "catalog:read",
+] as const;
 
 export type ApiScope = (typeof API_SCOPES)[number];
 
