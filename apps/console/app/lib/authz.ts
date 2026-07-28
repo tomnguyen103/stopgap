@@ -114,6 +114,38 @@ export function roleLandingRoute(roles: readonly Role[]): string {
   return ROLE_LANDING_ROUTE[best];
 }
 
+/**
+ * The four dashboard groups (ticket 03), each one role's surface.
+ *
+ * Named the same as the role whose landing route it holds, because a group that did not map 1:1
+ * onto a role would need its own access rule, and a second rule is a second thing to get wrong.
+ */
+export const DASHBOARD_GROUPS = ["viewer", "pharmacist", "pharmacy_director", "admin"] as const;
+export type DashboardGroup = (typeof DASHBOARD_GROUPS)[number];
+
+/**
+ * May this caller see this group's surface?
+ *
+ * At or BELOW their own rank. A director looking at the viewer overview is reading a subset of
+ * what their own dashboard shows, so refusing it would be theatre; a viewer reaching the admin
+ * surface is not, and is refused.
+ *
+ * This is VISIBILITY, not permission. Reaching a route grants nothing: every page read and every
+ * server action still calls its own guard, exactly as before. The two are deliberately separate —
+ * a dashboard a role can see but only partly use is normal, and would be unrepresentable if this
+ * function doubled as policy.
+ */
+export function canViewGroup(roles: readonly Role[], group: DashboardGroup): boolean {
+  let best = RANK.viewer;
+  for (const role of roles) {
+    const rank = RANK[role];
+    // An unknown role is skipped rather than thrown on, for the reason `roleLandingRoute` gives:
+    // an IdP may legitimately present a realm role this build has never heard of.
+    if (rank !== undefined && rank > best) best = rank;
+  }
+  return best >= RANK[group];
+}
+
 /** Thrown when a caller lacks the role an action requires. The server action surfaces it. */
 export class AuthorizationError extends Error {
   constructor(

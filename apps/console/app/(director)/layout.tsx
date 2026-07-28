@@ -1,0 +1,25 @@
+import type { ReactNode } from "react";
+import { DashboardShell, type NavLink } from "../components/dashboard-shell";
+import { requireGroup } from "../lib/group-guard";
+
+/**
+ * Oversight: the same cases a pharmacist works, read for trend rather than for action, plus the
+ * deployment's KPIs.
+ *
+ * The guard runs HERE, in the layout, because it is the one place that covers every route in the
+ * group — including ones added later, which is what stops a new page shipping unguarded.
+ */
+
+const NAV: NavLink[] = [
+  { href: "/oversight", label: "Oversight" },
+  { href: "/metrics", label: "KPIs" },
+];
+
+export default async function DirectorLayout({ children }: { children: ReactNode }) {
+  await requireGroup("pharmacy_director");
+  return (
+    <DashboardShell surface="director oversight" nav={NAV}>
+      {children}
+    </DashboardShell>
+  );
+}
