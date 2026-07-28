@@ -1,13 +1,15 @@
 import { draftDailyBrief } from "@stopgap/agents";
 import { screenContent, describeViolations } from "@stopgap/compliance";
 import {
-  latestDailyBrief,
+  latestScoresForSignals,
   listOrganizations,
   listSignals,
-  listOpenMonitoringCases,
+  listCasesAwaitingHuman,
+  previousDailyBrief,
   recordDailyBrief,
   withBypassDb,
   withOrgDb,
+  type DegradedReason,
 } from "@stopgap/db";
 
 /**
@@ -15,9 +17,7 @@ import {
  *
  * NO SECOND ORCHESTRATOR. This is an activity on the same Temporal spine every other scheduled job
  * runs on, and the model call goes through the existing provider registry — so failover, cost and
- * latency logging and tracing are inherited rather than reimplemented. A brief is exactly the
- * feature that tempts a team into adopting a second scheduler and a second tracing library, and
- * the observability fragmentation that follows costs more than the feature is worth.
+ * latency logging and tracing are inherited rather than reimplemented.
  *
  * Per tenant, by ENUMERATION, like the feed poll: the schedule has no session and no org, and it
  * does not invent one. `withBypassDb` lists the registry and nothing else.
@@ -28,41 +28,63 @@ function utcDate(at: Date): string {
   return at.toISOString().slice(0, 10);
 }
 
+/** How many signals the model is shown. The rest are counted, not listed. */
+const BRIEF_SIGNAL_LIMIT = 100;
+
 export async function generateDailyBriefs(now = new Date()): Promise<{
   generated: number;
   degraded: number;
 }> {
   const orgs = await withBypassDb(() => listOrganizations());
+  const briefDate = utcDate(now);
   let generated = 0;
   let degraded = 0;
 
   for (const org of orgs) {
     try {
       const { input, previousKeys, since } = await withOrgDb(org.id, async (db) => {
-        const signals = await listSignals(db, org.id, { excludeFeedAbsent: true, limit: 100 });
-        const previous = await latestDailyBrief(db, org.id);
-        const openCases = await listOpenMonitoringCases(db, org.id);
+        const signals = await listSignals(db, org.id, {
+          excludeFeedAbsent: true,
+          limit: BRIEF_SIGNAL_LIMIT,
+        });
+        // THE NUMBER COMES FROM THE DETERMINISTIC SCORER, NOT FROM THE SIGNAL ROW (ADR-0002).
+        // `riskSignals.severityScore` is the ingest heuristic each connector assigns on arrival;
+        // ticket 07's scorer writes `risk_score_snapshots.score`, and that is the figure the rest
+        // of the console shows. Two differently-derived numbers under one name is how a director
+        // ends up escalating on a rank the product does not actually hold.
+        const scores = await latestScoresForSignals(
+          db,
+          org.id,
+          signals.map((s) => s.id),
+        );
+        const previous = await previousDailyBrief(db, org.id, briefDate);
+        const awaiting = await listCasesAwaitingHuman(db, org.id);
+        // Highest risk first, because that is what the model is told it is being given. An
+        // unscored signal sorts last rather than as a zero: "not scored yet" and "scored zero"
+        // are different facts, and only one of them means the signal is unimportant.
+        const ranked = signals
+          .map((s) => ({ signal: s, score: scores.get(s.id)?.score }))
+          .sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
         return {
           previousKeys: previous?.signalKeys ?? [],
-          since: previous?.generatedAt.toISOString(),
+          since: previous?.briefDate,
           input: {
-            current: signals.map((s) => ({
-              entity: s.entityIdentifier,
-              domain: s.riskDomain,
-              severity: s.severity,
-              // Already computed by the deterministic scorer. The model never produces a number.
-              score: Number(s.severityScore) * 100,
-              title: s.title,
+            current: ranked.map(({ signal, score }) => ({
+              entity: signal.entityIdentifier,
+              domain: signal.riskDomain,
+              severity: signal.severity,
+              score,
+              title: signal.title,
+              key: signal.dedupeKey,
             })),
-            currentKeys: signals.map((s) => s.dedupeKey),
-            awaitingReview: openCases.map((c) => ({ key: c.key, source: c.source })),
+            awaitingReview: awaiting,
           },
         };
       });
 
       let draft;
       let model: string | null = null;
-      let degradedReason: string | null = null;
+      let degradedReason: DegradedReason | null = null;
       try {
         const drafted = await draftDailyBrief({ ...input, previousKeys, since });
         draft = drafted.brief;
@@ -108,12 +130,12 @@ export async function generateDailyBriefs(now = new Date()): Promise<{
 
       await withOrgDb(org.id, (db) =>
         recordDailyBrief(db, org.id, {
-          briefDate: utcDate(now),
+          briefDate,
           headline: draft.headline,
           changes: draft.changes,
           newlyAtRisk: draft.newlyAtRisk,
           needsReview: draft.needsReview,
-          signalKeys: input.currentKeys,
+          signalKeys: input.current.map((s) => s.key),
           degradedReason,
           model,
           generatedAt: now,

@@ -1,3 +1,4 @@
+import { DEGRADED_REASONS, type DegradedReason } from "@stopgap/db";
 import { getDailyBriefs } from "../lib/data";
 
 export const dynamic = "force-dynamic";
@@ -9,10 +10,13 @@ export const dynamic = "force-dynamic";
  * write today's brief" call for different responses from a director, and a page that shows only
  * the good ones makes the two indistinguishable.
  */
-const DEGRADED_LABEL: Record<string, string> = {
-  provider_unavailable: "No model provider could be reached",
-  compliance_blocked: "Withheld by the compliance guard",
-};
+/**
+ * A reason the writer minted but this page does not know is a deployment mid-rollout, not a
+ * mystery — render the raw value rather than nothing.
+ */
+function degradedLabel(reason: string): string {
+  return DEGRADED_REASONS[reason as DegradedReason] ?? reason;
+}
 
 export default async function BriefPage() {
   const briefs = await getDailyBriefs(30);
@@ -37,9 +41,7 @@ export default async function BriefPage() {
             {latest.degradedReason ? (
               <>
                 {" "}
-                <span className="pill sev-high">
-                  {DEGRADED_LABEL[latest.degradedReason] ?? latest.degradedReason}
-                </span>
+                <span className="pill sev-high">{degradedLabel(latest.degradedReason)}</span>
               </>
             ) : null}
           </h2>
@@ -105,7 +107,7 @@ export default async function BriefPage() {
                   <td>
                     {brief.degradedReason ? (
                       <span className="pill sev-high">
-                        {DEGRADED_LABEL[brief.degradedReason] ?? brief.degradedReason}
+                        {degradedLabel(brief.degradedReason)}
                       </span>
                     ) : (
                       brief.headline

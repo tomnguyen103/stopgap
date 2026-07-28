@@ -19,6 +19,10 @@ const scopedOrgIds: string[] = [];
 const written: { orgId: string; input: DailyBriefInput }[] = [];
 /** Orgs whose signal read should throw, to prove per-tenant containment. */
 const failingReads = new Set<string>();
+/** `briefDate` values `previousDailyBrief` was asked for — proof today's own row is excluded. */
+const previousBriefDates: string[] = [];
+/** The input the model was handed, so the ordering it promises can be asserted. */
+const draftInputs: { current: { entity: string; score: number | undefined }[] }[] = [];
 /** Set to make the model call throw, standing in for a total provider outage. */
 let providerDown = false;
 /** What the model "wrote" this run. */
@@ -34,18 +38,39 @@ vi.mock("@stopgap/db", () => ({
   listSignals: (_db: unknown, orgId: string) => {
     if (failingReads.has(orgId)) throw new Error("signal read failed");
     return [
+      // Deliberately in the WRONG order for a brief: `listSignals` orders by publication date,
+      // and the brief promises the model highest-risk-first. Only the scorer's snapshot can
+      // reorder these, which is what the ranking assertion below checks.
       {
-        entityIdentifier: `drug-${orgId.slice(0, 4)}`,
+        id: "sig-low",
+        entityIdentifier: "aminophylline",
+        riskDomain: "shortage",
+        severity: "low",
+        severityScore: "0.90",
+        title: "Minor shortage",
+        dedupeKey: `key-low-${orgId.slice(0, 4)}`,
+      },
+      {
+        id: "sig-high",
+        entityIdentifier: "cefazolin",
         riskDomain: "shortage",
         severity: "high",
-        severityScore: "0.72",
+        severityScore: "0.10",
         title: "Injectable shortage",
-        dedupeKey: `key-${orgId.slice(0, 4)}`,
+        dedupeKey: `key-high-${orgId.slice(0, 4)}`,
       },
     ];
   },
-  latestDailyBrief: () => undefined,
-  listOpenMonitoringCases: () => [{ key: "case-1", source: "openfda" }],
+  latestScoresForSignals: () =>
+    new Map([
+      ["sig-low", { score: 12, band: "low", scorerVersion: "v1" }],
+      ["sig-high", { score: 88, band: "high", scorerVersion: "v1" }],
+    ]),
+  previousDailyBrief: (_db: unknown, _orgId: string, briefDate: string) => {
+    previousBriefDates.push(briefDate);
+    return undefined;
+  },
+  listCasesAwaitingHuman: () => [{ key: "case-1", status: "awaiting_review" }],
   recordDailyBrief: (_db: unknown, orgId: string, input: DailyBriefInput) => {
     written.push({ orgId, input });
     return { id: "row", orgId, ...input };
@@ -53,7 +78,8 @@ vi.mock("@stopgap/db", () => ({
 }));
 
 vi.mock("@stopgap/agents", () => ({
-  draftDailyBrief: () => {
+  draftDailyBrief: (input: { current: { entity: string; score: number | undefined }[] }) => {
+    draftInputs.push(input);
     if (providerDown) throw new Error("all providers unhealthy");
     return {
       brief: { headline: draftHeadline, changes: ["a"], newlyAtRisk: ["b"], needsReview: ["c"] },
@@ -72,6 +98,8 @@ const { generateDailyBriefs } = await import("./brief.js");
 beforeEach(() => {
   scopedOrgIds.length = 0;
   written.length = 0;
+  previousBriefDates.length = 0;
+  draftInputs.length = 0;
   failingReads.clear();
   providerDown = false;
   draftHeadline = "Two shortages eased, one new device recall.";
@@ -87,13 +115,34 @@ describe("generateDailyBriefs", () => {
     // Every scope opened is one of the two tenants — never an ambient default.
     expect(new Set(scopedOrgIds)).toEqual(new Set([ORG_A, ORG_B]));
     // The signal keys stored are the ones read under that same tenant's scope.
-    expect(written[0]?.input.signalKeys).toEqual([`key-${ORG_A.slice(0, 4)}`]);
-    expect(written[1]?.input.signalKeys).toEqual([`key-${ORG_B.slice(0, 4)}`]);
+    expect(written[0]?.input.signalKeys).toEqual([
+      `key-high-${ORG_A.slice(0, 4)}`,
+      `key-low-${ORG_A.slice(0, 4)}`,
+    ]);
+    expect(written[1]?.input.signalKeys).toEqual([
+      `key-high-${ORG_B.slice(0, 4)}`,
+      `key-low-${ORG_B.slice(0, 4)}`,
+    ]);
   });
 
   it("dates the brief in UTC, so two tenants agree which day it covers", async () => {
     await generateDailyBriefs(new Date("2026-03-04T23:30:00Z"));
     expect(written.every((w) => w.input.briefDate === "2026-03-04")).toBe(true);
+  });
+
+  it("ranks by the deterministic scorer, not by the signal row's ingest heuristic", async () => {
+    await generateDailyBriefs(new Date("2026-03-04T06:00:00Z"));
+
+    // `severityScore` on the row would have put aminophylline (0.90) first. The scorer's snapshot
+    // puts cefazolin (88) first, and the model is told it is reading highest-risk-first.
+    expect(draftInputs[0]?.current.map((s) => s.entity)).toEqual(["cefazolin", "aminophylline"]);
+    expect(draftInputs[0]?.current.map((s) => s.score)).toEqual([88, 12]);
+  });
+
+  it("measures 'what changed' against a brief from a PREVIOUS day, never today's own row", async () => {
+    await generateDailyBriefs(new Date("2026-03-04T06:00:00Z"));
+    // A same-day re-run upserts; reading the day's own row back would collapse every diff to zero.
+    expect(previousBriefDates).toEqual(["2026-03-04", "2026-03-04"]);
   });
 
   it("records the model that wrote it", async () => {

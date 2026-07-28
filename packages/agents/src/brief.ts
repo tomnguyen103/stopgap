@@ -2,41 +2,63 @@ import { generateStructured } from "@stopgap/providers";
 import { UNTRUSTED_RECORD_NOTICE } from "./prompt.js";
 import { DailyBrief } from "./schemas.js";
 
+/** One scored signal, as the brief sees it. */
+export interface BriefSignal {
+  entity: string;
+  domain: string;
+  severity: string;
+  /** The deterministic scorer's 0-100 figure, or undefined when this signal has no snapshot yet. */
+  score: number | undefined;
+  title: string;
+  /** Dedupe key — how this signal is matched against the previous brief's set. */
+  key: string;
+}
+
 /** What the brief is written from — already-scored facts, never raw provider payloads. */
 export interface BriefInput {
   /** Signals present in this tenant right now, highest score first. */
-  current: { entity: string; domain: string; severity: string; score: number; title: string }[];
+  current: BriefSignal[];
   /** Dedupe keys present in the previous brief's window, for the "what changed" half. */
   previousKeys: string[];
-  /** Dedupe keys present now, in the same order as `current`. */
-  currentKeys: string[];
-  /** Cases still being monitored, so still sitting on somebody's desk. */
-  awaitingReview: { key: string; source: string }[];
-  /** When the previous brief was generated, or undefined for the first one. */
+  /** Cases sitting in a state that needs a human. */
+  awaitingReview: { key: string; status: string }[];
+  /** The date of the previous brief, or undefined for the first one. */
   since?: string;
 }
 
-/**
- * Draft the daily brief (ticket 13).
- *
- * Runs on the EXISTING provider path — `generateStructured` — so it inherits health-check
- * failover, the cost and latency logging, and the established tracing without a second of any of
- * them. A brief is exactly the kind of feature that tempts a team into adopting a second
- * orchestration library; the observability fragmentation that follows costs more than the feature.
- *
- * The model NEVER computes a score or a severity. Every number in the input arrived from the
- * deterministic scorer, and the model's whole job is to say what they mean in English (ADR-0002).
- * Temperature is whatever the provider path sets; the schema is what makes the output usable.
- */
 export interface DraftedBrief {
   brief: DailyBrief;
   /** `provider:model-id` of the call that actually ran, failover included. Recorded on the row. */
   model: string;
 }
 
+/** How many signals are listed by name. Beyond this they are counted, to bound the prompt. */
+const LISTED_SIGNALS = 25;
+
+/**
+ * Draft the daily brief (ticket 13).
+ *
+ * Runs on the EXISTING provider path — `generateStructured` — so it inherits health-check
+ * failover, the cost and latency logging, and the established tracing without a second of any of
+ * them.
+ *
+ * The model NEVER computes a score or a severity. Every number in the input arrived from the
+ * deterministic scorer, and the model's whole job is to say what they mean in English (ADR-0002).
+ * Temperature is whatever the provider path sets; the schema is what makes the output usable.
+ */
 export async function draftDailyBrief(input: BriefInput): Promise<DraftedBrief> {
-  const appeared = input.currentKeys.filter((k) => !input.previousKeys.includes(k));
-  const gone = input.previousKeys.filter((k) => !input.currentKeys.includes(k));
+  const previous = new Set(input.previousKeys);
+  const currentKeys = new Set(input.current.map((s) => s.key));
+  // NAMES, NOT COUNTS. The system prompt forbids inventing anything absent from the input, so a
+  // bare "3 newly present" leaves the model nothing to write a specific "what changed" from — it
+  // can only restate the number. Signals that DISAPPEARED have no name here: a dedupe key is
+  // `org:source:source-id`, and the row it named is the one no longer in the current set.
+  const appeared = input.current.filter((s) => !previous.has(s.key));
+  const goneCount = input.previousKeys.filter((k) => !currentKeys.has(k)).length;
+  const line = (s: BriefSignal) =>
+    `- ${s.entity} · ${s.domain} · ${s.severity} · ` +
+    `${s.score === undefined ? "not scored yet" : `score ${String(s.score)}`} — ${s.title}`;
+
   const { object, meta } = await generateStructured({
     schema: DailyBrief,
     operation: "daily-brief",
@@ -50,21 +72,20 @@ export async function draftDailyBrief(input: BriefInput): Promise<DraftedBrief> 
       "Do not address the reader as a patient or give instructions about anyone's care. " +
       `${UNTRUSTED_RECORD_NOTICE}`,
     prompt: [
-      input.since ? `Previous brief: ${input.since}` : "This is the first brief for this facility.",
+      input.since
+        ? `Previous brief: ${input.since}`
+        : "This is the first brief for this facility.",
       "",
       `Signals now (${String(input.current.length)}), highest risk first:`,
-      ...input.current
-        .slice(0, 25)
-        .map(
-          (s) =>
-            `- ${s.entity} · ${s.domain} · ${s.severity} · score ${String(s.score)} — ${s.title}`,
-        ),
+      ...input.current.slice(0, LISTED_SIGNALS).map(line),
       "",
-      `Newly present since the previous brief: ${String(appeared.length)}`,
-      `No longer present: ${String(gone.length)}`,
+      `Newly present since the previous brief (${String(appeared.length)}):`,
+      ...appeared.slice(0, LISTED_SIGNALS).map(line),
+      "",
+      `No longer present: ${String(goneCount)}`,
       "",
       `Cases awaiting a human decision (${String(input.awaitingReview.length)}):`,
-      ...input.awaitingReview.map((c) => `- ${c.key} · ${c.source}`),
+      ...input.awaitingReview.map((c) => `- ${c.key} · ${c.status}`),
     ].join("\n"),
   });
   // `meta` also went to the telemetry sinks inside `generateStructured` — provider, model, token
