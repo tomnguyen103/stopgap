@@ -57,8 +57,6 @@
 
   /* ---- Scale: the spacing, radius and type steps the stylesheet was already using ---------- */
   --space-1: 2px;
-  --space-2: 4px;
-  --space-3: 6px;
   --space-4: 8px;
   --space-5: 10px;
   --space-6: 12px;
@@ -68,12 +66,9 @@
   --radius-pill: 999px;
   --radius-md: 8px;
   --radius-lg: 10px;
-  --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 13px;
-  --text-base: 14px;
   --text-lg: 15px;
-  --text-xl: 20px;
   --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, monospace;
   --dur-fast: 120ms;
@@ -84,6 +79,8 @@
   --badge-fg: inherit;
   --badge-radius: var(--radius-pill);
   --badge-pad-y: var(--space-1);
+  /* 9px and 18px are the stylesheet's historical values, deliberately not rounded onto the
+     scale: re-rounding them would move pixels, which is the one thing this ticket must not do. */
   --badge-pad-x: 9px;
 
   --button-bg: var(--interactive);
@@ -111,89 +108,273 @@
 
   --focus-ring: var(--interactive);
 }
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--surface-page);
+  color: var(--text-default);
+  font:
+    14px/1.5 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
 }
-a { color: inherit; text-decoration: none; }
+a {
+  color: inherit;
+  text-decoration: none;
+}
 .topbar {
-  display: flex; align-items: baseline; gap: 12px;
-  padding: 14px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
 }
-.brand { font-weight: 700; letter-spacing: 0.3px; }
-.tag { color: var(--muted); font-size: 12px; }
-.wrap { max-width: 1080px; margin: 0 auto; padding: 24px; }
-h1 { font-size: 20px; margin: 0 0 4px; }
-.sub { color: var(--muted); margin: 0 0 20px; font-size: 13px; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
-tr:hover td { background: var(--surface-hover); }
-.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
-.sev-critical { color: var(--crit); border-color: var(--crit); }
-.sev-high { color: var(--high); border-color: var(--high); }
-.sev-moderate { color: var(--mod); border-color: var(--mod); }
-.sev-low { color: var(--low); border-color: var(--low); }
-.status { color: var(--accent); }
-.empty { padding: 40px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
-.kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; }
-.kv dt { color: var(--muted); }
-.back { color: var(--muted); font-size: 13px; }
-.audit { font-family: ui-monospace, monospace; font-size: 12px; }
-.audit li { margin-bottom: 4px; color: var(--muted); }
-.audit b { color: var(--text); }
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.tag {
+  color: var(--muted);
+  font-size: 12px;
+}
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px;
+}
+h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+.sub {
+  color: var(--muted);
+  margin: 0 0 20px;
+  font-size: 13px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th,
+td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+tr:hover td {
+  background: var(--surface-hover);
+}
+.pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+}
+.sev-critical {
+  color: var(--crit);
+  border-color: var(--crit);
+}
+.sev-high {
+  color: var(--high);
+  border-color: var(--high);
+}
+.sev-moderate {
+  color: var(--mod);
+  border-color: var(--mod);
+}
+.sev-low {
+  color: var(--low);
+  border-color: var(--low);
+}
+.status {
+  color: var(--accent);
+}
+.empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 6px 16px;
+}
+.kv dt {
+  color: var(--muted);
+}
+.back {
+  color: var(--muted);
+  font-size: 13px;
+}
+.audit {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.audit li {
+  margin-bottom: 4px;
+  color: var(--muted);
+}
+.audit b {
+  color: var(--text);
+}
 
 /* Phase 3: nav + protocol/shadow views. */
-.nav { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
-.nav a { color: var(--muted); }
-.nav a:hover { color: var(--text); }
-h2 { font-size: 15px; margin: 24px 0 8px; }
-.draft {
-  margin: 14px 0 0; padding: 12px 14px; background: var(--surface-sunken); border: 1px solid var(--line);
-  border-radius: 8px; white-space: pre-wrap; font: 13px/1.6 ui-monospace, monospace; color: var(--text);
+.nav {
+  margin-left: auto;
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
 }
-.sev-none { color: var(--muted); }
+.nav a {
+  color: var(--muted);
+}
+.nav a:hover {
+  color: var(--text);
+}
+h2 {
+  font-size: 15px;
+  margin: 24px 0 8px;
+}
+.draft {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  font:
+    13px/1.6 ui-monospace,
+    monospace;
+  color: var(--text);
+}
+.sev-none {
+  color: var(--muted);
+}
 
 /* Phase 4: HITL review panel. */
-.draft-input, .reason-input {
-  width: 100%; background: var(--surface-sunken); color: var(--text); border: 1px solid var(--line);
-  border-radius: 8px; padding: 10px 12px; font: 13px/1.6 ui-monospace, monospace;
+.draft-input,
+.reason-input {
+  width: 100%;
+  background: var(--surface-sunken);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font:
+    13px/1.6 ui-monospace,
+    monospace;
 }
-.reason-input { width: auto; flex: 1 1 200px; }
-.actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+.reason-input {
+  width: auto;
+  flex: 1 1 200px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
 button {
-  background: var(--accent); color: var(--text-on-accent); border: 0; border-radius: 8px; padding: 9px 16px;
-  font: 600 13px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font:
+    600 13px/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  cursor: pointer;
 }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
-button.danger { background: transparent; color: var(--crit); border: 1px solid var(--crit); }
-.error { color: var(--crit); font-size: 13px; margin: 10px 0 0; }
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button.danger {
+  background: transparent;
+  color: var(--crit);
+  border: 1px solid var(--crit);
+}
+.error {
+  color: var(--crit);
+  font-size: 13px;
+  margin: 10px 0 0;
+}
 
 /* Phase 6: audit-integrity verification banner. */
 .banner {
-  border-radius: 10px; padding: 14px 18px; margin: 0 0 20px; font-size: 14px;
-  border: 1px solid var(--line); background: var(--panel);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin: 0 0 20px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
 }
-.banner.ok { border-color: var(--ok); color: var(--ok); }
-.banner.bad { border-color: var(--crit); color: var(--crit); }
-.match-ok { color: var(--ok); }
-.match-bad { color: var(--crit); }
-.mono { font-family: ui-monospace, monospace; font-size: 12px; }
+.banner.ok {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+.banner.bad {
+  border-color: var(--crit);
+  color: var(--crit);
+}
+.match-ok {
+  color: var(--ok);
+}
+.match-bad {
+  color: var(--crit);
+}
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
 
 /* Phase 5: demo mode. */
 .demo-banner {
-  padding: 8px 24px; font-size: 13px; color: var(--text);
-  background: var(--surface-info); border-bottom: 1px solid var(--line);
+  padding: 8px 24px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface-info);
+  border-bottom: 1px solid var(--line);
 }
-.demo-banner.capped { background: var(--surface-warn); }
-.card-title { margin: 0 0 6px; }
-.sub-tight { margin: 0; }
-.sub-note { margin: 10px 0 0; }
-.feed-line { display: block; }
+.demo-banner.capped {
+  background: var(--surface-warn);
+}
+.card-title {
+  margin: 0 0 6px;
+}
+.sub-tight {
+  margin: 0;
+}
+.sub-note {
+  margin: 10px 0 0;
+}
+.feed-line {
+  display: block;
+}
 
 /*
   PHASE6 §6.5 — the admin active-org badge. Deliberately the loudest thing in the header: it only
@@ -202,15 +383,35 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   "you are writing into another hospital's records" is a caution, not a navigation aid.
 */
 .active-org-badge {
-  margin-left: 16px; display: inline-flex; align-items: baseline; gap: 8px;
-  padding: 4px 12px; border-radius: 999px;
-  border: 1px solid var(--high); background: var(--surface-warn); color: var(--high);
-  font-size: 12px; white-space: nowrap;
+  margin-left: 16px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--high);
+  background: var(--surface-warn);
+  color: var(--high);
+  font-size: 12px;
+  white-space: nowrap;
 }
-.active-org-badge:hover { background: var(--surface-warn-hover); }
-.active-org-badge__label { text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
-.active-org-badge__name { color: var(--text); font-weight: 600; }
-.active-org-badge__slug { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+.active-org-badge:hover {
+  background: var(--surface-warn-hover);
+}
+.active-org-badge__label {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+}
+.active-org-badge__name {
+  color: var(--text);
+  font-weight: 600;
+}
+.active-org-badge__slug {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
 
 /*
   ---------------------------------------------------------------------------------------------
@@ -234,17 +435,32 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   border: 1px solid var(--badge-border);
   color: var(--badge-fg);
 }
-.ds-badge--critical { --badge-border: var(--severity-critical); --badge-fg: var(--severity-critical); }
-.ds-badge--high { --badge-border: var(--severity-high); --badge-fg: var(--severity-high); }
-.ds-badge--moderate { --badge-border: var(--severity-moderate); --badge-fg: var(--severity-moderate); }
-.ds-badge--low { --badge-border: var(--severity-low); --badge-fg: var(--severity-low); }
-.ds-badge--none { --badge-fg: var(--severity-none); }
-.ds-badge--status { --badge-fg: var(--interactive); }
+.ds-badge--critical {
+  --badge-border: var(--severity-critical);
+  --badge-fg: var(--severity-critical);
+}
+.ds-badge--high {
+  --badge-border: var(--severity-high);
+  --badge-fg: var(--severity-high);
+}
+.ds-badge--moderate {
+  --badge-border: var(--severity-moderate);
+  --badge-fg: var(--severity-moderate);
+}
+.ds-badge--low {
+  --badge-border: var(--severity-low);
+  --badge-fg: var(--severity-low);
+}
+.ds-badge--none {
+  --badge-fg: var(--severity-none);
+}
+.ds-badge--status {
+  --badge-fg: var(--interactive);
+}
 
 /*
   Button — all eight states, because a primitive that only styles `default` is a primitive every
-  consumer has to finish themselves. `.is-*` classes duplicate each pseudo-class so the preview
-  route can show every state at once without scripting a hover.
+  consumer has to finish themselves, and the two consumers finish it differently.
 */
 .ds-button {
   background: var(--button-bg);
@@ -256,20 +472,51 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   cursor: pointer;
   transition: filter var(--dur-fast) var(--ease-out);
 }
-.ds-button:hover:not(:disabled),
-.ds-button.is-hover { filter: brightness(1.08); }
-.ds-button:active:not(:disabled),
-.ds-button.is-active { filter: brightness(0.92); }
+.ds-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.ds-button:active:not(:disabled) {
+  filter: brightness(0.92);
+}
 /* Never transition the ring: a focus indicator that fades in is a focus indicator you can miss. */
-.ds-button:focus-visible,
-.ds-button.is-focus { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.ds-button:disabled,
-.ds-button.is-disabled { opacity: var(--button-disabled-opacity); cursor: not-allowed; }
-.ds-button[data-state="loading"] { opacity: var(--button-disabled-opacity); cursor: progress; }
-.ds-button[data-state="error"] { background: transparent; color: var(--status-bad); box-shadow: inset 0 0 0 1px var(--status-bad); }
-.ds-button[data-state="success"] { background: transparent; color: var(--status-ok); box-shadow: inset 0 0 0 1px var(--status-ok); }
-.ds-button--danger { background: transparent; color: var(--severity-critical); box-shadow: inset 0 0 0 1px var(--severity-critical); }
-.ds-button--quiet { background: transparent; color: var(--text-subtle); box-shadow: inset 0 0 0 1px var(--border-default); }
+.ds-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.ds-button:disabled {
+  opacity: var(--button-disabled-opacity);
+  cursor: not-allowed;
+}
+.ds-button[data-state="loading"] {
+  opacity: var(--button-disabled-opacity);
+  cursor: progress;
+}
+/*
+  Outlined variants draw a real BORDER, exactly as `button.danger` has always done. An inset
+  box-shadow looks the same and occupies no layout box, so a rebuilt danger button would sit 2px
+  smaller than the hand-written one beside it — and box-shadow disappears entirely under
+  forced-colors, taking the only boundary with it.
+*/
+.ds-button[data-state="error"] {
+  background: transparent;
+  color: var(--status-bad);
+  border: 1px solid var(--status-bad);
+}
+.ds-button[data-state="success"] {
+  background: transparent;
+  color: var(--status-ok);
+  border: 1px solid var(--status-ok);
+}
+.ds-button--danger {
+  background: transparent;
+  color: var(--severity-critical);
+  border: 1px solid var(--severity-critical);
+}
+.ds-button--quiet {
+  background: transparent;
+  color: var(--text-subtle);
+  border: 1px solid var(--border-default);
+}
 
 /* Card — the same panel the console has always drawn, expressed once. */
 .ds-card {
@@ -280,8 +527,15 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   margin-bottom: var(--space-7);
 }
 /* Matches the global `h2` rule exactly — a card rebuilt on the primitive must not shift. */
-.ds-card__title { margin: var(--space-9) 0 var(--space-4); font-size: var(--text-lg); }
-.ds-card__sub { color: var(--text-subtle); margin: 0 0 var(--space-8); font-size: var(--text-md); }
+.ds-card__title {
+  margin: var(--space-9) 0 var(--space-4);
+  font-size: var(--text-lg);
+}
+.ds-card__sub {
+  color: var(--text-subtle);
+  margin: 0 0 var(--space-8);
+  font-size: var(--text-md);
+}
 
 /* Input — same eight states, same reason. */
 .ds-input {
@@ -293,16 +547,27 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   padding: var(--space-5) var(--space-6);
   font: var(--text-md) / 1.6 var(--font-mono);
 }
-.ds-input:hover:not(:disabled),
-.ds-input.is-hover { border-color: var(--text-subtle); }
-.ds-input:focus-visible,
-.ds-input.is-focus { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-.ds-input:disabled,
-.ds-input.is-disabled { opacity: var(--button-disabled-opacity); cursor: not-allowed; }
-.ds-input[aria-invalid="true"],
-.ds-input.is-error { border-color: var(--input-invalid-border); }
-.ds-input[data-state="success"] { border-color: var(--status-ok); }
-.ds-input--inline { width: auto; flex: 1 1 200px; }
+.ds-input:hover:not(:disabled) {
+  border-color: var(--text-subtle);
+}
+.ds-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.ds-input:disabled {
+  opacity: var(--button-disabled-opacity);
+  cursor: not-allowed;
+}
+.ds-input[aria-invalid="true"] {
+  border-color: var(--input-invalid-border);
+}
+.ds-input[data-state="success"] {
+  border-color: var(--status-ok);
+}
+.ds-input--inline {
+  width: auto;
+  flex: 1 1 200px;
+}
 
 /*
   Table — the existing element rules, scoped so a rebuilt page can opt in explicitly.
@@ -312,10 +577,19 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   inside its own container keeps the overflow where it belongs. Desktop is unaffected — the
   content fits, so the container never scrolls and nothing moves.
 */
-.ds-table-scroll { overflow-x: auto; }
-.ds-table { width: 100%; border-collapse: collapse; }
+.ds-table-scroll {
+  overflow-x: auto;
+}
+.ds-table {
+  width: 100%;
+  border-collapse: collapse;
+}
 .ds-table th,
-.ds-table td { text-align: left; padding: var(--space-5) var(--space-6); border-bottom: 1px solid var(--table-cell-border); }
+.ds-table td {
+  text-align: left;
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--table-cell-border);
+}
 .ds-table th {
   color: var(--table-header-fg);
   font-weight: 600;
@@ -323,12 +597,21 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
-.ds-table tr:hover td { background: var(--table-row-hover); }
+.ds-table tr:hover td {
+  background: var(--table-row-hover);
+}
 /* Same pair `.sub` applies when it lands on a cell: recede, and drop one type step. */
-.ds-table td.is-subtle { color: var(--text-subtle); font-size: var(--text-md); }
+.ds-table td.is-subtle {
+  color: var(--text-subtle);
+  font-size: var(--text-md);
+}
 /* The accent-coloured lifecycle state, as `.status` has always rendered it. */
-.ds-table td.is-status { color: var(--interactive); }
+.ds-table td.is-status {
+  color: var(--interactive);
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .ds-button { transition-duration: 1ms; }
+  .ds-button {
+    transition-duration: 1ms;
+  }
 }
