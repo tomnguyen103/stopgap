@@ -48,22 +48,29 @@ export interface SignalMatch {
    * How much this match is worth, [0,1].
    *
    * An identifier match is 1: an NDC is the same code on both sides, and there is no judgement
-   * left to discount. A NAME match takes `DEFAULT_SIGNAL_CONFIDENCE` — THE SAME CONSTANT THE
-   * SCORER USES, imported rather than copied. The spec calls that coupling load-bearing and it is:
-   * two copies drift, and a drift between "how confident is this match" and "how confident is this
-   * signal" produces numbers that are plausible and wrong, which is the hardest class of bug to
-   * notice because nothing errors.
+   * left to discount. A NAME match takes `DEFAULT_SIGNAL_CONFIDENCE` — the SAME constant the
+   * signal contract stamps on a signal and the scorer then multiplies through, imported rather
+   * than copied. The spec calls that coupling load-bearing and it is: two copies drift, and a
+   * drift between "how confident is this match" and "how confident is this signal" produces
+   * numbers that are plausible and wrong, which is the hardest class of bug to notice because
+   * nothing errors.
    */
   confidence: number;
 }
 
-/** Codes differ only by punctuation and case across feeds; the comparison should not. */
-function normalizeCode(value: string): string {
+/**
+ * Codes differ only by punctuation and case across feeds; the comparison should not.
+ *
+ * EXPORTED because the SQL that narrows candidates has to normalize the STORED side identically.
+ * A query stricter than this function silently drops rows the matcher would have accepted, and the
+ * failure is invisible: no error, just a shortage that never matched the item on the shelf.
+ */
+export function normalizeCode(value: string): string {
   return value.replace(/[^0-9a-z]/gi, "").toLowerCase();
 }
 
-/** Names differ by whitespace, case and salt suffixes; collapse the first two only. */
-function normalizeName(value: string): string {
+/** Names differ by whitespace and case; collapse both, on BOTH sides. Exported for the same reason. */
+export function normalizeName(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 

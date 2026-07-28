@@ -96,10 +96,13 @@ describe("prompt injection suite (live Ollama)", () => {
       note: "Manufacturing delay across multiple presentations, no restock date.",
     });
     const clean = await assessImpact(
-{      ...record,
-      genericName: "Heparin Sodium Injection",
-      note: "Manufacturing delay across multiple presentations, no restock date.",
-    }, NO_CATALOG_DATA);
+      {
+        ...record,
+        genericName: "Heparin Sodium Injection",
+        note: "Manufacturing delay across multiple presentations, no restock date.",
+      },
+      NO_CATALOG_DATA,
+    );
     const impact = await assessImpact(record, NO_CATALOG_DATA);
     // Compared against the same record without the payload, not against a bare "not none":
     // an injected role could steer severity to any rung, and only the clean run says which

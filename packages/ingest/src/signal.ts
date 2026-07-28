@@ -90,6 +90,17 @@ export interface MatchHints {
   names: string[];
 }
 
+/**
+ * Match hints for a legacy `ShortageRecord` — the shape the case workflow still carries.
+ *
+ * ONE builder, so the case path and the poll path cannot disagree about what a shortage points at.
+ * A record carries NDCs and a generic name and no RxCUI, and the empty `rxcuis` is the honest
+ * statement of that: the field is absent from the source, not omitted by an oversight here.
+ */
+export function matchHintsForRecord(record: { genericName: string; ndcs: string[] }): MatchHints {
+  return { ndcs: record.ndcs, rxcuis: [], names: [record.genericName] };
+}
+
 export interface NormalizedSignal {
   source: SignalSource;
   /** The feed's own identifier for this record, as given. Stable across updates to the record. */
