@@ -1162,13 +1162,17 @@ export async function sweepRetention(): Promise<RetentionSweepResult[]> {
   // ONE instant for the whole run, not one per org: cutoffs computed from a moving clock would
   // make two tenants' sweeps incomparable and the run irreproducible from its own audit entries.
   const now = new Date();
+  // Stable across retries of this activity's execution, so a retried sweep's audit entries name
+  // the same run rather than looking like a second cleanup.
+  const runToken = currentRunId() ?? now.toISOString();
   const results: RetentionSweepResult[] = [];
   for (const org of orgs) {
     try {
-      const result = await sweepOrgRetention(org.id, now, windows);
+      const result = await sweepOrgRetention(org.id, now, windows, runToken);
       results.push(result);
       const removed = totalRemoved(result.counts);
       if (removed > 0) console.log(`[retention] org ${org.id}: removed ${removed} rows`, result.counts);
+      incrementCounter("stopgap_retention_success_total");
     } catch (err) {
       incrementCounter("stopgap_retention_failures_total");
       console.error(

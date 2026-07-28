@@ -35,7 +35,14 @@ async function asOrg<T>(orgId: string, fn: (tx: postgres.TransactionSql) => Prom
   }) as Promise<T>;
 }
 
-/** One expired signal (with a snapshot) and one fresh signal, per tenant. */
+/**
+ * One expired signal (with a snapshot) and one fresh signal, per tenant.
+ *
+ * `updated_at` carries the age, because that is the column the sweep reads: a live shortage is
+ * touched by every poll that still lists it, so only a signal the feeds have stopped mentioning
+ * ages out. Setting only `published_at` old would describe a signal the poll still refreshes,
+ * which retention deliberately keeps.
+ */
 async function seed(orgId: string, label: string): Promise<void> {
   await asOrg(orgId, async (tx) => {
     for (const [age, suffix] of [
@@ -46,13 +53,14 @@ async function seed(orgId: string, label: string): Promise<void> {
         insert into risk_signals (
           org_id, source, source_id, risk_domain, entity_type, entity_identifier, title, summary,
           severity, severity_score, confidence, observed_at, published_at, last_fetched_at,
-          staleness, evidence_url, raw, dedupe_key, match_hints
+          staleness, evidence_url, raw, dedupe_key, match_hints, created_at, updated_at
         ) values (
           ${orgId}, 'openfda-drug', ${`${label}-${suffix}`}, 'shortage', 'drug', 'cefazolin',
           ${`${label} ${suffix}`}, 'seeded', 'high', 0.7, 0.9,
           now() - ${age}::interval, now() - ${age}::interval, now(), 'fresh',
           'https://example.test', '{}'::jsonb, ${`${orgId}:openfda-drug:${label}-${suffix}`},
-          '{"ndcs":[],"rxcuis":[],"names":[]}'::jsonb
+          '{"ndcs":[],"rxcuis":[],"names":[]}'::jsonb,
+          now() - ${age}::interval, now() - ${age}::interval
         ) returning id`;
       const signalId = (signal as { id: string }).id;
       await tx`insert into risk_score_snapshots (org_id, signal_id, score, band, components,

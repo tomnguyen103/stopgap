@@ -30,8 +30,13 @@ import {
  *     independently valid: a sweep killed halfway has removed some expired rows and no live ones.
  *     There is no intermediate state to resume from and nothing to roll back.
  *  4. **Recorded.** A run that removed nothing and a run that never happened look identical from
- *     the outside, so each org's sweep appends ONE audit entry with its per-kind counts — through
+ *     the outside, so each org's sweep appends an audit entry with its per-kind counts — through
  *     the chain that already exists rather than a second bespoke log.
+ *
+ * ONE WINDOW IS NOT INDEPENDENT OF ANOTHER, and the configuration cannot hide it: score snapshots
+ * cascade from their signal, so a snapshot window LONGER than the signal window does not preserve
+ * them — a swept signal takes its history with it. The snapshot window governs snapshots whose
+ * signal is still here; it cannot outlive the signal, and no setting makes it.
  */
 
 /** The record kinds a sweep may remove. Deliberately does NOT include the audit chain — see above. */
@@ -98,65 +103,76 @@ export const RETENTION_BATCH_SIZE = 5_000;
 export type RetentionCounts = Record<RetentionKind, number>;
 
 /**
+ * The table, tenant column, and AGE column behind each kind — one map, at module level.
+ *
+ * Age is read from the column that says how long the row has been ours, not from a date the
+ * SOURCE chose: `risk_signals.updatedAt` is refreshed by every poll that still sees the signal, so
+ * a shortage published two years ago and still live is not swept, while one the feeds stopped
+ * mentioning ages out. Sweeping on `publishedAt` would delete live signals and the next poll would
+ * recreate them with their miss counters reset — churn that looks like retention working.
+ */
+const RETENTION_TABLES = {
+  riskSignals: { table: riskSignals, id: riskSignals.id, org: riskSignals.orgId, at: riskSignals.updatedAt },
+  riskScoreSnapshots: {
+    table: riskScoreSnapshots,
+    id: riskScoreSnapshots.id,
+    org: riskScoreSnapshots.orgId,
+    at: riskScoreSnapshots.computedAt,
+  },
+  alertEvents: { table: alertEvents, id: alertEvents.id, org: alertEvents.orgId, at: alertEvents.firedAt },
+  inventorySnapshots: {
+    table: inventorySnapshots,
+    id: inventorySnapshots.id,
+    org: inventorySnapshots.orgId,
+    at: inventorySnapshots.capturedAt,
+  },
+  procurementEvents: {
+    table: procurementEvents,
+    id: procurementEvents.id,
+    org: procurementEvents.orgId,
+    at: procurementEvents.orderedAt,
+  },
+} as const satisfies Record<RetentionKind, unknown>;
+
+/**
  * Delete one kind's expired rows for one tenant, in batches, returning how many went.
  *
- * The `id in (select … limit)` shape is what makes the batch bounded: a bare `delete … where
- * captured_at < cutoff` is unbounded by construction. `orgId` appears in BOTH the subquery and the
- * outer predicate — belt and braces over RLS, so a row this tenant cannot see is also a row this
- * statement does not name.
+ * ONE TRANSACTION PER BATCH — `withOrgDb` opens the transaction, and it is opened INSIDE the loop
+ * on purpose. A scope around the whole loop would hold every deleted row's lock until the last
+ * batch committed, which is the single enormous delete the batching exists to avoid, and a sweep
+ * killed halfway would roll back all of its work. As written, each batch commits alone: an
+ * interrupted sweep has removed some expired rows and no live ones, with nothing to resume.
+ *
+ * The `id in (…)` shape is what makes a batch bounded — a bare `delete … where at < cutoff` is
+ * unbounded by construction. `orgId` is in both the select and the delete: RLS would already hide
+ * another tenant's row, and the predicate means the statement does not name it either.
  */
-async function sweepKind(
-  db: Parameters<Parameters<typeof withOrgDb>[1]>[0],
-  orgId: string,
-  kind: RetentionKind,
-  cutoff: Date,
-): Promise<number> {
-  const table = {
-    riskSignals: { table: riskSignals, id: riskSignals.id, org: riskSignals.orgId, at: riskSignals.publishedAt },
-    riskScoreSnapshots: {
-      table: riskScoreSnapshots,
-      id: riskScoreSnapshots.id,
-      org: riskScoreSnapshots.orgId,
-      at: riskScoreSnapshots.computedAt,
-    },
-    alertEvents: { table: alertEvents, id: alertEvents.id, org: alertEvents.orgId, at: alertEvents.firedAt },
-    inventorySnapshots: {
-      table: inventorySnapshots,
-      id: inventorySnapshots.id,
-      org: inventorySnapshots.orgId,
-      at: inventorySnapshots.capturedAt,
-    },
-    procurementEvents: {
-      table: procurementEvents,
-      id: procurementEvents.id,
-      org: procurementEvents.orgId,
-      at: procurementEvents.orderedAt,
-    },
-  }[kind];
-
+async function sweepKind(orgId: string, kind: RetentionKind, cutoff: Date): Promise<number> {
+  const columns = RETENTION_TABLES[kind];
   let removed = 0;
   for (;;) {
-    const doomed = await db
-      .select({ id: table.id })
-      .from(table.table)
-      .where(and(eq(table.org, orgId), lt(table.at, cutoff)))
-      .limit(RETENTION_BATCH_SIZE);
-    if (doomed.length === 0) return removed;
-    await db
-      .delete(table.table)
-      .where(
+    const batch = await withOrgDb(orgId, async (db) => {
+      const doomed = await db
+        .select({ id: columns.id })
+        .from(columns.table)
+        .where(and(eq(columns.org, orgId), lt(columns.at, cutoff)))
+        .limit(RETENTION_BATCH_SIZE);
+      if (doomed.length === 0) return 0;
+      await db.delete(columns.table).where(
         and(
-          eq(table.org, orgId),
+          eq(columns.org, orgId),
           inArray(
-            table.id,
+            columns.id,
             doomed.map((row) => row.id),
           ),
         ),
       );
-    removed += doomed.length;
-    // A short batch means the table is drained; skipping the confirming round trip matters on the
+      return doomed.length;
+    });
+    removed += batch;
+    // A short batch means the table is drained; the confirming round trip is skipped, which is the
     // common case where nothing at all has expired.
-    if (doomed.length < RETENTION_BATCH_SIZE) return removed;
+    if (batch < RETENTION_BATCH_SIZE) return removed;
   }
 }
 
@@ -179,32 +195,41 @@ export async function sweepOrgRetention(
   orgId: string,
   now: Date,
   windows: RetentionWindows,
+  /**
+   * A token identifying the RUN, stable across retries of the same execution (the Temporal run id
+   * upstream). It names the sweep in the audit entry, so two entries produced by a retried
+   * activity are recognisable as one sweep recorded twice rather than as two cleanups.
+   */
+  runToken = now.toISOString(),
 ): Promise<RetentionSweepResult> {
   const plan = retentionPlan(now, windows);
   const counts = Object.fromEntries(RETENTION_KINDS.map((kind) => [kind, 0])) as RetentionCounts;
 
-  // Each kind in its OWN transaction, so an interruption between two kinds leaves the database
-  // consistent and the work already done committed. A single transaction spanning every kind would
-  // make a killed sweep undo hours of deletes and start again from nothing.
-  for (const entry of plan) {
-    counts[entry.kind] = await withOrgDb(orgId, (db) => sweepKind(db, orgId, entry.kind, entry.cutoff));
+  try {
+    for (const entry of plan) {
+      counts[entry.kind] = await sweepKind(orgId, entry.kind, entry.cutoff);
+    }
+  } finally {
+    // Recorded even when a later kind threw. Rows already deleted are gone whether or not the run
+    // finished, and an audit chain that only describes complete runs cannot answer "where did
+    // those rows go" for the runs that matter most.
+    await withOrgDb(orgId, (db) =>
+      appendAudit(db, {
+        orgId,
+        actor: "system:retention",
+        action: "retention.sweep",
+        detail: {
+          sweptAt: now.toISOString(),
+          runToken,
+          counts,
+          cutoffs: Object.fromEntries(plan.map((entry) => [entry.kind, entry.cutoff.toISOString()])),
+        },
+        // NOT deduped: `appendAudit` only applies its idempotency lookup to case-scoped entries,
+        // and this has no case. The key is a stable label, not a guarantee of one entry per run.
+        eventKey: `retention:${orgId}:${runToken}`,
+      }),
+    );
   }
-
-  await withOrgDb(orgId, (db) =>
-    appendAudit(db, {
-      orgId,
-      actor: "system:retention",
-      action: "retention.sweep",
-      detail: {
-        sweptAt: now.toISOString(),
-        counts,
-        cutoffs: Object.fromEntries(plan.map((entry) => [entry.kind, entry.cutoff.toISOString()])),
-      },
-      // One entry per org per sweep instant: a retried activity records the same run once rather
-      // than appending a second entry claiming a second cleanup.
-      eventKey: `retention:${orgId}:${now.toISOString()}`,
-    }),
-  );
 
   return { orgId, counts, sweptAt: now };
 }

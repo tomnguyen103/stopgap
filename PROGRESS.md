@@ -380,3 +380,13 @@ Recorded as they are made, so the reasoning survives the pull request that carri
 - **The sweep batches, one transaction per kind** (#18). A killed sweep has removed some expired
   rows and no live ones, with nothing to resume and nothing to roll back — which is what makes
   "an interrupted cleanup leaves the database consistent" a property rather than a hope.
+- **Signals age out on `updated_at`, not on the source's `published_at`** (#18, from local review).
+  Every poll that still lists a shortage refreshes the row, so a two-year-old shortage that is
+  still live is not swept while one the feeds stopped mentioning ages out. Sweeping on the source's
+  publication date would delete live signals and the next poll would recreate them with their miss
+  counters reset — churn that looks like retention working.
+- **Inventory and procurement rows are swept too, though the ticket names only signals, snapshots
+  and alert events** (#18). They are the other unbounded-growth tables — an inventory feed writes a
+  snapshot per item per capture — and their windows default to a year, long enough that the
+  burn-rate window (90 days) is never starved. Stated here because it is more than the ticket asked
+  for.
