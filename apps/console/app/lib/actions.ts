@@ -18,7 +18,12 @@ import {
   setUserDisabled,
   withOrgDb,
 } from "@stopgap/db";
-import { assertMutationAllowed, isDemoMode, prepareDemoRun, type DemoRunResult } from "@stopgap/demo";
+import {
+  assertMutationAllowed,
+  isDemoMode,
+  prepareDemoRun,
+  type DemoRunResult,
+} from "@stopgap/demo";
 import {
   acknowledgeCase as signalAcknowledge,
   resolveException,
@@ -27,7 +32,11 @@ import {
   withTemporalClient,
 } from "@stopgap/workflows";
 import { requireRole } from "./auth-guards";
-import { ACTIVE_ORG_COOKIE, ACTIVE_ORG_COOKIE_MAX_AGE_SECONDS, resolvePrincipal } from "./principal";
+import {
+  ACTIVE_ORG_COOKIE,
+  ACTIVE_ORG_COOKIE_MAX_AGE_SECONDS,
+  resolvePrincipal,
+} from "./principal";
 
 /**
  * HITL actions (PROJECT_PLAN §2, §13 Phase 4). Every one of these signals the durable
@@ -123,7 +132,10 @@ export async function acknowledgeCase(workflowId: unknown): Promise<void> {
   if (!principal.userId) throw new Error("acknowledge requires an authenticated user id");
   const row = await caseForWorkflow(principal.orgId, workflowIdSchema.parse(workflowId));
   await withTemporalClient((client) =>
-    signalAcknowledge(client, row.workflowId, { userId: principal.userId!, label: principal.label }),
+    signalAcknowledge(client, row.workflowId, {
+      userId: principal.userId!,
+      label: principal.label,
+    }),
   );
   revalidatePath(`/cases/${encodeURIComponent(String(workflowId))}`);
 }
@@ -211,7 +223,12 @@ export async function assignRoleAction(userId: unknown, role: unknown): Promise<
   const r = roleSchema.parse(role);
   // Only audit a real grant — assignRole is a no-op when the user already holds the role.
   if (await withOrgDb(principal.orgId, (db) => assignRole(db, principal.orgId, uid, r))) {
-    await recordPrivilegedAudit(principal, "user.role_granted", { targetUserId: uid, role: r }, `user.role_granted.${uid}.${r}`);
+    await recordPrivilegedAudit(
+      principal,
+      "user.role_granted",
+      { targetUserId: uid, role: r },
+      `user.role_granted.${uid}.${r}`,
+    );
   }
   revalidatePath("/admin/users");
 }
@@ -224,7 +241,12 @@ export async function revokeRoleAction(userId: unknown, role: unknown): Promise<
   const r = roleSchema.parse(role);
   // Only audit a real revoke — revokeRole is a no-op when the user never held the role.
   if (await withOrgDb(principal.orgId, (db) => revokeRole(db, principal.orgId, uid, r))) {
-    await recordPrivilegedAudit(principal, "user.role_revoked", { targetUserId: uid, role: r }, `user.role_revoked.${uid}.${r}`);
+    await recordPrivilegedAudit(
+      principal,
+      "user.role_revoked",
+      { targetUserId: uid, role: r },
+      `user.role_revoked.${uid}.${r}`,
+    );
   }
   revalidatePath("/admin/users");
 }
@@ -329,7 +351,12 @@ export async function revokeApiKeyAction(id: unknown): Promise<void> {
   // sees the failure and can re-run it — the second run is a no-op that appends nothing, which is
   // why the audit gap is worth recording here rather than papering over.
   if (await withOrgDb(principal.orgId, (db) => revokeApiKey(principal.orgId, keyId, db))) {
-    await recordPrivilegedAudit(principal, "api_key.revoked", { apiKeyId: keyId }, `api_key.revoked.${keyId}`);
+    await recordPrivilegedAudit(
+      principal,
+      "api_key.revoked",
+      { apiKeyId: keyId },
+      `api_key.revoked.${keyId}`,
+    );
   }
   revalidatePath("/admin/api-keys");
 }

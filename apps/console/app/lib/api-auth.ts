@@ -135,9 +135,16 @@ export async function authenticateApiRequest(
   // blip into an unmetered window — the one moment the limit exists to cover.
   let reservation: { allowed: boolean; recent: number };
   try {
-    reservation = await reserveApiKeyRequest(key.id, new Date(Date.now() - RATE_WINDOW_MS), key.rateLimitPerHour);
+    reservation = await reserveApiKeyRequest(
+      key.id,
+      new Date(Date.now() - RATE_WINDOW_MS),
+      key.rateLimitPerHour,
+    );
   } catch (err) {
-    return { ok: false, response: storeUnavailable("record this request against the key's rate limit", err) };
+    return {
+      ok: false,
+      response: storeUnavailable("record this request against the key's rate limit", err),
+    };
   }
   if (!reservation.allowed) {
     return {

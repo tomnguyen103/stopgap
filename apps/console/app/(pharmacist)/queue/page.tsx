@@ -2,6 +2,7 @@ import Link from "next/link";
 import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
 import { DemoPanel } from "../../demo-panel";
 import { getCases, getFeedFreshness } from "../../lib/data";
+import { requireGroup } from "../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,16 @@ function sevClass(sev: string | null): string {
  * gets. The queue IS the pharmacist's work, so it is the landing route rather than a link away
  * from one.
  */
+/**
+ * Guards itself, and does not rely on the group layout having run.
+ *
+ * A layout is NOT an authorization boundary: Next does not re-render one on a soft navigation, and
+ * the partial render is driven by router-state headers the client supplies. A crafted request can
+ * render this page with the layout skipped entirely — so the check that matters is the one here.
+ * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
+ */
 export default async function CaseQueuePage() {
+  await requireGroup("pharmacist");
   const [cases, feeds] = await Promise.all([getCases(), getFeedFreshness()]);
   return (
     <>

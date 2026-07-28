@@ -67,8 +67,8 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
       <div className="card">
         <h2 className="card-title">Issue a key</h2>
         <p className="sub-tight">
-          Scopes are the whole authorization story for a key — it can do exactly what is ticked
-          here and nothing else.
+          Scopes are the whole authorization story for a key — it can do exactly what is ticked here
+          and nothing else.
         </p>
         <div className="actions">
           <input

@@ -6,10 +6,20 @@ import { getCaseDetail, getWorkflowState } from "../../../lib/data";
 import { resolvePrincipal } from "../../../lib/principal";
 import { EscalationPanel } from "./escalation-panel";
 import { ReviewPanel } from "./review-panel";
+import { requireGroup } from "../../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Guards itself, and does not rely on the group layout having run.
+ *
+ * A layout is NOT an authorization boundary: Next does not re-render one on a soft navigation, and
+ * the partial render is driven by router-state headers the client supplies. A crafted request can
+ * render this page with the layout skipped entirely — so the check that matters is the one here.
+ * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
+ */
 export default async function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireGroup("pharmacist");
   const { id } = await params;
   const detail = await getCaseDetail(decodeURIComponent(id));
   if (!detail) notFound();
@@ -64,8 +74,8 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           <h2>Pharmacist review (disabled in demo)</h2>
           <p className="sub">
             This case is blocked on a pharmacist decision. Approving clinical guidance needs a
-            verified reviewer, and this deployment has no auth layer — so the demo shows the
-            gate without opening it.
+            verified reviewer, and this deployment has no auth layer — so the demo shows the gate
+            without opening it.
           </p>
         </div>
       ) : live ? (
@@ -85,9 +95,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         <div className="card">
           <h2>Review unavailable</h2>
           <p className="sub">
-            This case is {c.status.replace("_", " ")}, but the workflow could not be reached, so
-            the drafted protocol cannot be shown. Start the worker (<code>pnpm worker</code>)
-            and reload — decisions are taken against the live draft, never a stale copy.
+            This case is {c.status.replace("_", " ")}, but the workflow could not be reached, so the
+            drafted protocol cannot be shown. Start the worker (<code>pnpm worker</code>) and reload
+            — decisions are taken against the live draft, never a stale copy.
           </p>
         </div>
       ) : null}

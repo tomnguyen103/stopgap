@@ -1,4 +1,5 @@
 import { getShadowDashboard, getShadowRuns } from "../../lib/data";
+import { requireGroup } from "../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,16 @@ export const dynamic = "force-dynamic";
  * plus the promotion stage each drug class has earned and what is still blocking the next
  * one. Nothing here can promote a class — promotion is computed from the ledger, not set.
  */
+/**
+ * Guards itself, and does not rely on the group layout having run.
+ *
+ * A layout is NOT an authorization boundary: Next does not re-render one on a soft navigation, and
+ * the partial render is driven by router-state headers the client supplies. A crafted request can
+ * render this page with the layout skipped entirely — so the check that matters is the one here.
+ * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
+ */
 export default async function ShadowPage() {
+  await requireGroup("pharmacist");
   const [classes, runs] = await Promise.all([getShadowDashboard(), getShadowRuns(50)]);
   const totalRuns = classes.reduce((sum, row) => sum + row.stats.runs, 0);
 
@@ -16,14 +26,13 @@ export default async function ShadowPage() {
     <>
       <h1>Shadow mode</h1>
       <p className="sub">
-        {totalRuns} scored run{totalRuns === 1 ? "" : "s"} · agent proposals vs the human
-        baseline · no shadow run ever touches a live case
+        {totalRuns} scored run{totalRuns === 1 ? "" : "s"} · agent proposals vs the human baseline ·
+        no shadow run ever touches a live case
       </p>
 
       {classes.length === 0 ? (
         <div className="empty">
-          No shadow runs yet. Replay the corpus:{" "}
-          <code>pnpm --filter @stopgap/shadow replay</code>
+          No shadow runs yet. Replay the corpus: <code>pnpm --filter @stopgap/shadow replay</code>
         </div>
       ) : (
         <table>

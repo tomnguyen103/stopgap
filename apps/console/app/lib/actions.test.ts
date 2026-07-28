@@ -31,7 +31,10 @@ const MEMBER_USER_ID = "44444444-4444-4444-4444-444444444444";
 const FOREIGN_USER_ID = "55555555-5555-5555-5555-555555555555";
 
 // DB side effects — spies so we can assert they never fire on an unauthorized call.
-const approveProtocolVersion = vi.fn(async (..._a: unknown[]) => ({ row: { version: 3 }, changed: true }));
+const approveProtocolVersion = vi.fn(async (..._a: unknown[]) => ({
+  row: { version: 3 },
+  changed: true,
+}));
 const appendAudit = vi.fn(async (..._a: unknown[]) => ({ hash: "h" }));
 /** Orgs `withOrgDb` was opened for, in order — the cross-tenant assertions read this. */
 const scopedOrgIds: string[] = [];
@@ -101,7 +104,8 @@ vi.mock("@stopgap/demo", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const { approveProtocolVersionAction, assignRoleAction, revokeRoleAction } = await import("./actions");
+const { approveProtocolVersionAction, assignRoleAction, revokeRoleAction } =
+  await import("./actions");
 const { AuthorizationError } = await import("./authz");
 
 function principal(roles: Principal["roles"]): Principal {
@@ -166,7 +170,9 @@ describe("role management is confined to the admin's active org", () => {
 
   it("REJECTS a pharmacist attempting a grant at all (RBAC still first)", async () => {
     resolvePrincipal.mockResolvedValue(principal(["pharmacist"]));
-    await expect(assignRoleAction(MEMBER_USER_ID, "pharmacist")).rejects.toBeInstanceOf(AuthorizationError);
+    await expect(assignRoleAction(MEMBER_USER_ID, "pharmacist")).rejects.toBeInstanceOf(
+      AuthorizationError,
+    );
     expect(assignRole).not.toHaveBeenCalled();
   });
 });
@@ -174,7 +180,9 @@ describe("role management is confined to the admin's active org", () => {
 describe("approveProtocolVersionAction (server-enforced authorization)", () => {
   it("REJECTS a pharmacist session with AuthorizationError and runs NO side effect", async () => {
     resolvePrincipal.mockResolvedValue(principal(["pharmacist"]));
-    await expect(approveProtocolVersionAction(VERSION_ID)).rejects.toBeInstanceOf(AuthorizationError);
+    await expect(approveProtocolVersionAction(VERSION_ID)).rejects.toBeInstanceOf(
+      AuthorizationError,
+    );
     // The privilege check fires before the DB write / audit append / any workflow call.
     expect(approveProtocolVersion).not.toHaveBeenCalled();
     expect(appendAudit).not.toHaveBeenCalled();
@@ -209,7 +217,10 @@ describe("approveProtocolVersionAction (server-enforced authorization)", () => {
     expect(scopedOrgIds.length).toBeGreaterThan(0);
     expect(new Set(scopedOrgIds)).toEqual(new Set([PRINCIPAL_ORG_ID]));
     // And the entry RECORDS the org it happened in, so the chain answers "which hospital".
-    expect(appendAudit).toHaveBeenCalledWith({}, expect.objectContaining({ orgId: PRINCIPAL_ORG_ID }));
+    expect(appendAudit).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ orgId: PRINCIPAL_ORG_ID }),
+    );
   });
 
   it("does NOT audit a no-op approval (version already approved → changed:false)", async () => {
