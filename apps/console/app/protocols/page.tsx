@@ -41,7 +41,10 @@ export default async function ProtocolsPage() {
               </>
             }
           >
-            <Table head={["Version", "State", "Authored by", "Approved by", "Rationale"]}>
+            <Table
+              label={`${protocol.title} version history`}
+              head={["Version", "State", "Authored by", "Approved by", "Rationale"]}
+            >
               {versions.map((version) => (
                 <tr key={version.id}>
                   <td>v{version.version}</td>
