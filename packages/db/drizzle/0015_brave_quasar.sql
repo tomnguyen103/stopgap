@@ -62,6 +62,7 @@ CREATE TABLE "procurement_events" (
 	"facility_id" uuid NOT NULL,
 	"item_id" uuid NOT NULL,
 	"supplier_id" uuid,
+	"order_ref" text DEFAULT '' NOT NULL,
 	"ordered_at" timestamp with time zone NOT NULL,
 	"quantity" numeric(14, 3) NOT NULL,
 	"unit_cost" numeric(14, 4)
@@ -112,7 +113,7 @@ CREATE UNIQUE INDEX "item_suppliers_pair_uq" ON "item_suppliers" USING btree ("o
 CREATE INDEX "item_suppliers_supplier_idx" ON "item_suppliers" USING btree ("org_id","supplier_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "items_sku_uq" ON "items" USING btree ("org_id","sku");--> statement-breakpoint
 CREATE INDEX "items_generic_idx" ON "items" USING btree ("org_id","generic_name");--> statement-breakpoint
-CREATE UNIQUE INDEX "procurement_events_point_uq" ON "procurement_events" USING btree ("org_id","facility_id","item_id","ordered_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "procurement_events_point_uq" ON "procurement_events" USING btree ("org_id","facility_id","item_id","ordered_at","order_ref");--> statement-breakpoint
 CREATE INDEX "procurement_events_item_idx" ON "procurement_events" USING btree ("org_id","item_id","ordered_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "supplier_sites_code_uq" ON "supplier_sites" USING btree ("org_id","supplier_id","code");--> statement-breakpoint
 CREATE UNIQUE INDEX "suppliers_code_uq" ON "suppliers" USING btree ("org_id","code");--> statement-breakpoint

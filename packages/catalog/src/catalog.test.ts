@@ -39,6 +39,11 @@ describe("reading a delimited file", () => {
     }
   });
 
+  it("counts the lines a multi-line quoted cell spans, and reports where its row STARTED", () => {
+    const doc = parseCsv(['a,b', 'one,"line one', 'line two"', "three,four"].join("\n"));
+    expect(doc.rows.map((r) => r.line)).toEqual([2, 4]);
+  });
+
   it("addresses cells by header name", () => {
     const doc = parseCsv(ITEMS_CSV);
     const record = toRecord(doc.header, doc.rows[0]!);
@@ -58,6 +63,40 @@ describe("coercion", () => {
     ]);
     // A facility recording only a GTIN still gets its own sku as an identifier.
     expect(itemIdentifiers(plan.rows[1]!.row).map((i) => i.type)).toEqual(["sku", "gtin"]);
+  });
+
+  it("carries every identifier system the catalog story names", () => {
+    const result = coerceRow("items", {
+      sku: "A",
+      name: "B",
+      ndc: "1",
+      rxcui: "2",
+      gtin: "3",
+      upc: "4",
+      hibc: "5",
+      mpn: "6",
+      fda_app_no: "7",
+    });
+    expect(result.ok && itemIdentifiers(result.row).map((i) => i.type)).toEqual([
+      "sku",
+      "ndc",
+      "rxcui",
+      "gtin",
+      "upc",
+      "hibc",
+      "mpn",
+      "fda_app_no",
+    ]);
+  });
+
+  it("defaults a missing purchase-order reference to the empty string, not to undefined", () => {
+    const result = coerceRow("procurement", {
+      facility_code: "F1",
+      sku: "A",
+      ordered_at: "2026-07-01",
+      quantity: "2",
+    });
+    expect(result.ok && result.row.order_ref).toBe("");
   });
 
   it("treats a blank optional cell as absent, never as an empty value", () => {

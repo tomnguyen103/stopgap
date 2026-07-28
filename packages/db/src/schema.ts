@@ -927,12 +927,31 @@ export const procurementEvents = pgTable(
       .notNull()
       .references(() => items.id, { onDelete: "cascade" }),
     supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    /**
+     * The purchase-order reference, `''` when the file carried none.
+     *
+     * Part of the natural key, and NOT NULL with an empty-string default rather than nullable,
+     * because NULL is not equal to itself in a unique index — a nullable column here would let the
+     * same order be imported twice and would defeat the whole point of the key.
+     */
+    orderRef: text("order_ref").notNull().default(""),
     orderedAt: timestamp("ordered_at", { withTimezone: true }).notNull(),
     quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
     unitCost: numeric("unit_cost", { precision: 14, scale: 4 }),
   },
   (t) => [
-    uniqueIndex("procurement_events_point_uq").on(t.orgId, t.facilityId, t.itemId, t.orderedAt),
+    // An event's identity is NOT just its timestamp. Two genuine orders of the same item at the
+    // same facility on the same date are ordinary — and common once a file gives dates rather than
+    // datetimes — so the purchase-order reference is part of the key. Where a file carries no
+    // reference the two orders are indistinguishable in the data, and the import restates one row
+    // rather than inventing a difference the file does not contain.
+    uniqueIndex("procurement_events_point_uq").on(
+      t.orgId,
+      t.facilityId,
+      t.itemId,
+      t.orderedAt,
+      t.orderRef,
+    ),
     index("procurement_events_item_idx").on(t.orgId, t.itemId, t.orderedAt),
   ],
 );

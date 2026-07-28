@@ -1,5 +1,5 @@
 {
-  "id": "595a7fa3-1b88-47b6-9bf7-775dc0985d4e",
+  "id": "fc9e8843-bb0e-4f13-9a43-92e356b3d576",
   "prevId": "7f3c1a92-4f6e-4b58-9a1d-0c14d2f8ab14",
   "version": "7",
   "dialect": "postgresql",
@@ -1859,6 +1859,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "order_ref": {
+          "name": "order_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
         "ordered_at": {
           "name": "ordered_at",
           "type": "timestamp with time zone",
@@ -1902,6 +1909,12 @@
             },
             {
               "expression": "ordered_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "order_ref",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
