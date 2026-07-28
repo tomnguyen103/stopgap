@@ -48,7 +48,7 @@ export interface PagedListOptions {
  * for. (This is a WILDCARD concern, not an injection one — the term is a bound parameter either
  * way.)
  */
-function likeTerm(q: string): string {
+export function likeTerm(q: string): string {
   return `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
@@ -56,13 +56,24 @@ function direction(dir: PagedListOptions["dir"]): typeof asc {
   return dir === "asc" ? asc : desc;
 }
 
-/** Resolve a caller's sort key against a map, falling back to the resource's default column. */
-function orderBy(
+/**
+ * Resolve a caller's sort key against a map, falling back to the resource's default column.
+ *
+ * `Object.hasOwn` rather than a bare index read, because a plain object inherits
+ * `constructor`, `toString` and the rest of `Object.prototype`: `?sort=constructor` would
+ * otherwise resolve to a FUNCTION instead of undefined, the `??` fallback would never fire, and
+ * drizzle would be handed something that is not a column. Exported so the offline gate can assert
+ * exactly that, which no route-level test can reach — the parser upstream drops the key first.
+ */
+export function orderBy(
   columns: Record<string, Parameters<typeof asc>[0]>,
   fallback: Parameters<typeof asc>[0],
   options: PagedListOptions,
 ): SQL {
-  const chosen = options.sort !== undefined ? columns[options.sort] : undefined;
+  const chosen =
+    options.sort !== undefined && Object.hasOwn(columns, options.sort)
+      ? columns[options.sort]
+      : undefined;
   return direction(options.dir)(chosen ?? fallback);
 }
 
@@ -151,8 +162,8 @@ export async function listSignalsPage(
   return { rows, total: counted?.total ?? 0 };
 }
 
-/** One signal by its dedupe key, in the public list's field set. */
-export async function getSignalPublic(
+/** One signal by its dedupe key, in the public API's field set. */
+export async function getSignalForApi(
   db: Db,
   orgId: string,
   dedupeKey: string,

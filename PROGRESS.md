@@ -349,3 +349,20 @@ Recorded as they are made, so the reasoning survives the pull request that carri
   (#13). A false positive is only fixable if somebody can see the line that tripped it; a `reason`
   string travels into logs and metric labels, a wider audience than suspected protected information
   should reach.
+- **The public API's list endpoints speak the console's vocabulary, and therefore have no 400**
+  (#19 / ticket 19). `q/sort/dir/page/pageSize` plus declared filters, parsed through the same pure
+  module the dashboards use, so a link copied out of a dashboard means the same thing to a client.
+  That parser is TOTAL — an unusable value degrades to a default — so these operations cannot
+  refuse a query string, while the older `?limit=` endpoints validate one number and answer 400.
+  The divergence is deliberate: a filter allow-list has no honest 400 for a value from a newer
+  server's vocabulary, and refusing a forward-compatible client is worse than answering with the
+  rows it can already see. Both dialects are published in the OpenAPI document rather than left for
+  an integrator to discover.
+- **Three read scopes, not one `platform:read`** (#19). A supply-planning integration needs the
+  catalog and nothing about clinical risk; a monitoring one needs scores and never the facility's
+  stock levels. Splitting `signals:read`, `scores:read` and `catalog:read` lets a key hold the
+  narrowest scope that does its job, which is the only thing that makes a leaked key's blast radius
+  smaller than "everything the platform knows".
+- **The catalog list publishes identity and units, never quantities, suppliers or prices** (#19).
+  Those are the exposure calculation's inputs; putting them on the resource every integration reads
+  would make the narrowest scope the most sensitive one.

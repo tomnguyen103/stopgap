@@ -479,6 +479,11 @@ that matters: `v1` hashes a frozen payload with no `org_id`, which is the only r
 cannot invalidate a historical entry — if it ever goes red, every deployment's history has become
 permanently unverifiable and the chain is reporting tampering that never happened.
 
+A third live suite, `packages/db/src/public-lists.e2e.test.ts` (ticket 19), covers the public API's
+read queries: two tenants holding deliberately similar signals, snapshots and items, so a missing
+`org_id` predicate surfaces as another hospital's row rather than as an empty result that reads like
+a pass. It needs the same application role as `rls.e2e.test.ts` and refuses to run under the owner.
+
 **`pnpm gate` still runs offline and still proves none of this.** Nothing in it can show that
 Postgres refuses a cross-tenant row or that `0013`/`0014` apply cleanly; the SQL was hand-verified
 and the two suites above are how you check it, against a live server, yourself.
@@ -488,8 +493,9 @@ ASKS for a cross-tenant row. With `withOrgDb` stubbed to record the org it was o
 
 - `apps/console/app/lib/actions.test.ts` — a console action scopes its DB work and its audit append
   to the session's org;
-- `apps/console/app/api/v1/cases/route.test.ts` and `apps/console/app/lib/api-auth.test.ts` — a REST
-  route scopes to the KEY's org and ignores every org-shaped query parameter and header;
+- `apps/console/app/api/v1/cases/route.test.ts`, `apps/console/app/api/v1/signals/route.test.ts` and
+  `apps/console/app/lib/api-auth.test.ts` — a REST route scopes to the KEY's org and ignores every
+  org-shaped query parameter and header;
 - `packages/workflows/src/activities.tenancy.test.ts` — a workflow activity scopes to
   `CaseInput.orgId`, and the feed poll fetches once and opens one case per organization;
 - `apps/console/app/lib/principal.test.ts` — the four tenant-resolution outcomes (own org, cookie

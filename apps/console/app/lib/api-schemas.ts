@@ -345,16 +345,31 @@ export function toCatalogItemResource(row: CatalogItemListRow): z.infer<typeof c
  * Every parameter is optional and every one degrades to its default, which is why none of them is
  * described as required and why these endpoints publish no 400.
  */
-function listParamsQuery(resource: ApiListResource): z.ZodTypeAny {
+function listParamsQuery(resource: ApiListResource, searchedFields: string): z.ZodTypeAny {
   const schema = API_LIST_SCHEMAS[resource];
   const shape: Record<string, z.ZodTypeAny> = {
-    q: z.string().optional().openapi({ description: "Substring search. Unmatched values are ignored, never rejected." }),
+    // WHICH fields `q` searches differs per resource, so each one says so: a single "substring
+    // search" description across three endpoints would leave a caller to discover by experiment
+    // that searching scores by an NDC returns nothing.
+    q: z
+      .string()
+      .optional()
+      .openapi({ description: `Case-insensitive substring search over ${searchedFields}.` }),
     sort: z.enum(schema.sortKeys as unknown as [string, ...string[]]).optional()
       .openapi({ description: `Sort key. Defaults to \`${schema.defaultSort}\`.` }),
     dir: z.enum(["asc", "desc"]).optional().openapi({ description: `Defaults to \`${schema.defaultDir}\`.` }),
-    page: z.coerce.number().int().optional().openapi({ description: "1-based. Bounded at 10,000." }),
-    pageSize: z.coerce.number().int().optional()
-      .openapi({ description: `One of ${schema.pageSizes.join(", ")}. Defaults to ${schema.defaultPageSize}.` }),
+    // Bounds are published, not merely described: a generated client that offers an unconstrained
+    // integer invites values this parser silently discards, and "my page parameter did nothing" is
+    // the least debuggable failure an integrator can hit.
+    page: z.coerce.number().int().min(1).max(10_000).optional().openapi({ description: "1-based." }),
+    pageSize: z.coerce
+      .number()
+      .int()
+      .optional()
+      .openapi({
+        description: `Defaults to ${schema.defaultPageSize}.`,
+        param: { schema: { type: "integer", enum: [...schema.pageSizes] } },
+      }),
   };
   for (const [key, values] of Object.entries(schema.filters)) {
     shape[key] = z
@@ -591,7 +606,7 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
               "degrades to its default rather than failing the request.",
           ),
           ...scoped("signals:read"),
-          requestParams: { query: listParamsQuery("signals") },
+          requestParams: { query: listParamsQuery("signals", "the title and the entity identifier") },
           responses: {
             "200": { description: "Signals.", content: { "application/json": { schema: signalListSchema } } },
             ...authFailureResponses,
@@ -624,7 +639,7 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
               "console ranks on; `Signal.severityScore` is an input to it, not a substitute for it.",
           ),
           ...scoped("scores:read"),
-          requestParams: { query: listParamsQuery("scores") },
+          requestParams: { query: listParamsQuery("scores", "the signal title") },
           responses: {
             "200": { description: "Scores.", content: { "application/json": { schema: scoreListSchema } } },
             ...authFailureResponses,
@@ -640,7 +655,7 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
               "part of this resource.",
           ),
           ...scoped("catalog:read"),
-          requestParams: { query: listParamsQuery("catalogItems") },
+          requestParams: { query: listParamsQuery("catalogItems", "the sku, name and generic name") },
           responses: {
             "200": { description: "Items.", content: { "application/json": { schema: catalogItemListSchema } } },
             ...authFailureResponses,

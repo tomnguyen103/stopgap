@@ -1,4 +1,4 @@
-import { getSignalPublic, withOrgDb } from "@stopgap/db";
+import { getSignalForApi, withOrgDb } from "@stopgap/db";
 import { authenticateApiRequest } from "../../../../lib/api-auth";
 import { jsonError, jsonOk } from "../../../../lib/api-response";
 import { signalSchema, toSignalResource } from "../../../../lib/api-schemas";
@@ -24,7 +24,7 @@ export async function GET(
 
   const { key } = await context.params;
   const orgId = auth.key.orgId;
-  const row = await withOrgDb(orgId, (db) => getSignalPublic(db, orgId, key));
+  const row = await withOrgDb(orgId, (db) => getSignalForApi(db, orgId, key));
   if (!row) return jsonError(404, "not_found", `no signal with dedupe key "${key}"`);
   return jsonOk(signalSchema.parse(toSignalResource(row)));
 }

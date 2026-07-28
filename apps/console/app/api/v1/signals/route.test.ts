@@ -63,7 +63,7 @@ const itemRow = {
 const listSignalsPage = vi.fn(async () => ({ rows: [signalRow], total: 1 }));
 const listScoresPage = vi.fn(async () => ({ rows: [scoreRow], total: 1 }));
 const listCatalogItemsPage = vi.fn(async () => ({ rows: [itemRow], total: 1 }));
-const getSignalPublic = vi.fn(async (_db: unknown, _orgId: string, key: string) =>
+const getSignalForApi = vi.fn(async (_db: unknown, _orgId: string, key: string) =>
   key === signalRow.dedupeKey ? signalRow : undefined,
 );
 
@@ -75,8 +75,8 @@ vi.mock("@stopgap/db", async (importOriginal) => {
     listSignalsPage: (...a: unknown[]) => listSignalsPage(...(a as [])),
     listScoresPage: (...a: unknown[]) => listScoresPage(...(a as [])),
     listCatalogItemsPage: (...a: unknown[]) => listCatalogItemsPage(...(a as [])),
-    getSignalPublic: (...a: unknown[]) =>
-      getSignalPublic(...(a as Parameters<typeof getSignalPublic>)),
+    getSignalForApi: (...a: unknown[]) =>
+      getSignalForApi(...(a as Parameters<typeof getSignalForApi>)),
     withOrgDb: (orgId: string, fn: (db: unknown) => Promise<unknown>) => {
       scopedOrgIds.push(orgId);
       return fn({});
@@ -102,7 +102,7 @@ const { GET: getItems } = await import("../catalog/items/route");
 beforeEach(() => {
   scopedOrgIds.length = 0;
   heldScopes = ["signals:read", "scores:read", "catalog:read"];
-  for (const spy of [listSignalsPage, listScoresPage, listCatalogItemsPage, getSignalPublic]) spy.mockClear();
+  for (const spy of [listSignalsPage, listScoresPage, listCatalogItemsPage, getSignalForApi]) spy.mockClear();
 });
 
 describe("GET /api/v1/signals", () => {
