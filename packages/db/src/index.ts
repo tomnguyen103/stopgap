@@ -164,6 +164,17 @@ export {
   type ScoreListRow,
   type CatalogItemListRow,
 } from "./public-lists.js";
+  retentionPlan,
+  sweepOrgRetention,
+  totalRemoved,
+  RETENTION_KINDS,
+  RETENTION_BATCH_SIZE,
+  RETAINED_FOREVER,
+  type RetentionKind,
+  type RetentionWindows,
+  type RetentionCounts,
+  type RetentionSweepResult,
+} from "./retention.js";
 export type {
   OrganizationRow,
   NewOrganizationRow,

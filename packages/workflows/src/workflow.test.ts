@@ -92,6 +92,19 @@ const mockActivities: typeof activities = {
   anchorAuditChain: async () => [
     { orgId: TEST_ORG_ID, maxAuditId: 7, headHash: "deadbeef", sink: "file" },
   ],
+  sweepRetention: async () => [
+    {
+      orgId: TEST_ORG_ID,
+      sweptAt: new Date("2026-07-28T00:00:00.000Z"),
+      counts: {
+        riskSignals: 3,
+        riskScoreSnapshots: 5,
+        alertEvents: 1,
+        inventorySnapshots: 0,
+        procurementEvents: 0,
+      },
+    },
+  ],
   // Memory hit only for the drug whose name says so, so every other case exercises the
   // agent-research path exactly as before.
   lookupProtocol: async (_orgId: string, key: string) =>

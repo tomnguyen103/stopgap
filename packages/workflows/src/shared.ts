@@ -14,6 +14,7 @@ export const SHORTAGE_CASE_WORKFLOW = "shortageCaseWorkflow";
 export const POLL_FEEDS_WORKFLOW = "pollFeedsWorkflow";
 export const ANCHOR_AUDIT_WORKFLOW = "anchorAuditWorkflow";
 export const DAILY_BRIEF_WORKFLOW = "dailyBriefWorkflow";
+export const RETENTION_SWEEP_WORKFLOW = "retentionSweepWorkflow";
 
 /** Input to a shortage case workflow: the (possibly merged) detected shortage. */
 export interface CaseInput {

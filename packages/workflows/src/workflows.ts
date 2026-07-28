@@ -497,4 +497,19 @@ export async function anchorAuditWorkflow(): Promise<
  */
 export async function dailyBriefWorkflow(): Promise<{ generated: number; degraded: number }> {
   return briefActs.generateDailyBriefs();
+ * The retention workflow (ticket 18). One run = one sweep of every organization's expired records.
+ * A daily Temporal Schedule fires it (`scripts/start-schedule.ts`) — the same orchestrator
+ * everything else already runs on, so "did the cleanup run" is answerable in the place an operator
+ * already looks rather than from a cron log on one host.
+ */
+export async function retentionSweepWorkflow(): Promise<
+  { orgId: string; removed: number }[]
+> {
+  const results = await acts.sweepRetention();
+  // The workflow RESULT is deliberately the small summary: per-kind counts are already in each
+  // organization's audit chain, and a workflow history is not the place to keep a second copy.
+  return results.map((result) => ({
+    orgId: result.orgId,
+    removed: Object.values(result.counts).reduce((sum, count) => sum + count, 0),
+  }));
 }

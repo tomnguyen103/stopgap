@@ -42,6 +42,10 @@ const signalledWorkflowIds: string[] = [];
 const counters: string[] = [];
 /** Signals written per org (ticket 06) — proof the poll normalizes PER TENANT, not once. */
 const writtenSignals: { orgId: string; dedupeKeys: string[] }[] = [];
+/** Orgs whose sweep should throw, so the containment assertion has something to contain. */
+const failingSweepOrgs = new Set<string>();
+/** Retention sweeps performed (ticket 18) — which org, at which instant, under which windows. */
+const sweptOrgs: { orgId: string; at: string; windows: Record<string, number | null> }[] = [];
 /** The sources each org's miss sweep was scoped to, so an outage cannot retire live signals. */
 const missSweeps: { orgId: string; sources: string[] }[] = [];
 /** Score snapshots written per org (ticket 07) — scoring rides the poll, not a second runtime. */
@@ -113,6 +117,26 @@ vi.mock("@stopgap/db", () => ({
     missSweeps.push({ orgId, sources });
     return 0;
   },
+  // Ticket 18 — the retention sweep. Recorded per org so the assertions below can show the sweep
+  // visits every tenant and asks for each one by its own id.
+  sweepOrgRetention: async (orgId: string, now: Date, windows: Record<string, number | null>) => {
+    sweptOrgs.push({ orgId, at: now.toISOString(), windows });
+    if (failingSweepOrgs.has(orgId)) throw new Error("lock timeout");
+    return {
+      orgId,
+      sweptAt: now,
+      counts: {
+        riskSignals: 2,
+        riskScoreSnapshots: 1,
+        alertEvents: 0,
+        inventorySnapshots: 0,
+        procurementEvents: 0,
+      },
+    };
+  },
+  totalRemoved: (counts: Record<string, number>) =>
+    Object.values(counts).reduce((sum, n) => sum + n, 0),
+  RETAINED_FOREVER: null,
   listAlertRules: async () => [],
   lastFiredByRule: async () => ({}),
   recordAlertEvents: async () => [],
@@ -151,7 +175,19 @@ vi.mock("@stopgap/db", () => ({
   getDb: () => ({}),
 }));
 
-vi.mock("@stopgap/core/env", () => ({ getEnv: () => ({ FEED_RESOLVE_MISS_THRESHOLD: 3 }) }));
+/** Env the activities read. Mutable so the retention tests can vary the windows. */
+const env = vi.hoisted(() => ({
+  values: {
+    FEED_RESOLVE_MISS_THRESHOLD: 3,
+    RETENTION_SIGNAL_DAYS: 180,
+    RETENTION_SCORE_SNAPSHOT_DAYS: 180,
+    RETENTION_ALERT_EVENT_DAYS: 90,
+    RETENTION_INVENTORY_SNAPSHOT_DAYS: 365,
+    RETENTION_PROCUREMENT_EVENT_DAYS: 365,
+  } as Record<string, number>,
+}));
+
+vi.mock("@stopgap/core/env", () => ({ getEnv: () => env.values }));
 
 // The feed returns ONE snapshot for the whole deployment — the fetch must not repeat per tenant.
 let openFdaCalls = 0;
@@ -259,7 +295,9 @@ vi.mock("@temporalio/activity", () => ({
   Context: { current: () => ({ info: { workflowExecution: { runId: "run-1" } } }) },
 }));
 
-const { recordDetected, persistStatus, pollAndOpenCases } = await import("./activities.js");
+const { recordDetected, persistStatus, pollAndOpenCases, sweepRetention } = await import(
+  "./activities.js"
+);
 
 beforeEach(() => {
   scopedOrgIds.length = 0;
@@ -474,5 +512,42 @@ describe("the scheduled feed poll (no session, no case)", () => {
     expect(a?.workflowId).toBe("case-heparin");
     // Org B has no case yet, so `startCase` mints the new org-qualified id itself.
     expect(b?.workflowId).toBeUndefined();
+  });
+});
+
+describe("the retention sweep (ticket 18)", () => {
+  it("sweeps EVERY organization, each under its own scope and one shared instant", async () => {
+    const results = await sweepRetention();
+    expect(sweptOrgs.map((s) => s.orgId)).toEqual([ORG_A, ORG_B]);
+    // One instant for the whole run: two tenants swept against two clocks would be incomparable,
+    // and the run would not be reproducible from the timestamps its audit entries record.
+    expect(new Set(sweptOrgs.map((s) => s.at)).size).toBe(1);
+    expect(results.map((r) => r.orgId)).toEqual([ORG_A, ORG_B]);
+  });
+
+  it("passes the configured windows through, with a negative one meaning keep forever", async () => {
+    const restore = { ...env.values };
+    env.values.RETENTION_ALERT_EVENT_DAYS = -1;
+    env.values.RETENTION_SIGNAL_DAYS = 30;
+    try {
+      await sweepRetention();
+      const windows = sweptOrgs.at(-1)?.windows;
+      expect(windows?.alertEvents).toBeNull();
+      expect(windows?.riskSignals).toBe(30);
+    } finally {
+      env.values = restore;
+    }
+  });
+
+  it("contains one tenant's failure instead of abandoning the rest of the deployment", async () => {
+    failingSweepOrgs.add(ORG_A);
+    try {
+      const results = await sweepRetention();
+      // Org A threw; org B was still swept, and the failure was counted rather than swallowed.
+      expect(results.map((r) => r.orgId)).toEqual([ORG_B]);
+      expect(counters).toContain("stopgap_retention_failures_total");
+    } finally {
+      failingSweepOrgs.clear();
+    }
   });
 });
