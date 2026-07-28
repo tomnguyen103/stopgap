@@ -60,7 +60,7 @@ export function roleSatisfies(have: Role, min: Role): boolean {
 }
 
 /** Does any of the caller's roles meet the minimum? */
-export function rolesAllow(roles: Role[], min: Role): boolean {
+export function rolesAllow(roles: readonly Role[], min: Role): boolean {
   return roles.some((r) => roleSatisfies(r, min));
 }
 

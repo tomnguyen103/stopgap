@@ -105,8 +105,8 @@ export function ReviewPanel({
       <div className="card">
         <h2>Resolve exception</h2>
         <p className="sub">
-          The agent escalated this case. What you write here becomes an approved protocol
-          version for this drug and releases the case — future shortages of it reuse your text.
+          The agent escalated this case. What you write here becomes an approved protocol version
+          for this drug and releases the case — future shortages of it reuse your text.
         </p>
         <textarea
           className="draft-input"
@@ -139,7 +139,9 @@ export function ReviewPanel({
           />
           <button
             type="button"
-            disabled={pending || resolutionBody.trim().length === 0 || rationale.trim().length === 0}
+            disabled={
+              pending || resolutionBody.trim().length === 0 || rationale.trim().length === 0
+            }
             onClick={() => {
               run(() =>
                 resolveExceptionCase(workflowId, {

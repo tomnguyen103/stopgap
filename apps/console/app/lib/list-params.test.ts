@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseListParams, serializeListParams, type ListParams, type ListParamsSchema } from "./list-params";
+import {
+  parseListParams,
+  serializeListParams,
+  type ListParams,
+  type ListParamsSchema,
+} from "./list-params";
 
 /**
  * List interaction state (unified-platform-spec, Phase F).
@@ -98,9 +103,12 @@ describe("parseListParams — pagination", () => {
     expect(parseListParams("page=4", schema).page).toBe(4);
   });
 
-  it.each(["0", "-3", "abc", "", "1.5", "NaN", "Infinity"])("clamps a bad page (%s) to 1", (bad) => {
-    expect(parseListParams(`page=${bad}`, schema).page).toBe(1);
-  });
+  it.each(["0", "-3", "abc", "", "1.5", "NaN", "Infinity"])(
+    "clamps a bad page (%s) to 1",
+    (bad) => {
+      expect(parseListParams(`page=${bad}`, schema).page).toBe(1);
+    },
+  );
 
   it.each(["10001", "9007199254740991"])("clamps an absurd page (%s) to 1", (absurd) => {
     // `page` reaches an OFFSET. Bounding `pageSize` alone leaves `?page=9007199254740991` costing
@@ -121,7 +129,9 @@ describe("parseListParams — pagination", () => {
 
 describe("parseListParams — filters", () => {
   it("reads a single filter value", () => {
-    expect(parseListParams("severity=critical", schema).filters).toEqual({ severity: ["critical"] });
+    expect(parseListParams("severity=critical", schema).filters).toEqual({
+      severity: ["critical"],
+    });
   });
 
   it("reads repeated params as a multi-value filter", () => {
@@ -152,7 +162,9 @@ describe("parseListParams — filters", () => {
   });
 
   it("de-duplicates repeated identical values", () => {
-    expect(parseListParams("severity=high&severity=high", schema).filters).toEqual({ severity: ["high"] });
+    expect(parseListParams("severity=high&severity=high", schema).filters).toEqual({
+      severity: ["high"],
+    });
   });
 
   it("orders values by the schema's declaration, not by the URL", () => {
@@ -174,24 +186,41 @@ describe("serializeListParams", () => {
   });
 
   it("emits only what differs from the defaults", () => {
-    expect(serializeListParams({ ...defaults, q: "heparin", page: 3 }, schema)).toBe("q=heparin&page=3");
+    expect(serializeListParams({ ...defaults, q: "heparin", page: 3 }, schema)).toBe(
+      "q=heparin&page=3",
+    );
   });
 
   it("emits repeated params for a multi-value filter", () => {
-    const out = serializeListParams({ ...defaults, filters: { severity: ["critical", "high"] } }, schema);
+    const out = serializeListParams(
+      { ...defaults, filters: { severity: ["critical", "high"] } },
+      schema,
+    );
     expect(out).toBe("severity=critical&severity=high");
   });
 
   it("orders output deterministically regardless of input value order", () => {
     // Equal state must serialise byte-identically, or one shared link becomes two cache keys.
-    const a = serializeListParams({ ...defaults, filters: { severity: ["critical", "high"] } }, schema);
-    const b = serializeListParams({ ...defaults, filters: { severity: ["high", "critical"] } }, schema);
+    const a = serializeListParams(
+      { ...defaults, filters: { severity: ["critical", "high"] } },
+      schema,
+    );
+    const b = serializeListParams(
+      { ...defaults, filters: { severity: ["high", "critical"] } },
+      schema,
+    );
     expect(a).toBe(b);
   });
 
   it("orders output deterministically regardless of input key order", () => {
-    const a = serializeListParams({ ...defaults, filters: { status: ["open"], severity: ["high"] } }, schema);
-    const b = serializeListParams({ ...defaults, filters: { severity: ["high"], status: ["open"] } }, schema);
+    const a = serializeListParams(
+      { ...defaults, filters: { status: ["open"], severity: ["high"] } },
+      schema,
+    );
+    const b = serializeListParams(
+      { ...defaults, filters: { severity: ["high"], status: ["open"] } },
+      schema,
+    );
     expect(a).toBe(b);
   });
 
@@ -210,7 +239,14 @@ describe("round-trip", () => {
     { pageSize: 100 },
     { sort: "drug", dir: "asc" },
     { filters: { severity: ["critical", "high"] } },
-    { q: "insulin lispro", sort: "opened_at", dir: "asc", page: 2, pageSize: 50, filters: { status: ["open"] } },
+    {
+      q: "insulin lispro",
+      sort: "opened_at",
+      dir: "asc",
+      page: 2,
+      pageSize: 50,
+      filters: { status: ["open"] },
+    },
   ];
 
   it.each(cases)("parse(serialize(x)) === x for %j", (partial) => {
@@ -221,7 +257,10 @@ describe("round-trip", () => {
   it("is idempotent under repeated serialisation", () => {
     // A director sends a colleague a filtered link; the colleague changes a filter and sends it
     // back. The URL must not accrete parameters each hop.
-    const once = serializeListParams({ ...defaults, q: "heparin", filters: { severity: ["high"] } }, schema);
+    const once = serializeListParams(
+      { ...defaults, q: "heparin", filters: { severity: ["high"] } },
+      schema,
+    );
     const twice = serializeListParams(parseListParams(once, schema), schema);
     expect(twice).toBe(once);
   });

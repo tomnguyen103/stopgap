@@ -25,7 +25,11 @@ export async function ActiveOrgBadge() {
   const active = await getActiveOrgOverride();
   if (!active) return null;
   return (
-    <Link href="/admin/organizations" className="active-org-badge" title="Switch back to your own organization">
+    <Link
+      href="/admin/organizations"
+      className="active-org-badge"
+      title="Switch back to your own organization"
+    >
       <span className="active-org-badge__label">Acting in</span>
       <strong className="active-org-badge__name">{active.name}</strong>
       <span className="active-org-badge__slug">{active.slug}</span>

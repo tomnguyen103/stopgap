@@ -100,7 +100,11 @@ export async function getCaseDetail(
     const userIds = [...new Set(ackRows.map((a) => a.userId))];
     const userRows = userIds.length
       ? await db
-          .select({ id: schema.users.id, email: schema.users.email, displayName: schema.users.displayName })
+          .select({
+            id: schema.users.id,
+            email: schema.users.email,
+            displayName: schema.users.displayName,
+          })
           .from(schema.users)
           .where(and(eq(schema.users.orgId, orgId), inArray(schema.users.id, userIds)))
       : [];

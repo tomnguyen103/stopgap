@@ -98,7 +98,10 @@ describe("authentication", () => {
   });
 
   it("401s a malformed Authorization header (not `Bearer <token>`)", async () => {
-    const result = await authenticateApiRequest(request({ authorization: "Basic abc" }), "cases:read");
+    const result = await authenticateApiRequest(
+      request({ authorization: "Basic abc" }),
+      "cases:read",
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.response.status).toBe(401);
@@ -107,7 +110,10 @@ describe("authentication", () => {
 
   it("401s an UNKNOWN key", async () => {
     findActiveApiKeyByPlaintext.mockResolvedValue(undefined);
-    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_nope" }), "cases:read");
+    const result = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_nope" }),
+      "cases:read",
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.response.status).toBe(401);
@@ -117,8 +123,14 @@ describe("authentication", () => {
     // `findActiveApiKeyByPlaintext` filters `revokedAt IS NULL` in SQL, so a revoked key comes back
     // as undefined — the same value, the same code path, the same body as a key that never existed.
     findActiveApiKeyByPlaintext.mockResolvedValue(undefined);
-    const revoked = await authenticateApiRequest(request({ authorization: "Bearer sk_live_revoked" }), "cases:read");
-    const unknown = await authenticateApiRequest(request({ authorization: "Bearer sk_live_unknown" }), "cases:read");
+    const revoked = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_revoked" }),
+      "cases:read",
+    );
+    const unknown = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_unknown" }),
+      "cases:read",
+    );
     expect(revoked.ok).toBe(false);
     expect(unknown.ok).toBe(false);
     if (revoked.ok || unknown.ok) return;
@@ -130,7 +142,10 @@ describe("authentication", () => {
 describe("scope enforcement", () => {
   it("403s a cases:read-only key on a protocols:write endpoint, naming the required scope", async () => {
     findActiveApiKeyByPlaintext.mockResolvedValue(keyRow(["cases:read"]));
-    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_ro" }), "protocols:write");
+    const result = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_ro" }),
+      "protocols:write",
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.response.status).toBe(403);
@@ -144,7 +159,10 @@ describe("scope enforcement", () => {
   it("passes a key that DOES carry the scope, and stamps last-used", async () => {
     const row = keyRow(["cases:read", "protocols:write"]);
     findActiveApiKeyByPlaintext.mockResolvedValue(row);
-    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_rw" }), "protocols:write");
+    const result = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_rw" }),
+      "protocols:write",
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.key).toBe(row);
@@ -153,9 +171,15 @@ describe("scope enforcement", () => {
 
   it("ignores an unrecognized scope stored on the key rather than honouring it", async () => {
     findActiveApiKeyByPlaintext.mockResolvedValue(keyRow(["*", "everything", "cases:read"]));
-    const denied = await authenticateApiRequest(request({ authorization: "Bearer sk_live_x" }), "protocols:write");
+    const denied = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_x" }),
+      "protocols:write",
+    );
     expect(denied.ok).toBe(false);
-    const allowed = await authenticateApiRequest(request({ authorization: "Bearer sk_live_x" }), "cases:read");
+    const allowed = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_x" }),
+      "cases:read",
+    );
     expect(allowed.ok).toBe(true);
   });
 });
@@ -164,7 +188,10 @@ describe("rate limiting", () => {
   it("429s with Retry-After when the reservation is refused", async () => {
     findActiveApiKeyByPlaintext.mockResolvedValue(keyRow(["cases:read"], { rateLimitPerHour: 10 }));
     reserveApiKeyRequest.mockResolvedValue({ allowed: false, recent: 10 });
-    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_busy" }), "cases:read");
+    const result = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_busy" }),
+      "cases:read",
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.response.status).toBe(429);
@@ -175,7 +202,9 @@ describe("rate limiting", () => {
   });
 
   it("reserves against the key's own hourly limit within a one-hour window", async () => {
-    findActiveApiKeyByPlaintext.mockResolvedValue(keyRow(["shadow:read"], { rateLimitPerHour: 25 }));
+    findActiveApiKeyByPlaintext.mockResolvedValue(
+      keyRow(["shadow:read"], { rateLimitPerHour: 25 }),
+    );
     await authenticateApiRequest(request({ authorization: "Bearer sk_live_ok" }), "shadow:read");
     const [id, since, limit] = reserveApiKeyRequest.mock.calls[0] as [string, Date, number];
     expect(id).toBe("55555555-5555-5555-5555-555555555555");
@@ -187,7 +216,10 @@ describe("rate limiting", () => {
 describe("key store outage", () => {
   it("503s — never 401 — when the key LOOKUP throws, so a DB blip is not read as a bad credential", async () => {
     findActiveApiKeyByPlaintext.mockRejectedValue(new Error("connection terminated unexpectedly"));
-    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_any" }), "cases:read");
+    const result = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_any" }),
+      "cases:read",
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.response.status).toBe(503);
@@ -202,7 +234,10 @@ describe("key store outage", () => {
   it("503s and FAILS CLOSED when the rate reservation throws — an unrecordable request is refused", async () => {
     findActiveApiKeyByPlaintext.mockResolvedValue(keyRow(["cases:read"]));
     reserveApiKeyRequest.mockRejectedValue(new Error("deadlock detected"));
-    const result = await authenticateApiRequest(request({ authorization: "Bearer sk_live_ok" }), "cases:read");
+    const result = await authenticateApiRequest(
+      request({ authorization: "Bearer sk_live_ok" }),
+      "cases:read",
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.response.status).toBe(503);

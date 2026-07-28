@@ -1,6 +1,7 @@
 import { getKpis, withOrgDb } from "@stopgap/db";
 import { getShadowDashboard } from "../../lib/data";
 import { resolvePrincipal } from "../../lib/principal";
+import { requireGroup } from "../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,16 @@ function pct(value: number | undefined): string {
  * that looks fine in isolation can still read as failing, and any metric with no data yet
  * says so rather than rendering a confident zero.
  */
+/**
+ * Guards itself, and does not rely on the group layout having run.
+ *
+ * A layout is NOT an authorization boundary: Next does not re-render one on a soft navigation, and
+ * the partial render is driven by router-state headers the client supplies. A crafted request can
+ * render this page with the layout skipped entirely — so the check that matters is the one here.
+ * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
+ */
 export default async function MetricsPage() {
+  await requireGroup("pharmacy_director");
   // The caller's org (PHASE6 §6.5): KPIs are one hospital's operational performance, and averaging
   // two tenants' medians into one number would describe neither of them.
   const { orgId } = await resolvePrincipal();
