@@ -100,7 +100,10 @@ export const cases = pgTable(
      * from the current run, making the per-poll counter update idempotent under retry.
      */
     lastFeedPollRun: text("last_feed_poll_run"),
-    ndcs: jsonb("ndcs").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    ndcs: jsonb("ndcs")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     lastNote: text("last_note"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -176,7 +179,9 @@ export const users = pgTable(
     // The cost is real and accepted: a pharmacist covering two facilities needs two IdP subjects
     // today. The fix, if it is ever wanted, is a `user_organizations` join table plus an org
     // picker after sign-in — a feature with its own UI, not a silently relaxed index.
-    uniqueIndex("users_oidc_subject_uq").on(t.oidcSubject).where(sql`${t.oidcSubject} is not null`),
+    uniqueIndex("users_oidc_subject_uq")
+      .on(t.oidcSubject)
+      .where(sql`${t.oidcSubject} is not null`),
     index("users_org_idx").on(t.orgId),
   ],
 );
@@ -228,7 +233,10 @@ export const escalationPolicies = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     severity: text("severity").notNull(),
-    steps: jsonb("steps").$type<EscalationStep[]>().notNull().default(sql`'[]'::jsonb`),
+    steps: jsonb("steps")
+      .$type<EscalationStep[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("escalation_policies_severity_uq").on(t.severity)],
@@ -377,44 +385,48 @@ export const auditLog = pgTable(
  * 0014 also gives it RLS, with a deliberately ASYMMETRIC policy — SELECT only, no write policy at
  * all. See the index/policy block at the bottom of this table for what that buys and why.
  */
-export const auditAnchors = pgTable("audit_anchors", {
-  id: bigserial("id", { mode: "number" }).primaryKey(),
-  /**
-   * The tenant whose chain head this anchor pins (PHASE6 §6.5, migration 0014). NOT NULL:
-   * migration 0014 backfills every pre-existing anchor to the seed org, which is the tenant whose
-   * chain those anchors were in fact taken over — before 0013 there was only one.
-   */
-  orgId: uuid("org_id")
-    .notNull()
-    .references(() => organizations.id),
-  /** When this anchor was taken (the head it pins is the chain as of this moment). */
-  ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
-  /** Highest `audit_log.id` covered by this anchor, WITHIN `orgId`'s chain. */
-  maxAuditId: bigint("max_audit_id", { mode: "number" }).notNull(),
-  /** Hash of row `maxAuditId` at anchor time — the value re-verification compares against. */
-  headHash: text("head_hash").notNull(),
-  /** Where the anchor was written: `file` (always) or `tsa` (RFC 3161 token obtained). */
-  sink: text("sink").notNull(),
-  /** Reference into the sink — the anchor file path, or the base64 TSA token. Nullable. */
-  sinkRef: text("sink_ref"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [
-  // Verification reads anchors newest-first per org; the org leads so one tenant's history check
-  // does not walk every other tenant's anchors first.
-  index("audit_anchors_org_idx").on(t.orgId, t.id),
-  // RLS: SELECT-only, since migration 0014. This table is a hybrid and the asymmetry is the design.
-  // READS are scoped like any tenant table — an org may see the anchors that pin its own chain and
-  // nothing else, because anchor metadata (when a tenant last appended, how much history it has) is
-  // still that tenant's information. WRITES are left entirely to the maintenance (BYPASSRLS) role:
-  // there is no INSERT/UPDATE/DELETE policy, so an org-scoped connection cannot touch a row at all.
-  //
-  // That is what keeps BOTH properties. A tenant cannot opt out of being anchored (it cannot delete
-  // or rewrite its anchors, and cannot stop the maintenance role writing new ones), and it also
-  // cannot reach another tenant's anchors — which, before this, it could: with no policy at all, an
-  // ordinary org-scoped connection could UPDATE or DELETE every other hospital's anchor rows, and
-  // `verifyAnchors`'s explicit org filter was the only thing standing between a tenant and every
-  // other tenant's integrity metadata.
-]);
+export const auditAnchors = pgTable(
+  "audit_anchors",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    /**
+     * The tenant whose chain head this anchor pins (PHASE6 §6.5, migration 0014). NOT NULL:
+     * migration 0014 backfills every pre-existing anchor to the seed org, which is the tenant whose
+     * chain those anchors were in fact taken over — before 0013 there was only one.
+     */
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** When this anchor was taken (the head it pins is the chain as of this moment). */
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    /** Highest `audit_log.id` covered by this anchor, WITHIN `orgId`'s chain. */
+    maxAuditId: bigint("max_audit_id", { mode: "number" }).notNull(),
+    /** Hash of row `maxAuditId` at anchor time — the value re-verification compares against. */
+    headHash: text("head_hash").notNull(),
+    /** Where the anchor was written: `file` (always) or `tsa` (RFC 3161 token obtained). */
+    sink: text("sink").notNull(),
+    /** Reference into the sink — the anchor file path, or the base64 TSA token. Nullable. */
+    sinkRef: text("sink_ref"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Verification reads anchors newest-first per org; the org leads so one tenant's history check
+    // does not walk every other tenant's anchors first.
+    index("audit_anchors_org_idx").on(t.orgId, t.id),
+    // RLS: SELECT-only, since migration 0014. This table is a hybrid and the asymmetry is the design.
+    // READS are scoped like any tenant table — an org may see the anchors that pin its own chain and
+    // nothing else, because anchor metadata (when a tenant last appended, how much history it has) is
+    // still that tenant's information. WRITES are left entirely to the maintenance (BYPASSRLS) role:
+    // there is no INSERT/UPDATE/DELETE policy, so an org-scoped connection cannot touch a row at all.
+    //
+    // That is what keeps BOTH properties. A tenant cannot opt out of being anchored (it cannot delete
+    // or rewrite its anchors, and cannot stop the maintenance role writing new ones), and it also
+    // cannot reach another tenant's anchors — which, before this, it could: with no policy at all, an
+    // ordinary org-scoped connection could UPDATE or DELETE every other hospital's anchor rows, and
+    // `verifyAnchors`'s explicit org filter was the only thing standing between a tenant and every
+    // other tenant's integrity metadata.
+  ],
+);
 
 /**
  * Raw feed records for dedup + provenance; `(source, sourceId)` is unique.
@@ -497,7 +509,10 @@ export const protocolVersions = pgTable(
     state: text("state").notNull().default("draft"),
     body: text("body").notNull(),
     /** Alternatives the protocol authorizes, in the order a pharmacist should consider them. */
-    alternatives: jsonb("alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    alternatives: jsonb("alternatives")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** The case whose resolution produced this version — the provenance link. */
     sourceCaseId: uuid("source_case_id").references(() => cases.id),
     /** "agent" for an agent-drafted version, a pharmacist id once a human edits/approves. */
@@ -552,9 +567,15 @@ export const shadowRuns = pgTable(
     key: text("key").notNull(),
     drugClass: text("drug_class"),
     proposedSeverity: text("proposed_severity").notNull(),
-    proposedAlternatives: jsonb("proposed_alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    proposedAlternatives: jsonb("proposed_alternatives")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     baselineSeverity: text("baseline_severity").notNull(),
-    baselineAlternatives: jsonb("baseline_alternatives").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    baselineAlternatives: jsonb("baseline_alternatives")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     /** 0-1 agreement against the human baseline (see @stopgap/shadow scoring). */
     agreement: numeric("agreement", { precision: 4, scale: 3 }).notNull(),
     severityAgreed: boolean("severity_agreed").notNull(),
@@ -662,7 +683,10 @@ export const apiKeys = pgTable(
      * characters are the point: the namespace alone is identical on every row.
      */
     keyPrefix: text("key_prefix").notNull(),
-    scopes: jsonb("scopes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    scopes: jsonb("scopes")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     rateLimitPerHour: integer("rate_limit_per_hour").notNull().default(1000),
     createdByUserId: uuid("created_by_user_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -711,7 +735,143 @@ export const apiKeyRequests = pgTable(
   (t) => [index("api_key_requests_key_at_idx").on(t.apiKeyId, t.at)],
 );
 
+/**
+ * ---------------------------------------------------------------------------------------------
+ * Normalized signals and the scores derived from them (ticket 06). Both TENANT tables.
+ * ---------------------------------------------------------------------------------------------
+ *
+ * The asymmetry with `feed_records` above is deliberate and is the whole reason this table exists
+ * separately. A FEED RECORD is one physical fact about the drug supply — openFDA's snapshot of a
+ * heparin shortage is byte-identical for every hospital in the deployment, so it is stored once,
+ * globally, and the HTTP fetch happens once.
+ *
+ * A RISK SIGNAL is that fact INTERPRETED for one facility: matched against what this hospital
+ * stocks, weighted by how exposed it is, carrying its own dedupe key and its own resolution state.
+ * Two hospitals reading the same recall genuinely hold different signals. Storing signals globally
+ * would either force one interpretation on every tenant or require a tenant column on a table with
+ * no policy — which is a leak with extra steps.
+ *
+ * Same test, applied honestly: "would two orgs disagree about this row". For a feed record, never.
+ * For a signal, always.
+ */
+export const riskSignals = pgTable(
+  "risk_signals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** `@stopgap/ingest`'s `SignalSource` — which feed said this. */
+    source: text("source").notNull(),
+    /** The feed's own identifier for the record, as given. */
+    sourceId: text("source_id").notNull(),
+    riskDomain: text("risk_domain").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityIdentifier: text("entity_identifier").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    severity: text("severity").notNull(),
+    /** The scorer's input. Carried BESIDE the label, never re-derived from it. */
+    severityScore: numeric("severity_score", { precision: 5, scale: 4 }).notNull(),
+    confidence: numeric("confidence", { precision: 5, scale: 4 }).notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }).notNull(),
+    staleness: text("staleness").notNull(),
+    /**
+     * THE SOURCE says the hazard is over — a terminated recall, a resolved shortage.
+     *
+     * Stored as its own column, and NOT collapsed with `feedMissCount` below, because the two are
+     * different facts with different consequences: this one is a WEIGHTING input the scorer decays,
+     * that one is a STATUS TRANSITION the poller reconciles. A single "inactive" flag would make a
+     * terminated recall and a record that merely fell out of the feed indistinguishable, and they
+     * are not — a recall terminated last week still bears on what is safe to substitute into today.
+     */
+    sourceResolved: boolean("source_resolved").notNull().default(false),
+    /**
+     * Consecutive polls in which the feed no longer listed this signal.
+     *
+     * The same counter shape `cases.feedMissCount` already uses, and for the same reason: one miss
+     * is feed flap, not a resolution, and the poll is at-least-once so the increment has to be
+     * idempotent per run.
+     */
+    feedMissCount: integer("feed_miss_count").notNull().default(0),
+    /** The poll run that last touched `feedMissCount`, making the increment retry-safe. */
+    lastFeedPollRun: text("last_feed_poll_run"),
+    evidenceUrl: text("evidence_url").notNull(),
+    /** The provider payload, retained as evidence. Never re-parsed for meaning. */
+    raw: jsonb("raw").notNull(),
+    /** `<org>:<source>:<sourceId>` — the contract's key, as `signalDedupeKey` spells it. */
+    dedupeKey: text("dedupe_key").notNull(),
+    /** NDCs, RxCUIs and names, for the catalog association ticket 16 performs. */
+    matchHints: jsonb("match_hints")
+      .$type<{ ndcs: string[]; rxcuis: string[]; names: string[] }>()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // The dedupe key already embeds the org, but the index leads with `org_id` anyway: it is what
+    // makes this double as the org-filter index, and it keeps uniqueness meaning "within this
+    // tenant" even if the key's shape is ever changed.
+    uniqueIndex("risk_signals_dedupe_uq").on(t.orgId, t.dedupeKey),
+    index("risk_signals_domain_idx").on(t.orgId, t.riskDomain, t.publishedAt),
+    index("risk_signals_entity_idx").on(t.orgId, t.entityIdentifier),
+  ],
+);
+
+/**
+ * A score computed from a signal, at a moment, by a named scorer version (ticket 07 computes them).
+ *
+ * A SNAPSHOT rather than a column on the signal: a score is the output of a weighting that changes
+ * as the scorer is tuned, and overwriting yesterday's number would destroy the only evidence of
+ * what the console showed a pharmacist when they made a decision. The audit trail is the point —
+ * "why was this ranked first on Tuesday" has to stay answerable after the weights move.
+ */
+export const riskScoreSnapshots = pgTable(
+  "risk_score_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    signalId: uuid("signal_id")
+      .notNull()
+      .references(() => riskSignals.id, { onDelete: "cascade" }),
+    /** 0–100, as the console ranks on. */
+    score: numeric("score", { precision: 6, scale: 2 }).notNull(),
+    /** The banded reading of the same number, for filtering. */
+    band: text("band").notNull(),
+    /**
+     * The per-component breakdown behind the number.
+     *
+     * Stored because a score a pharmacist cannot decompose is a score they cannot argue with, and
+     * ADR-0002 is explicit that the number is arithmetic rather than a model's opinion — which is
+     * only meaningful if the arithmetic is visible.
+     */
+    components: jsonb("components").$type<Record<string, number>>().notNull(),
+    /** Which scorer produced it. A score without its version is not reproducible. */
+    scorerVersion: text("scorer_version").notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One snapshot per (signal, scorer version, moment): re-running the same scorer over the same
+    // signal in the same poll restates one row instead of appending a duplicate history entry.
+    uniqueIndex("risk_score_snapshots_point_uq").on(
+      t.orgId,
+      t.signalId,
+      t.scorerVersion,
+      t.computedAt,
+    ),
+    index("risk_score_snapshots_rank_idx").on(t.orgId, t.computedAt, t.score),
+  ],
+);
+
 export type OrganizationRow = typeof organizations.$inferSelect;
+export type RiskSignalRow = typeof riskSignals.$inferSelect;
+export type NewRiskSignalRow = typeof riskSignals.$inferInsert;
+export type RiskScoreSnapshotRow = typeof riskScoreSnapshots.$inferSelect;
+export type NewRiskScoreSnapshotRow = typeof riskScoreSnapshots.$inferInsert;
 export type NewOrganizationRow = typeof organizations.$inferInsert;
 export type EscalationPolicyRow = typeof escalationPolicies.$inferSelect;
 export type AcknowledgmentRow = typeof acknowledgments.$inferSelect;
