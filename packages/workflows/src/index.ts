@@ -13,6 +13,7 @@ export {
   shortageCaseWorkflow,
   pollFeedsWorkflow,
   anchorAuditWorkflow,
+  dailyBriefWorkflow,
   reviewSignal,
   resolvedSignal,
   exceptionResolvedSignal,
@@ -22,6 +23,7 @@ export {
 export { diffResolutions, type FeedResolutionDiff, type ResolutionEvidence } from "./feed-resolution.js";
 export {
   ANCHOR_AUDIT_WORKFLOW,
+  DAILY_BRIEF_WORKFLOW,
   POLL_FEEDS_WORKFLOW,
   SHORTAGE_CASE_WORKFLOW,
   type CaseAcknowledgment,

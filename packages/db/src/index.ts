@@ -157,4 +157,5 @@ export type {
   NewProtocolVersionRow,
   ShadowRunRow,
   NewShadowRunRow,
+  DailyBriefRow,
 } from "./schema.js";

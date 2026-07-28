@@ -902,3 +902,10 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
     });
   });
 }
+
+/**
+ * The daily brief (ticket 13). Lives in `brief.ts` and is re-exported here because the worker
+ * registers `* as activities` — an activity the worker cannot see is a schedule that fails at run
+ * time rather than at build time.
+ */
+export { generateDailyBriefs } from "./brief.js";

@@ -1,10 +1,11 @@
 import { getEnv } from "@stopgap/core/env";
 import { Client, ScheduleAlreadyRunning } from "@temporalio/client";
 import { makeClient } from "../client.js";
-import { ANCHOR_AUDIT_WORKFLOW, POLL_FEEDS_WORKFLOW } from "../shared.js";
+import { ANCHOR_AUDIT_WORKFLOW, DAILY_BRIEF_WORKFLOW, POLL_FEEDS_WORKFLOW } from "../shared.js";
 
 const POLL_SCHEDULE_ID = "poll-feeds";
 const ANCHOR_SCHEDULE_ID = "anchor-audit";
+const BRIEF_SCHEDULE_ID = "daily-brief";
 
 /** Create one schedule, treating "already exists" as success (idempotent re-run). */
 async function ensureSchedule(
@@ -38,6 +39,7 @@ async function ensureSchedule(
  * Create (or confirm) the Temporal Schedules that run without a human:
  *   - poll-feeds (15m): the auto-open spine (PROJECT_PLAN §4).
  *   - anchor-audit (1h): the external audit-chain anchor (PHASE6 §6.2).
+ *   - daily-brief (24h): the per-tenant daily brief (ticket 13).
  * Idempotent — safe to re-run.
  *
  *   pnpm --filter @stopgap/workflows start-schedule
@@ -58,6 +60,13 @@ async function main() {
       every: "1h",
       workflowType: ANCHOR_AUDIT_WORKFLOW,
       workflowId: "anchor-audit-run",
+      taskQueue: env.TEMPORAL_TASK_QUEUE,
+    });
+    await ensureSchedule(client, {
+      scheduleId: BRIEF_SCHEDULE_ID,
+      every: "24h",
+      workflowType: DAILY_BRIEF_WORKFLOW,
+      workflowId: "daily-brief-run",
       taskQueue: env.TEMPORAL_TASK_QUEUE,
     });
   } finally {

@@ -467,6 +467,16 @@ export async function pollFeedsWorkflow(): Promise<{ polled: number; opened: num
  * ambiguous). A separate hourly Temporal Schedule fires it (`scripts/start-schedule.ts`) so
  * wholesale chain rewrites stay detectable even to someone holding the HMAC key.
  */
+/**
+ * The daily-brief workflow (ticket 13). One run = one brief per tenant, on the SAME Temporal spine
+ * the feed poll and the audit anchor already run on. No second orchestrator is introduced: a brief
+ * is exactly the feature that tempts a team into adopting one, and the observability fragmentation
+ * that follows costs more than the feature is worth.
+ */
+export async function dailyBriefWorkflow(): Promise<{ generated: number; degraded: number }> {
+  return acts.generateDailyBriefs();
+}
+
 export async function anchorAuditWorkflow(): Promise<
   { orgId: string; maxAuditId: number; headHash: string; sink: string }[]
 > {

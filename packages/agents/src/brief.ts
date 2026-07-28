@@ -10,8 +10,8 @@ export interface BriefInput {
   previousKeys: string[];
   /** Dedupe keys present now, in the same order as `current`. */
   currentKeys: string[];
-  /** Cases sitting in a state that needs a human. */
-  awaitingReview: { key: string; status: string }[];
+  /** Cases still being monitored, so still sitting on somebody's desk. */
+  awaitingReview: { key: string; source: string }[];
   /** When the previous brief was generated, or undefined for the first one. */
   since?: string;
 }
@@ -28,10 +28,16 @@ export interface BriefInput {
  * deterministic scorer, and the model's whole job is to say what they mean in English (ADR-0002).
  * Temperature is whatever the provider path sets; the schema is what makes the output usable.
  */
-export async function draftDailyBrief(input: BriefInput): Promise<DailyBrief> {
+export interface DraftedBrief {
+  brief: DailyBrief;
+  /** `provider:model-id` of the call that actually ran, failover included. Recorded on the row. */
+  model: string;
+}
+
+export async function draftDailyBrief(input: BriefInput): Promise<DraftedBrief> {
   const appeared = input.currentKeys.filter((k) => !input.previousKeys.includes(k));
   const gone = input.previousKeys.filter((k) => !input.currentKeys.includes(k));
-  const { object } = await generateStructured({
+  const { object, meta } = await generateStructured({
     schema: DailyBrief,
     operation: "daily-brief",
     system:
@@ -58,8 +64,11 @@ export async function draftDailyBrief(input: BriefInput): Promise<DailyBrief> {
       `No longer present: ${String(gone.length)}`,
       "",
       `Cases awaiting a human decision (${String(input.awaitingReview.length)}):`,
-      ...input.awaitingReview.map((c) => `- ${c.key} · ${c.status}`),
+      ...input.awaitingReview.map((c) => `- ${c.key} · ${c.source}`),
     ].join("\n"),
   });
-  return object;
+  // `meta` also went to the telemetry sinks inside `generateStructured` — provider, model, token
+  // counts, cost and latency. Recording the model on the row too is the same reason a score
+  // carries its scorer version: a brief that reads oddly is only diagnosable if you know who wrote it.
+  return { brief: object, model: `${meta.provider}:${meta.modelId}` };
 }
