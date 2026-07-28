@@ -3,6 +3,7 @@ import { getApiKeys } from "../../../lib/data";
 import { isActionAllowed } from "../../../lib/authz";
 import { resolvePrincipal } from "../../../lib/principal";
 import { ApiKeysAdmin } from "./api-keys-admin";
+import { requireGroup } from "../../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,16 @@ export const dynamic = "force-dynamic";
  * Revoked keys stay in the list. "Did we already revoke that integration?" is the question this
  * page exists to answer, and hiding revoked rows would make it unanswerable here.
  */
+/**
+ * Guards itself, and does not rely on the group layout having run.
+ *
+ * A layout is NOT an authorization boundary: Next does not re-render one on a soft navigation, and
+ * the partial render is driven by router-state headers the client supplies. A crafted request can
+ * render this page with the layout skipped entirely — so the check that matters is the one here.
+ * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
+ */
 export default async function AdminApiKeysPage() {
+  await requireGroup("admin");
   const principal = await resolvePrincipal();
   if (!isActionAllowed(principal.roles, "manage_api_keys")) {
     return (

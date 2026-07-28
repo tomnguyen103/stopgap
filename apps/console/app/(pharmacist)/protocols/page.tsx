@@ -1,5 +1,6 @@
 import { getProtocols } from "../../lib/data";
 import { Card, Table } from "../../components/ui";
+import { requireGroup } from "../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,16 @@ export const dynamic = "force-dynamic";
  * `<td className="status">` — resolves to the same tokens through `Card` and `Table`, so
  * the rebuild is a proof that the two styling systems coexist rather than a redesign.
  */
+/**
+ * Guards itself, and does not rely on the group layout having run.
+ *
+ * A layout is NOT an authorization boundary: Next does not re-render one on a soft navigation, and
+ * the partial render is driven by router-state headers the client supplies. A crafted request can
+ * render this page with the layout skipped entirely — so the check that matters is the one here.
+ * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
+ */
 export default async function ProtocolsPage() {
+  await requireGroup("pharmacist");
   const protocols = await getProtocols();
 
   return (

@@ -1,5 +1,6 @@
 import { Card } from "../../components/ui";
 import { resolvePrincipal } from "../../lib/principal";
+import { requireGroup } from "../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,16 @@ export const dynamic = "force-dynamic";
  * yet. A placeholder that pretended to show data would be the faked-success this repository
  * refuses everywhere else.
  */
+/**
+ * Guards itself, and does not rely on the group layout having run.
+ *
+ * A layout is NOT an authorization boundary: Next does not re-render one on a soft navigation, and
+ * the partial render is driven by router-state headers the client supplies. A crafted request can
+ * render this page with the layout skipped entirely — so the check that matters is the one here.
+ * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
+ */
 export default async function OverviewPage() {
+  await requireGroup("viewer");
   const principal = await resolvePrincipal();
   return (
     <>

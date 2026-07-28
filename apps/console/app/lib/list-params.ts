@@ -50,7 +50,8 @@ export interface ListParams {
  * Accepted inputs: a raw query string, a `URLSearchParams`, or Next's `searchParams` record
  * (where a repeated param arrives as an array).
  */
-export type ListParamsInput = string | URLSearchParams | Record<string, string | string[] | undefined>;
+export type ListParamsInput =
+  string | URLSearchParams | Record<string, string | string[] | undefined>;
 
 /**
  * Upper bound on a search term. The term reaches a `LIKE`/`ILIKE` predicate, and an unbounded one
@@ -123,7 +124,9 @@ export function parseListParams(input: ListParamsInput, schema: ListParamsSchema
 
   const rawPageSize = parsePositiveInt(params.get("pageSize"));
   const pageSize =
-    rawPageSize !== null && schema.pageSizes.includes(rawPageSize) ? rawPageSize : schema.defaultPageSize;
+    rawPageSize !== null && schema.pageSizes.includes(rawPageSize)
+      ? rawPageSize
+      : schema.defaultPageSize;
 
   // Driven by the SCHEMA's keys, never the URL's: an undeclared key cannot enter the result at
   // all, so a crafted `?org_id=...` is invisible here rather than something the query layer has to
@@ -152,8 +155,10 @@ export function parseListParams(input: ListParamsInput, schema: ListParamsSchema
 export function serializeListParams(params: ListParams, schema: ListParamsSchema): string {
   const out = new URLSearchParams();
 
-  if (params.q !== null && params.q.trim() !== "") out.set("q", params.q.trim().slice(0, MAX_QUERY_LENGTH));
-  if (params.sort !== schema.defaultSort && schema.sortKeys.includes(params.sort)) out.set("sort", params.sort);
+  if (params.q !== null && params.q.trim() !== "")
+    out.set("q", params.q.trim().slice(0, MAX_QUERY_LENGTH));
+  if (params.sort !== schema.defaultSort && schema.sortKeys.includes(params.sort))
+    out.set("sort", params.sort);
   if (params.dir !== schema.defaultDir) out.set("dir", params.dir);
   if (params.page > 1 && params.page <= MAX_PAGE) out.set("page", String(params.page));
   if (params.pageSize !== schema.defaultPageSize && schema.pageSizes.includes(params.pageSize)) {

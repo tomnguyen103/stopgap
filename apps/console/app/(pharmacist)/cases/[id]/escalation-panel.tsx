@@ -11,15 +11,18 @@ import { formatUtc } from "../../../lib/format";
  * and offers an Ack button that signals the workflow to stop the ladder.
  *
  * The button is a convenience only: `acknowledgeCase` re-checks the role server-side, so a viewer
- * (or the anonymous demo) who somehow reaches it still fails. `canAck` just hides a button that
- * would always fail for the current surface (demo mode), matching how the review panel is hidden.
+ * (or the anonymous demo) who somehow reaches it still fails.
+ *
+ * A caller who lacks the role sees the button DISABLED, saying what it would take — never hidden
+ * (ticket 03). Hiding teaches "the acknowledge button is broken" rather than "you are not the one
+ * who acknowledges", and it invites the reader to believe the absence IS the enforcement. It never
+ * is: the server action refuses a hand-crafted request whatever this renders.
  */
 export interface AckRow {
   step: number;
   ackAt: string;
   ackedByLabel: string;
 }
-
 
 export function EscalationPanel({
   workflowId,
@@ -42,7 +45,8 @@ export function EscalationPanel({
   const [error, setError] = useState<string | undefined>();
 
   // The ladder never ran (severity below high, or no policy) and nothing was acked — nothing to show.
-  if (escalationStep === undefined && escalationEvents.length === 0 && acks.length === 0) return null;
+  if (escalationStep === undefined && escalationEvents.length === 0 && acks.length === 0)
+    return null;
   const notified = escalationEvents.filter((e) => !e.sendFailed);
 
   return (
@@ -84,12 +88,18 @@ export function EscalationPanel({
           </li>
         ))}
       </ol>
-      {canAck && !acked ? (
+      {!acked ? (
         <div className="actions">
           <button
             type="button"
-            disabled={pending}
+            // `aria-disabled` rather than `disabled`: a disabled control leaves the tab order, so
+            // the very explanation a keyboard or screen-reader user needs becomes unreachable.
+            // The click handler no-ops instead.
+            aria-disabled={!canAck || pending}
+            data-state={!canAck ? "error" : undefined}
+            title={canAck ? undefined : "Requires the pharmacist role"}
             onClick={() => {
+              if (!canAck || pending) return;
               setError(undefined);
               startTransition(async () => {
                 try {

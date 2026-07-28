@@ -54,7 +54,9 @@ function discoverOperations(): [path: string, method: "get" | "post"][] {
       if (NON_CONTRACT_ROUTES.has(path)) return [];
       const source = readFileSync(file, "utf8");
       return (["get", "post"] as const)
-        .filter((method) => new RegExp(`export\\s+async\\s+function\\s+${method.toUpperCase()}\\b`).test(source))
+        .filter((method) =>
+          new RegExp(`export\\s+async\\s+function\\s+${method.toUpperCase()}\\b`).test(source),
+        )
         .map((method) => [path, method]);
     })
     .sort(([a], [b]) => a.localeCompare(b));
@@ -64,7 +66,10 @@ const IMPLEMENTED_OPERATIONS = discoverOperations();
 
 describe("security scheme", () => {
   it("documents bearer authentication and applies it document-wide", () => {
-    expect(doc.components?.securitySchemes?.bearerAuth).toMatchObject({ type: "http", scheme: "bearer" });
+    expect(doc.components?.securitySchemes?.bearerAuth).toMatchObject({
+      type: "http",
+      scheme: "bearer",
+    });
     expect(doc.security).toEqual([{ bearerAuth: [] }]);
   });
 
@@ -79,7 +84,10 @@ describe("paths", () => {
     // whole suite green while checking nothing. Assert the walk found real routes first.
     expect(IMPLEMENTED_OPERATIONS.length).toBeGreaterThanOrEqual(6);
     expect(IMPLEMENTED_OPERATIONS).toContainEqual(["/api/v1/cases", "get"]);
-    expect(IMPLEMENTED_OPERATIONS).toContainEqual(["/api/v1/cases/{key}/resolve-exception", "post"]);
+    expect(IMPLEMENTED_OPERATIONS).toContainEqual([
+      "/api/v1/cases/{key}/resolve-exception",
+      "post",
+    ]);
   });
 
   it("documents exactly one operation per implemented route", () => {
@@ -88,7 +96,9 @@ describe("paths", () => {
       expect(doc.paths?.[path]?.[method], `missing ${method.toUpperCase()} ${path}`).toBeDefined();
     }
     // No documented path without an implementation behind it (the spec must not over-promise).
-    expect(Object.keys(doc.paths ?? {}).sort()).toEqual([...new Set(IMPLEMENTED_OPERATIONS.map(([p]) => p))].sort());
+    expect(Object.keys(doc.paths ?? {}).sort()).toEqual(
+      [...new Set(IMPLEMENTED_OPERATIONS.map(([p]) => p))].sort(),
+    );
   });
 
   it("names a known scope on EVERY operation, in both the extension and the description", () => {
@@ -121,7 +131,8 @@ describe("paths", () => {
 
   it("documents 401/403/429 on every authenticated operation", () => {
     for (const [path, method] of IMPLEMENTED_OPERATIONS) {
-      const responses = (doc.paths?.[path]?.[method] as { responses?: Record<string, unknown> })?.responses ?? {};
+      const responses =
+        (doc.paths?.[path]?.[method] as { responses?: Record<string, unknown> })?.responses ?? {};
       for (const status of ["401", "403", "429"]) {
         expect(responses[status], `${method} ${path} does not document ${status}`).toBeDefined();
       }
