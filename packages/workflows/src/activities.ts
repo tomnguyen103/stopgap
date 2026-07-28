@@ -24,6 +24,10 @@ import {
   recordFeedRecords,
   dedupeByKey,
   recordEvidence,
+  listAlertRules,
+  lastFiredByRule,
+  recordAlertEvents,
+  recordAlertDeliveries,
   recordScoreSnapshots,
   type EvidenceInput,
   type ScoreSnapshotInput,
@@ -36,9 +40,16 @@ import {
   withOrgDb,
   type EscalationStep,
 } from "@stopgap/db";
-import { sendEhrFlag, sendEmail } from "@stopgap/comms";
+import { sendChat, sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { incrementCounter } from "@stopgap/observability";
 import { componentsToRecord, scoreSignals, type ScorableSignal } from "@stopgap/scorer";
+import {
+  evaluateAlerts,
+  summarize,
+  type AlertChannel,
+  type AlertRule,
+  type AlertableSignal,
+} from "@stopgap/alerts";
 import {
   ashpShortageConnector,
   contentHash,
@@ -475,6 +486,126 @@ function evidenceForPoll(
     });
   }
   return entries;
+ * Pair each signal with the row it was persisted as and the score it was given.
+ *
+ * By dedupe KEY, never by array index: `scoreForPoll` skips a signal that has no persisted row, so
+ * the two lists are not parallel and an index join would silently attach one drug's score to
+ * another drug's signal.
+ */
+function pairScored(
+  signals: NormalizedSignal[],
+  persisted: { id: string; dedupeKey: string }[],
+  snapshots: ScoreSnapshotInput[],
+): { signal: NormalizedSignal; signalId: string; score: number }[] {
+  const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
+  const scoreById = new Map(snapshots.map((s) => [s.signalId, s.score]));
+  const out: { signal: NormalizedSignal; signalId: string; score: number }[] = [];
+  for (const signal of signals) {
+    const signalId = idByKey.get(signal.dedupeKey);
+    if (!signalId) continue;
+    const score = scoreById.get(signalId);
+    if (score === undefined) continue;
+    out.push({ signal, signalId, score });
+  }
+  return out;
+}
+
+/**
+ * Evaluate this tenant's alert rules against what the poll just scored, and notify (ticket 12).
+ *
+ * Runs INSIDE the org's own transaction for the decision and the record, and OUTSIDE it for the
+ * sends — the same division the case loop already makes. Holding a database transaction open
+ * across an email round trip pins a pooled connection for the duration of somebody else's network,
+ * which is how a poll starves a deployment.
+ *
+ * The send is guarded by the ROW, not by the caller remembering: `recordAlertEvents` returns only
+ * the events that were genuinely new, so a retried poll conflicts on the idempotency key, gets an
+ * empty list, and sends nothing.
+ */
+async function evaluateAndNotify(
+  orgId: string,
+  scored: { signal: NormalizedSignal; signalId: string; score: number }[],
+  evaluatedAt: string,
+): Promise<void> {
+  const alertable: AlertableSignal[] = scored.map((s) => ({
+    signalId: s.signalId,
+    dedupeKey: s.signal.dedupeKey,
+    riskDomain: s.signal.riskDomain,
+    entityIdentifier: s.signal.entityIdentifier,
+    severity: s.signal.severity,
+    score: s.score,
+    title: s.signal.title,
+  }));
+
+  const { evaluation, newEvents } = await withOrgDb(orgId, async (db) => {
+    const rows = await listAlertRules(db, orgId);
+    const rules: AlertRule[] = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      enabled: r.enabled,
+      riskDomain: r.riskDomain ?? undefined,
+      entityContains: r.entityContains ?? undefined,
+      minSeverity: r.minSeverity as AlertRule["minSeverity"],
+      cooldownMinutes: r.cooldownMinutes,
+      channels: r.channels as AlertChannel[],
+    }));
+    if (rules.length === 0) return { evaluation: { fired: [], suppressed: [] }, newEvents: [] };
+
+    const lastFiredAt = await lastFiredByRule(
+      db,
+      orgId,
+      rules.map((r) => r.id),
+    );
+    const result = evaluateAlerts({ rules, signals: alertable, lastFiredAt, evaluatedAt });
+
+    // Suppressed evaluations are recorded too. "This rule matched twelve signals and stayed quiet
+    // until 14:20" is exactly what a director tuning a rule needs to read, and a table holding
+    // only successes answers "what did we send" but never "what did we decide".
+    const rows2 = await recordAlertEvents(db, orgId, [
+      ...result.fired.map((f) => ({
+        ruleId: f.rule.id,
+        outcome: "fired" as const,
+        matchedCount: f.matched.length,
+        matchedKeys: f.matched.map((m) => m.dedupeKey),
+        deliveries: [],
+        idempotencyKey: f.idempotencyKey,
+        firedAt: new Date(evaluatedAt),
+      })),
+      ...result.suppressed.map((sp) => ({
+        ruleId: sp.rule.id,
+        outcome: "suppressed_cooldown" as const,
+        matchedCount: sp.matched.length,
+        matchedKeys: sp.matched.map((m) => m.dedupeKey),
+        deliveries: [],
+        idempotencyKey: `${sp.rule.id}:suppressed:${evaluatedAt}`,
+        firedAt: new Date(evaluatedAt),
+      })),
+    ]);
+    return { evaluation: result, newEvents: rows2 };
+  });
+
+  for (const fired of evaluation.fired) {
+    const event = newEvents.find((e) => e.idempotencyKey === fired.idempotencyKey);
+    // No new row means this notification already went out. The retry stops here.
+    if (!event || event.outcome !== "fired") continue;
+
+    const { subject, body } = summarize(fired);
+    const deliveries: { channel: string; delivered: boolean; reason?: string }[] = [];
+    for (const channel of fired.rule.channels) {
+      // A channel with no credential returns `delivered: false` WITH A REASON, and that is what
+      // gets recorded. Never a faked success — "the pharmacy was told" has to stay falsifiable.
+      const result =
+        channel === "chat"
+          ? await sendChat({ idempotencyKey: fired.idempotencyKey, subject, body })
+          : await sendEmail({ idempotencyKey: fired.idempotencyKey, subject, body, to: [] });
+      deliveries.push({
+        channel: result.channel,
+        delivered: result.delivered,
+        ...(result.reason ? { reason: result.reason } : {}),
+      });
+    }
+    await withOrgDb(orgId, (db) => recordAlertDeliveries(db, orgId, event.id, deliveries));
+  }
 }
 
 export async function pollAndOpenCases(): Promise<{
@@ -538,14 +669,15 @@ export async function pollAndOpenCases(): Promise<{
       // Ticket 06 — this tenant's INTERPRETATION of what the feeds returned. Normalized per org
       // (the dedupe key is org-scoped), written inside this org's own transaction, and never
       // shared: two hospitals reading the same recall hold genuinely different signals.
+      let scoredForAlerts: { signal: NormalizedSignal; signalId: string; score: number }[] = [];
       // COLLAPSED ONCE, here, rather than by each consumer in turn.
       //
       // Two feed records can derive one dedupe key — the openFDA mapper hashes (generic name,
       // presentation) when no NDC is given — and every write below keys on it: the signal upsert,
       // the score snapshot and the evidence artifact each have a unique constraint that
-      // `ON CONFLICT DO UPDATE` refuses to touch twice in one statement. Collapsing at the source
-      // means the three of them cannot disagree about how many signals this poll saw, and a fourth
-      // consumer added later inherits the same list rather than the same bug.
+      // ON CONFLICT DO UPDATE refuses to touch twice in one statement. Collapsing at the source
+      // means they cannot disagree about how many signals this poll saw, and a later consumer
+      // inherits the list rather than the bug.
       const signals = dedupeByKey(
         normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp }),
       );
@@ -575,7 +707,14 @@ export async function pollAndOpenCases(): Promise<{
           // the payload: see the table's own doc block for why a long-retention table stays free
           // of content.
           await recordEvidence(db, org.id, evidenceForPoll(signals, persisted, pollTimestamp));
+          const snapshots = scoreForPoll(signals, persisted, pollTimestamp);
+          await recordScoreSnapshots(db, org.id, snapshots);
+          scoredForAlerts = pairScored(signals, persisted, snapshots);
         });
+        // Ticket 12 — decide what is worth telling someone about, and tell them. Outside the write
+        // transaction above on purpose: the sends are network calls, and a transaction held across
+        // one pins a pooled connection for the duration of somebody else's SMTP.
+        await evaluateAndNotify(org.id, scoredForAlerts, pollTimestamp);
       } catch (err) {
         incrementCounter("stopgap_signal_persist_failures_total");
         console.error(

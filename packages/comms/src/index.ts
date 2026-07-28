@@ -22,7 +22,7 @@ export interface CommsMessage {
 }
 
 export interface CommsResult {
-  channel: "email" | "ehr";
+  channel: "email" | "ehr" | "chat";
   delivered: boolean;
   /** Why a send did not happen (missing credentials, transport error). */
   reason?: string;
@@ -37,7 +37,11 @@ export async function sendEmail(message: CommsMessage): Promise<CommsResult> {
     .map((address) => address.trim())
     .filter((address) => address.length > 0);
   const recipients =
-    message.to.length > 0 ? message.to : configured.length > 0 ? configured : compact([env.COMMS_DEMO_INBOX]);
+    message.to.length > 0
+      ? message.to
+      : configured.length > 0
+        ? configured
+        : compact([env.COMMS_DEMO_INBOX]);
   if (!env.RESEND_API_KEY) {
     return { channel: "email", delivered: false, reason: "RESEND_API_KEY not configured" };
   }
@@ -92,13 +96,62 @@ export async function sendEhrFlag(
       }),
     });
     if (!response.ok) {
-      return { channel: "ehr", delivered: false, reason: `ehr responded ${String(response.status)}` };
+      return {
+        channel: "ehr",
+        delivered: false,
+        reason: `ehr responded ${String(response.status)}`,
+      };
     }
     return { channel: "ehr", delivered: true };
   } catch (err) {
     // The EHR webhook defaults to a localhost endpoint that does not exist in a dev
     // environment; an unreachable endpoint is a recorded non-delivery, not a case failure.
     return { channel: "ehr", delivered: false, reason: errorMessage(err) };
+  }
+}
+
+/**
+ * Post an alert to the team's chat channel via an incoming webhook (ticket 12).
+ *
+ * Notifications have to reach people where they already are; an email nobody opens during a shift
+ * is the same as no notification. This is the second channel, and it degrades exactly like the
+ * first: a missing webhook is a RECORDED non-delivery with a reason, never a silent success. A
+ * stub that reported delivery would make "the pharmacy was told" unfalsifiable, which is the one
+ * property a notification system cannot afford to lose.
+ *
+ * The idempotency key travels in the payload rather than a header, because an incoming webhook has
+ * no dedup semantics of its own — so it is the RECEIVER's and the caller's shared reference for
+ * "this is the same notification", and the alert-event row is what actually prevents a resend.
+ */
+export async function sendChat(
+  message: Pick<CommsMessage, "idempotencyKey" | "subject" | "body">,
+): Promise<CommsResult> {
+  const env = getEnv();
+  if (!env.SLACK_WEBHOOK_URL) {
+    return { channel: "chat", delivered: false, reason: "SLACK_WEBHOOK_URL not configured" };
+  }
+  try {
+    const response = await fetch(env.SLACK_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: `*${message.subject}*
+${message.body}`,
+        // Not a dedup mechanism — see the doc block. It is here so a human reading the channel can
+        // tie a message back to the alert event that produced it.
+        metadata: { event_type: "stopgap_alert", event_payload: { key: message.idempotencyKey } },
+      }),
+    });
+    if (!response.ok) {
+      return {
+        channel: "chat",
+        delivered: false,
+        reason: `chat webhook responded ${String(response.status)}`,
+      };
+    }
+    return { channel: "chat", delivered: true };
+  } catch (err) {
+    return { channel: "chat", delivered: false, reason: errorMessage(err) };
   }
 }
 

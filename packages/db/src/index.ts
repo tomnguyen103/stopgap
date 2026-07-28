@@ -117,6 +117,18 @@ export {
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export {
   dedupeByKey,
+  listAlertRules,
+  createAlertRule,
+  updateAlertRule,
+  deleteAlertRule,
+  lastFiredByRule,
+  recordAlertEvents,
+  recordAlertDeliveries,
+  listAlertEvents,
+  type AlertRuleInput,
+  type AlertEventInput,
+} from "./alerts.js";
+export {
   upsertSignals,
   bumpSignalFeedMiss,
   listSignals,
