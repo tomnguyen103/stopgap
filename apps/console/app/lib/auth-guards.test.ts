@@ -19,9 +19,15 @@ vi.mock("./principal", () => ({ resolvePrincipal: () => resolvePrincipal() }));
 
 // Imported after the mock is registered so `auth-guards` binds the mocked `resolvePrincipal`.
 const { requireRole } = await import("./auth-guards");
-const { AuthorizationError, isActionAllowed, ACTION_MIN_ROLE, CONSOLE_ACTIONS, roleSatisfies } = await import(
-  "./authz"
-);
+const {
+  AuthorizationError,
+  isActionAllowed,
+  ACTION_MIN_ROLE,
+  CONSOLE_ACTIONS,
+  roleSatisfies,
+  roleLandingRoute,
+  ROLE_LANDING_ROUTE,
+} = await import("./authz");
 
 function principal(roles: Role[]): Principal {
   return {
@@ -143,5 +149,67 @@ describe("requireRole (server-enforced guard)", () => {
     resolvePrincipal.mockResolvedValue(principal(["viewer", "pharmacy_director"]));
     await expect(requireRole("approve_protocol_version")).resolves.toMatchObject({ authenticated: true });
     await expect(requireRole("manage_users")).rejects.toBeInstanceOf(AuthorizationError);
+  });
+});
+
+/**
+ * Role → landing route (unified-platform-spec, Phase F).
+ *
+ * The spec gives each role its own dashboard. Resolving WHICH dashboard is kept here, as a pure
+ * function over the role rank, precisely so that per-role routing is a table-driven unit test and
+ * never needs a browser: the middleware that consumes it is a one-line wrapper.
+ *
+ * This is routing, NOT authorization. Landing somewhere is not permission to act there — every
+ * page and every server action re-checks `requireRole` regardless of how the caller arrived.
+ */
+describe("role landing route", () => {
+  it("gives every role in the rank a landing route", () => {
+    for (const role of ROLES) {
+      expect(ROLE_LANDING_ROUTE[role]).toMatch(/^\//);
+    }
+  });
+
+  it("routes each role to its own dashboard", () => {
+    expect(roleLandingRoute(["viewer"])).toBe(ROLE_LANDING_ROUTE.viewer);
+    expect(roleLandingRoute(["pharmacist"])).toBe(ROLE_LANDING_ROUTE.pharmacist);
+    expect(roleLandingRoute(["pharmacy_director"])).toBe(ROLE_LANDING_ROUTE.pharmacy_director);
+    expect(roleLandingRoute(["admin"])).toBe(ROLE_LANDING_ROUTE.admin);
+  });
+
+  it("gives distinct routes to distinct roles", () => {
+    const routes = ROLES.map((r) => ROLE_LANDING_ROUTE[r]);
+    expect(new Set(routes).size).toBe(ROLES.length);
+  });
+
+  it("lands a multi-role user on their HIGHEST role's dashboard", () => {
+    expect(roleLandingRoute(["viewer", "pharmacy_director"])).toBe(ROLE_LANDING_ROUTE.pharmacy_director);
+    expect(roleLandingRoute(["admin", "viewer", "pharmacist"])).toBe(ROLE_LANDING_ROUTE.admin);
+  });
+
+  it("is order-independent", () => {
+    expect(roleLandingRoute(["admin", "viewer"])).toBe(roleLandingRoute(["viewer", "admin"]));
+  });
+
+  it("lands the anonymous demo visitor (no roles) on the viewer dashboard", () => {
+    // STOPGAP_DEMO_MODE resolves a visitor to an anonymous viewer holding no role at all; the
+    // public demo must still reach a real page rather than a redirect loop or a 404.
+    expect(roleLandingRoute([])).toBe(ROLE_LANDING_ROUTE.viewer);
+  });
+
+  it("ignores unknown roles rather than throwing", () => {
+    // Roles are unioned from IdP realm claims and local grants; an IdP can present a realm role
+    // this build has never heard of. Routing must degrade, not 500 the sign-in redirect.
+    expect(roleLandingRoute(["not_a_role" as Role])).toBe(ROLE_LANDING_ROUTE.viewer);
+    expect(roleLandingRoute(["not_a_role" as Role, "pharmacist"])).toBe(ROLE_LANDING_ROUTE.pharmacist);
+  });
+
+  it("never returns an external or protocol-relative destination", () => {
+    // The route is fed to a redirect. A value that could leave the origin would make the
+    // post-sign-in redirect an open redirect.
+    for (const role of ROLES) {
+      const route = ROLE_LANDING_ROUTE[role];
+      expect(route.startsWith("/")).toBe(true);
+      expect(route.startsWith("//")).toBe(false);
+    }
   });
 });

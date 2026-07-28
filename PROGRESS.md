@@ -270,3 +270,73 @@ lib; writeup; post-mortem; portfolio page + video.
   `pnpm gate` is the hard gate; `pnpm eval` is the signal.
 - Live stack verified end to end this session: Temporal worker + Postgres + Ollama + Langfuse
   (traces landing), console driving real approvals, MCP server answering a real client.
+
+---
+
+# Programme — unified supply-resilience platform
+
+Spec: `docs/unified-platform-spec.md`. Tickets: `.scratch/unified-platform/issues/01…20`, twenty
+vertical slices with explicit blocking edges. A ticket is done only when its pull request is
+**merged**.
+
+Reviews are the pacing constraint, not the code: CodeRabbit's fair-usage policy allows roughly one
+review per hour, so branches open as **drafts** (which cost no review event), are iterated and
+locally reviewed there, and are flipped ready one at a time as quota refills. A parked pull request
+is never merged without its review.
+
+| # | Ticket | State | PR |
+| --- | --- | --- | --- |
+| — | Role landing route + pure list-state module (foundation for 03, 08) | **merged** | #11 |
+| 01 | Keycloak with seeded per-role users | draft, awaiting refill | #12 |
+| 02 | Design tokens and shared primitives | not started | — |
+| 03 | Route groups and per-role landing | blocked by 01, 02 | — |
+| 04 | Browser smoke tier | blocked by 03 | — |
+| 05 | Normalized signal contract, recall and device feeds | draft, awaiting refill | #14 |
+| 06 | Risk signal and snapshot persistence | blocked by 05 | — |
+| 07 | Deterministic risk scorer | blocked by 06 | — |
+| 08 | Viewer dashboard | blocked by 03, 07 | — |
+| 09 | Evidence artifacts | blocked by 06 | — |
+| 10 | Compliance guard | draft, awaiting refill | #13 |
+| 11 | Pharmacist dashboard | blocked by 03, 07, 09, 10 | — |
+| 12 | Alert rules, cooldowns and delivery | blocked by 07 | — |
+| 13 | Daily brief | blocked by 07 | — |
+| 14 | Pharmacy director dashboard | blocked by 03, 12, 13 | — |
+| 15 | Catalog schema and CSV import | not started | — |
+| 16 | Signal matching and score completion | blocked by 07, 15 | — |
+| 17 | Administrator dashboard | blocked by 03, 15, 16 | — |
+| 18 | Retention schedule | blocked by 06, 15 | — |
+| 19 | Signals, scores and catalog on the public API | blocked by 07, 15 | — |
+| 20 | Archive medical-supply-monitor | blocked by 16, 17 | — |
+
+## Decisions taken during delivery
+
+Recorded as they are made, so the reasoning survives the pull request that carried it.
+
+- **openFDA publishes no device-shortages endpoint** (#14). `/device/shortages.json` answers 404
+  with "Cannot GET", verified live against api.fda.gov, so ticket 05 delivers device **recalls**
+  off `/device/enforcement.json` instead. Recalls are the hazard this pipeline exists to prevent
+  substituting into, so the coverage is the one that matters; the spec's Open decisions section
+  records the substitution when #14 merges.
+- **The new connectors are not wired into the poll workflow yet** (#14). A normalized signal has
+  nowhere to land until ticket 06 creates `risk_signal` and its policies, and polling the
+  enforcement endpoints to discard the results would spend provider quota for no observable
+  effect. Ticket 06 owns the wiring.
+- **Highest-role resolution belongs in the pure authorization module, not the middleware** (#11).
+  The spec first described a single-role landing function with the rank arithmetic in middleware.
+  In `authz.ts` instead, routing and permission cannot disagree about which role a multi-role user
+  effectively holds, and it stays unit-testable without a browser. The spec text was corrected to
+  match the code rather than the other way round.
+- **List state is canonical in schema order, and `page` is bounded** (#11). Filter values arriving
+  in two orders named the same view but serialised to two strings — one shared link, two cache
+  keys. Separately `pageSize` was allow-listed as a stated denial-of-service bound while the offset
+  it multiplies accepted any safe integer; bounding one and not the other bounds nothing.
+- **The compliance guard is anchored on language pointing at a person, not at a product** (#13).
+  Label and monograph vocabulary overlaps clinical vocabulary almost completely, so the first cut
+  blocked ordinary supply prose ("prescribing information", "dosage for adults", "do not administer
+  past the expiry date", "clean room 3"). The trade — impersonally-phrased clinical advice passes —
+  is stated rather than hidden, because a guard that blocks the permitted surface is one an operator
+  switches off, and a switched-off guard enforces nothing.
+- **Blocked content keeps its excerpt in the audit payload and out of the transport `reason`**
+  (#13). A false positive is only fixable if somebody can see the line that tripped it; a `reason`
+  string travels into logs and metric labels, a wider audience than suspected protected information
+  should reach.

@@ -4,11 +4,11 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A pure screening module detects protected-information patterns (record numbers, dates of birth, national identifiers, contact details), records-system references, diagnosis and treatment language, patient-specific phrasing, and substitution directives
-- [ ] It returns a structured report naming the category and the offending excerpt, not a bare boolean
-- [ ] It is applied at the outbound communications boundary, so nothing that violates the boundary is ever sent
-- [ ] Blocked content is recorded rather than silently dropped, so a false positive is discoverable
-- [ ] The module is pure — no network, no database — and tested directly against known patterns
-- [ ] Existing communication guarantees are preserved: a missing credential is still recorded as unconfigured and never faked as sent
+- [x] A pure screening module detects protected-information patterns (record numbers, dates of birth, national identifiers, contact details), records-system references, diagnosis and treatment language, patient-specific phrasing, and substitution directives
+- [x] It returns a structured report naming the category and the offending excerpt, not a bare boolean
+- [x] It is applied at the outbound communications boundary, so nothing that violates the boundary is ever sent
+- [x] Blocked content is recorded rather than silently dropped, so a false positive is discoverable
+- [x] The module is pure — no network, no database — and tested directly against known patterns
+- [x] Existing communication guarantees are preserved: a missing credential is still recorded as unconfigured and never faked as sent
