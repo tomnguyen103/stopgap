@@ -7,6 +7,7 @@ import {
   approveProtocolVersion,
   assertMaintenanceRoleBypassesRls,
   bumpFeedMiss,
+  bumpSignalFeedMiss,
   draftProtocolVersion,
   getApprovedProtocol,
   getCaseByKey,
@@ -22,6 +23,7 @@ import {
   listRoleRecipients,
   recordFeedRecords,
   resetFeedMiss,
+  upsertSignals,
   updateCaseStatus,
   upsertCaseForRecord,
   withBypassDb,
@@ -31,7 +33,17 @@ import {
 } from "@stopgap/db";
 import { sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { incrementCounter } from "@stopgap/observability";
-import { contentHash, mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
+import {
+  ashpShortageConnector,
+  contentHash,
+  mapAshpShortage,
+  mapOpenFdaResult,
+  mergeRecords,
+  openFdaDeviceRecallConnector,
+  openFdaDrugRecallConnector,
+  openFdaShortageConnector,
+  type NormalizedSignal,
+} from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, markResolved, startCase } from "./client.js";
 import { diffResolutions } from "./feed-resolution.js";
@@ -79,7 +91,6 @@ function currentRunId(): string | undefined {
   return Context.current().info.workflowExecution?.runId;
 }
 
-
 /** Persist a newly detected case and open the audit chain. Idempotent (upsert). */
 export async function recordDetected(input: CaseInput): Promise<void> {
   await withOrgDb(input.orgId, async (db) => {
@@ -122,7 +133,8 @@ export async function persistStatus(
       orgId,
       caseId: row?.id,
       actor: statusActor,
-      actorUserId: (detail.actorUserId as string | undefined) ?? syntheticUserIdForLabel(statusActor),
+      actorUserId:
+        (detail.actorUserId as string | undefined) ?? syntheticUserIdForLabel(statusActor),
       action: `case.${status}`,
       detail,
       runId: currentRunId(),
@@ -295,9 +307,88 @@ export async function recordDecision(
  * must resolve its own org before `app.current_org` can be set), and this is precisely the
  * deployment-wide job it exists for.
  */
-export async function pollAndOpenCases(): Promise<{ polled: number; opened: number; resolved: number }> {
-  const [openFda, ashp] = await Promise.all([pollOpenFda(), pollAshp()]);
-  const fetched = [...openFda, ...ashp];
+/**
+ * Fetch a feed, or report an empty one.
+ *
+ * Only for feeds that are ADDITIVE to a poll that already worked. The shortage feeds keep their
+ * throwing behaviour, because a poll that silently opened no cases would be worse than a failed
+ * one — but a recall endpoint that is down must not stop this deployment noticing shortages.
+ */
+async function fetchOrEmpty<T>(
+  fetch: () => Promise<T[]>,
+  source: string,
+): Promise<{ rows: T[]; ok: boolean }> {
+  try {
+    return { rows: await fetch(), ok: true };
+  } catch (err) {
+    incrementCounter("stopgap_feed_fetch_failures_total");
+    console.error(
+      `[poll] ${source} fetch failed: ${err instanceof Error ? err.message : String(err)}. ` +
+        "The poll continues without that feed. Its existing signals are left alone — they are " +
+        "NOT counted as missing, because an outage is not the feed saying the hazard ended.",
+    );
+    return { rows: [], ok: false };
+  }
+}
+
+/** Every adopted feed's raw payloads, fetched once for the deployment. */
+interface RawFeeds {
+  openFdaRaw: Awaited<ReturnType<typeof openFdaShortageConnector.fetch>>;
+  ashpRaw: Awaited<ReturnType<typeof ashpShortageConnector.fetch>>;
+  drugRecallRaw: Awaited<ReturnType<typeof openFdaDrugRecallConnector.fetch>>;
+  deviceRecallRaw: Awaited<ReturnType<typeof openFdaDeviceRecallConnector.fetch>>;
+}
+
+/**
+ * Turn one deployment-wide fetch into ONE tenant's signals.
+ *
+ * Pure: no network, no database, no clock — the fetch time comes from the caller, so two orgs in
+ * the same poll get the same `lastFetchedAt` and the whole poll stays reproducible.
+ */
+function normalizeForOrg(
+  raw: RawFeeds,
+  context: { orgId: string; fetchedAt: string },
+): NormalizedSignal[] {
+  return [
+    ...raw.openFdaRaw.map((r) => openFdaShortageConnector.normalize(r, context)),
+    ...raw.ashpRaw.map((r) => ashpShortageConnector.normalize(r, context)),
+    ...raw.drugRecallRaw.map((r) => openFdaDrugRecallConnector.normalize(r, context)),
+    ...raw.deviceRecallRaw.map((r) => openFdaDeviceRecallConnector.normalize(r, context)),
+  ];
+}
+
+export async function pollAndOpenCases(): Promise<{
+  polled: number;
+  opened: number;
+  resolved: number;
+}> {
+  // ONE fetch per feed for the whole deployment, then N normalizations — the same division the
+  // rest of this activity already makes. The raw payloads serve BOTH consumers: the legacy
+  // `ShortageRecord` path that opens cases, and the normalized-signal path (ticket 06) that
+  // persists per tenant. Fetching twice for the two shapes would double every provider call to
+  // store the same bytes.
+  const [openFdaRaw, ashpRaw] = await Promise.all([
+    openFdaShortageConnector.fetch(),
+    ashpShortageConnector.fetch(),
+  ]);
+  // Recalls are ADDITIVE to a poll that already worked. A new endpoint going down must not stop
+  // this deployment opening shortage cases, so its failure is contained and counted rather than
+  // thrown — the same stance the resolution loop below takes for one case's failure.
+  const [drugRecall, deviceRecall] = await Promise.all([
+    fetchOrEmpty(() => openFdaDrugRecallConnector.fetch(), openFdaDrugRecallConnector.source),
+    fetchOrEmpty(() => openFdaDeviceRecallConnector.fetch(), openFdaDeviceRecallConnector.source),
+  ]);
+  const { rows: drugRecallRaw, ok: drugRecallOk } = drugRecall;
+  const { rows: deviceRecallRaw, ok: deviceRecallOk } = deviceRecall;
+  // Only the feeds this poll actually reached. A source that failed is excluded from the
+  // miss sweep below, so an outage cannot retire its signals.
+  const polledSources: string[] = [openFdaShortageConnector.source, ashpShortageConnector.source];
+  if (drugRecallOk) polledSources.push(openFdaDrugRecallConnector.source);
+  if (deviceRecallOk) polledSources.push(openFdaDeviceRecallConnector.source);
+  const fetched = [
+    ...openFdaRaw.map(mapOpenFdaResult),
+    ...ashpRaw.map((entry) => mapAshpShortage(entry.key, entry.shortage)),
+  ];
   // Persist what the feeds returned before deciding what to do with it: `feed_records` is the
   // provenance trail behind every case, and the only thing that can answer "when did this
   // deployment last hear from openFDA" (the console's freshness panel). Resolved records are
@@ -336,6 +427,26 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
       // across a `startCase` RPC would pin a pooled connection for the duration of a network round
       // trip per record, which is the same starvation problem in a different shape — a transaction
       // is for the database work, not for the whole iteration.
+      // Ticket 06 — this tenant's INTERPRETATION of what the feeds returned. Normalized per org
+      // (the dedupe key is org-scoped), written inside this org's own transaction, and never
+      // shared: two hospitals reading the same recall hold genuinely different signals.
+      const signals = normalizeForOrg(
+        { openFdaRaw, ashpRaw, drugRecallRaw, deviceRecallRaw },
+        { orgId: org.id, fetchedAt: pollTimestamp },
+      );
+      await withOrgDb(org.id, async (db) => {
+        await upsertSignals(db, org.id, signals);
+        // The FEED-ABSENT half, kept distinct from `sourceResolved`: a signal the poll did not
+        // return has said nothing about whether the hazard is over.
+        await bumpSignalFeedMiss(
+          db,
+          org.id,
+          signals.map((s) => s.dedupeKey),
+          pollRun,
+          polledSources,
+        );
+      });
+
       const { existingWorkflowIds, openCases } = await withOrgDb(org.id, async (db) => {
         const rows = await getCasesByKeys(db, org.id, currentKeyList);
         return {
@@ -500,7 +611,11 @@ export async function sendEscalationNotification(input: {
             `Acknowledge in the console to stop the ladder.`,
           to: recipients,
         })
-      : { channel: "email" as const, delivered: false, reason: `no user holds role ${input.notify}` };
+      : {
+          channel: "email" as const,
+          delivered: false,
+          reason: `no user holds role ${input.notify}`,
+        };
   incrementCounter(
     result.delivered ? "stopgap_comms_delivered_total" : "stopgap_comms_nondelivered_total",
     { channel: "escalation" },
@@ -588,7 +703,12 @@ export async function anchorAuditChain(): Promise<
 > {
   await assertMaintenanceRoleBypassesRls("anchorAuditChain");
   const orgs = await withBypassDb(() => listOrganizations());
-  const rows = await withBypassDb((db) => runAuditAnchor(db, orgs.map((o) => o.id)));
+  const rows = await withBypassDb((db) =>
+    runAuditAnchor(
+      db,
+      orgs.map((o) => o.id),
+    ),
+  );
   return rows.map((row) => ({
     orgId: row.orgId,
     maxAuditId: row.maxAuditId,
@@ -652,7 +772,9 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
           key: input.key,
           version: current.version.version,
           authoredBy: input.authoredBy,
-          identitySource: input.approvedByUserId ? "authenticated-session" : "workflow-signal-claim",
+          identitySource: input.approvedByUserId
+            ? "authenticated-session"
+            : "workflow-signal-claim",
         },
         runId: currentRunId(),
         eventKey: `protocol.version_approved.v${String(current.version.version)}`,
