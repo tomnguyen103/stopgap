@@ -12,6 +12,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -886,6 +887,117 @@ export const riskScoreSnapshots = pgTable(
   ],
 );
 
+/**
+ * ---------------------------------------------------------------------------------------------
+ * Alert rules and the events they produce (ticket 12). Both TENANT tables.
+ * ---------------------------------------------------------------------------------------------
+ *
+ * A rule is one hospital's statement about what its team wants to hear about. Nothing about it is
+ * a shared external fact — two facilities stocking the same drug legitimately want different
+ * thresholds, different channels and different cooldowns — so the §6.5 test puts both here without
+ * argument.
+ *
+ * WHAT THESE TABLES DO NOT OWN: who is told, whether they acknowledged, and what happens when
+ * nobody does. That is the escalation ladder (`escalation_policies`, `acknowledgments`), and it is
+ * unchanged. Rules own TRIGGERING; the ladder owns OWNERSHIP. The split is drawn there because the
+ * two fail differently — a rule that fired and reached nobody is a delivery problem, a rule that
+ * never fired is a policy one — and merging them produces a component whose failure reads
+ * "somebody should have been told something", which nobody can debug.
+ */
+export const alertRules = pgTable(
+  "alert_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    name: text("name").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** One risk domain, or NULL for any. The "categories" axis. */
+    riskDomain: text("risk_domain"),
+    /** Case-insensitive substring on the entity identifier, or NULL for any. The "items" axis. */
+    entityContains: text("entity_contains"),
+    /** The severity floor. A signal below it never fires this rule. */
+    minSeverity: text("min_severity").notNull(),
+    /**
+     * Minutes between two notifications from this rule.
+     *
+     * Not a refinement. One recorded ingestion run opened fifty-seven cases; without this that is
+     * fifty-seven notifications from one event, and what the recipient learns is to filter the
+     * channel. A filtered channel is worse than no channel, because the system still believes it
+     * told them.
+     */
+    cooldownMinutes: integer("cooldown_minutes").notNull().default(60),
+    channels: jsonb("channels").$type<string[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Names are how a director refers to a rule when tuning it, so two rules cannot share one
+    // within a tenant. Org-leading, so it doubles as the org-filter index.
+    uniqueIndex("alert_rules_name_uq").on(t.orgId, t.name),
+    // Referenced by `alert_events`' composite foreign key. Redundant as an index (`id` is already
+    // unique), but Postgres requires a unique constraint over exactly the referenced columns.
+    uniqueIndex("alert_rules_org_id_uq").on(t.orgId, t.id),
+    index("alert_rules_enabled_idx").on(t.orgId, t.enabled),
+  ],
+);
+
+/**
+ * One firing, with what it matched and what became of each send.
+ *
+ * Recorded whether or not delivery succeeded, and recorded for SUPPRESSED evaluations too, because
+ * "this rule matched twelve signals and stayed quiet until 14:20" is exactly what a director
+ * tuning a rule needs to read. A table that only held successes would answer "what did we send"
+ * and never "what did we decide".
+ */
+export const alertEvents = pgTable(
+  "alert_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    ruleId: uuid("rule_id").notNull(),
+    /**
+     * `fired` | `suppressed_cooldown`.
+     *
+     * The outcome of the DECISION, kept separate from the outcome of the SEND below: a rule that
+     * fired into a misconfigured channel decided correctly and delivered nothing, and collapsing
+     * the two would make that indistinguishable from a rule that stayed quiet.
+     */
+    outcome: text("outcome").notNull(),
+    /** How many signals matched. The count is what a burst is about. */
+    matchedCount: integer("matched_count").notNull(),
+    /** The matched signals' dedupe keys — identifiers, not payloads. */
+    matchedKeys: jsonb("matched_keys").$type<string[]>().notNull(),
+    /** Per-channel send results, as `@stopgap/comms` returned them. */
+    deliveries: jsonb("deliveries")
+      .$type<{ channel: string; delivered: boolean; reason?: string }[]>()
+      .notNull(),
+    /**
+     * Stable per (rule, cooldown window).
+     *
+     * This is what makes a retried send a no-op: the insert conflicts, the row is restated, and no
+     * second notification is produced. Keyed on the window rather than on the signals so that a
+     * retry which happens to see one more matching signal still collides.
+     */
+    idempotencyKey: text("idempotency_key").notNull(),
+    firedAt: timestamp("fired_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("alert_events_idempotency_uq").on(t.orgId, t.idempotencyKey),
+    index("alert_events_rule_idx").on(t.orgId, t.ruleId, t.firedAt),
+    // Composite, for the reason spelled out on the snapshot and evidence tables: a plain foreign
+    // key proves the rule exists, not that it belongs to this tenant.
+    foreignKey({
+      columns: [t.orgId, t.ruleId],
+      foreignColumns: [alertRules.orgId, alertRules.id],
+      name: "alert_events_org_rule_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type RiskSignalRow = typeof riskSignals.$inferSelect;
 export type NewRiskSignalRow = typeof riskSignals.$inferInsert;
@@ -912,3 +1024,6 @@ export type DemoRunRow = typeof demoRuns.$inferSelect;
 export type ApiKeyRow = typeof apiKeys.$inferSelect;
 export type NewApiKeyRow = typeof apiKeys.$inferInsert;
 export type ApiKeyRequestRow = typeof apiKeyRequests.$inferSelect;
+export type AlertRuleRow = typeof alertRules.$inferSelect;
+export type NewAlertRuleRow = typeof alertRules.$inferInsert;
+export type AlertEventRow = typeof alertEvents.$inferSelect;

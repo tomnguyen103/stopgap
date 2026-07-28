@@ -70,6 +70,11 @@ const ID = {
   signalB: "bbbb0009-0000-0000-0000-000000000009",
   scoreA: "aaaa0010-0000-0000-0000-000000000010",
   scoreB: "bbbb0010-0000-0000-0000-000000000010",
+  // Ticket 12 — alert rules and the events they produce.
+  ruleA: "aaaa0012-0000-0000-0000-000000000012",
+  ruleB: "bbbb0012-0000-0000-0000-000000000012",
+  alertA: "aaaa0013-0000-0000-0000-000000000013",
+  alertB: "bbbb0013-0000-0000-0000-000000000013",
 } as const;
 
 /**
@@ -115,6 +120,8 @@ async function seedOrg(
     keyId: string;
     signalId: string;
     scoreId: string;
+    ruleId: string;
+    alertId: string;
   },
   suffix: string,
 ) {
@@ -157,6 +164,13 @@ async function seedOrg(
                                                reachable_max, scorer_version)
              values (${ids.scoreId}, ${orgId}, ${ids.signalId}, 42.5, 'moderate', '{}'::jsonb,
                      65, 'test-1')`;
+    await tx`insert into alert_rules (id, org_id, name, min_severity, cooldown_minutes, channels)
+             values (${ids.ruleId}, ${orgId}, ${"rule-" + suffix}, 'high', 60,
+                     '["email"]'::jsonb)`;
+    await tx`insert into alert_events (id, org_id, rule_id, outcome, matched_count, matched_keys,
+                                       deliveries, idempotency_key, fired_at)
+             values (${ids.alertId}, ${orgId}, ${ids.ruleId}, 'fired', 1, '[]'::jsonb, '[]'::jsonb,
+                     ${"idem-" + suffix}, now())`;
   });
 }
 
@@ -185,6 +199,31 @@ interface TenantTable {
 }
 
 const TENANT_TABLES: TenantTable[] = [
+  {
+    name: "alert_rules",
+    readOthers: (tx) => tx`select id from alert_rules where id = ${ID.ruleB}`,
+    insertAs: (tx, org) =>
+      tx`insert into alert_rules (org_id, name, min_severity, cooldown_minutes, channels)
+         values (${org}, ${"x-" + org.slice(0, 4)}, 'high', 60, '["email"]'::jsonb)`,
+    readAll: (tx) => tx`select id from alert_rules`,
+    updateOthers: (tx) =>
+      tx`update alert_rules set enabled = false where id = ${ID.ruleB} returning id`,
+    deleteOthers: (tx) => tx`delete from alert_rules where id = ${ID.ruleB} returning id`,
+  },
+  {
+    name: "alert_events",
+    readOthers: (tx) => tx`select id from alert_events where id = ${ID.alertB}`,
+    insertAs: (tx, org) =>
+      tx`insert into alert_events (org_id, rule_id, outcome, matched_count, matched_keys,
+                                   deliveries, idempotency_key, fired_at)
+         values (${org}, ${ID.ruleA}, 'fired', 1, '[]'::jsonb, '[]'::jsonb,
+                 ${"x-" + org.slice(0, 4)}, now())`,
+    readAll: (tx) => tx`select id from alert_events`,
+    updateOthers: (tx) =>
+      tx`update alert_events set outcome = 'hijacked' where id = ${ID.alertB} returning id`,
+    deleteOthers: (tx) => tx`delete from alert_events where id = ${ID.alertB} returning id`,
+  },
+
   {
     name: "risk_signals",
     readOthers: (tx) => tx`select id from risk_signals where id = ${ID.signalB}`,
@@ -350,6 +389,8 @@ beforeAll(async () => {
       keyId: ID.keyA,
       signalId: ID.signalA,
       scoreId: ID.scoreA,
+      ruleId: ID.ruleA,
+      alertId: ID.alertA,
     },
     "a",
   );
@@ -366,6 +407,8 @@ beforeAll(async () => {
       keyId: ID.keyB,
       signalId: ID.signalB,
       scoreId: ID.scoreB,
+      ruleId: ID.ruleB,
+      alertId: ID.alertB,
     },
     "b",
   );
@@ -385,6 +428,9 @@ afterAll(async () => {
       await tx`delete from cases where org_id = ${org}`;
       await tx`delete from users where org_id = ${org}`;
       // Snapshots first: they FK the signal they scored.
+      // Events first: they FK the rule that produced them.
+      await tx`delete from alert_events where org_id = ${org}`;
+      await tx`delete from alert_rules where org_id = ${org}`;
       await tx`delete from risk_score_snapshots where org_id = ${org}`;
       await tx`delete from risk_signals where org_id = ${org}`;
     });

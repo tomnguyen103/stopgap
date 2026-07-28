@@ -76,6 +76,14 @@ const EnvSchema = z.object({
   COMMS_PHARMACY_TO: z.string().default(""),
   COMMS_DEMO_INBOX: z.string().optional(),
   EHR_WEBHOOK_URL: z.string().default("http://localhost:4000/ehr/formulary-flag"),
+  /**
+   * Incoming-webhook URL for the team chat channel alerts go to (ticket 12).
+   *
+   * OPTIONAL, and absent by default. A deployment without it records every chat send as
+   * `delivered: false, reason: "SLACK_WEBHOOK_URL not configured"` — never as delivered. The
+   * repository's stance on unconfigured providers, applied to one more provider.
+   */
+  SLACK_WEBHOOK_URL: z.string().optional(),
 
   /**
    * Public-demo mode (PROJECT_PLAN §11). "on" makes the console a read-only guest surface:
@@ -155,7 +163,10 @@ const EnvSchema = z.object({
   /** OIDC client id registered in the realm. */
   KEYCLOAK_CLIENT_ID: z.string().default("stopgap-console"),
   /** OIDC client secret. Optional: a public client, or a deployment that has not wired auth. */
-  KEYCLOAK_CLIENT_SECRET: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
+  KEYCLOAK_CLIENT_SECRET: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 
   /**
    * Base URL of the public REST API (PHASE6 §6.7) — where the MCP server sends its requests.
