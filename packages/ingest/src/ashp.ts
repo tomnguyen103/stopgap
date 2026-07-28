@@ -2,11 +2,7 @@ import { getEnv } from "@stopgap/core/env";
 import { ShortageRecord } from "@stopgap/core";
 import { normalizeKey, normalizeStatus } from "./normalize.js";
 import {
-  DEFAULT_SIGNAL_CONFIDENCE,
-  classifyStaleness,
-  shortageSeverity,
-  shortageStatusResolved,
-  signalDedupeKey,
+  shortageSignal,
   type Connector,
   type NormalizationContext,
   type NormalizedSignal,
@@ -44,7 +40,9 @@ export function mapAshpShortage(key: string, s: AshpShortage): ShortageRecord {
   // fall back to undefined instead of failing every record over one bad timestamp.
   const updatedAtDate = typeof s.updatedAt === "number" ? new Date(s.updatedAt) : undefined;
   const updatedAt =
-    updatedAtDate && !Number.isNaN(updatedAtDate.getTime()) ? updatedAtDate.toISOString() : undefined;
+    updatedAtDate && !Number.isNaN(updatedAtDate.getTime())
+      ? updatedAtDate.toISOString()
+      : undefined;
   return ShortageRecord.parse({
     source: "ashp",
     sourceId: key,
@@ -96,42 +94,28 @@ export function ashpEntries(feed: AshpFeed): AshpEntry[] {
 export const ASHP_EVIDENCE_URL = "https://www.ashp.org/drug-shortages/current-shortages";
 
 /** Map one keyed ASHP entry onto the normalized signal contract (ticket 05). */
-export function normalizeAshpShortage(raw: AshpEntry, context: NormalizationContext): NormalizedSignal {
-  const record = mapAshpShortage(raw.key, raw.shortage);
-  const { severity, severityScore } = shortageSeverity(record.status);
-  const publishedAt = record.updatedAt ?? context.fetchedAt;
-  return {
-    source: "ashp_shortage",
-    sourceId: record.sourceId,
-    riskDomain: "shortage",
-    entityType: "drug",
-    entityIdentifier: record.genericName,
-    title: `Drug shortage — ${record.genericName}`,
-    summary: record.note?.replace(/\s+/g, " ").trim() || "No detail given by the source.",
-    severity,
-    severityScore,
-    confidence: DEFAULT_SIGNAL_CONFIDENCE,
-    observedAt: publishedAt,
-    publishedAt,
-    lastFetchedAt: context.fetchedAt,
-    staleness: classifyStaleness(publishedAt, context.fetchedAt),
-    sourceResolved: shortageStatusResolved(record.status),
-    evidenceUrl: ASHP_EVIDENCE_URL,
-    raw: raw.shortage,
-    dedupeKey: signalDedupeKey(context.orgId, "ashp_shortage", record.sourceId),
-    matchHints: {
-      ndcs: [...new Set(record.ndcs)],
-      rxcuis: [...new Set(record.rxcuis)],
-      names: [...new Set([record.genericName, record.key].filter((n) => n.length > 0))],
-    },
-  };
+export function normalizeAshpShortage(
+  raw: AshpEntry,
+  context: NormalizationContext,
+): NormalizedSignal {
+  return shortageSignal(
+    mapAshpShortage(raw.key, raw.shortage),
+    { source: "ashp_shortage", evidenceUrl: ASHP_EVIDENCE_URL, raw: raw.shortage },
+    context,
+  );
 }
 
 export const ashpShortageConnector: Connector<AshpEntry> = {
   source: "ashp_shortage",
   riskDomain: "shortage",
   entityType: "drug",
-  fetch: async (options) => ashpEntries(await fetchAshpFeed(options?.fetchImpl)),
+  // ASHP serves the whole shortage list as ONE document with no server-side paging, so `limit`
+  // can only be honoured by trimming after the fetch. Trimming is still worth doing — the option
+  // is on the contract, and silently ignoring it would let a caller believe it bounded the work.
+  fetch: async (options) => {
+    const entries = ashpEntries(await fetchAshpFeed(options?.fetchImpl));
+    return options?.limit === undefined ? entries : entries.slice(0, options.limit);
+  },
   normalize: normalizeAshpShortage,
 };
 

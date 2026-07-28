@@ -37,6 +37,7 @@ export {
   STALENESS_DAYS,
   DEFAULT_SIGNAL_CONFIDENCE,
   signalDedupeKey,
+  shortageSignal,
   classifyStaleness,
   shortageStatusResolved,
   shortageSeverity,
@@ -44,6 +45,7 @@ export {
   type EntityType,
   type SignalSource,
   type Severity,
+  type SeverityGrade,
   type Staleness,
   type MatchHints,
   type NormalizedSignal,
@@ -52,4 +54,10 @@ export {
 } from "./signal.js";
 export { getRxcuiByName, getTherapeuticClasses, type TherapeuticClass } from "./rxnorm.js";
 export { mergeRecords, dedupeSignals, type MergedShortage } from "./dedupe.js";
-export { normalizeKey, normalizeStatus, parseUsDate, parseCompactDate, contentHash } from "./normalize.js";
+export {
+  normalizeKey,
+  normalizeStatus,
+  parseUsDate,
+  parseCompactDate,
+  contentHash,
+} from "./normalize.js";

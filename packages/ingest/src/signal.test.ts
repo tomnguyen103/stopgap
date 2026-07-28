@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resetEnvCache } from "@stopgap/core/env";
 import drugEnforcement from "./fixtures/openfda-drug-enforcement.json" with { type: "json" };
 import deviceEnforcement from "./fixtures/openfda-device-enforcement.json" with { type: "json" };
 import openfdaHeparin from "./fixtures/openfda-heparin.json" with { type: "json" };
@@ -17,8 +18,17 @@ import {
   type NormalizationContext,
   type NormalizedSignal,
 } from "./signal.js";
-import { normalizeOpenFdaShortage, openFdaShortageConnector, type OpenFdaResponse } from "./openfda.js";
-import { ashpEntries, ashpShortageConnector, normalizeAshpShortage, type AshpFeed } from "./ashp.js";
+import {
+  normalizeOpenFdaShortage,
+  openFdaShortageConnector,
+  type OpenFdaResponse,
+} from "./openfda.js";
+import {
+  ashpEntries,
+  ashpShortageConnector,
+  normalizeAshpShortage,
+  type AshpFeed,
+} from "./ashp.js";
 import {
   openFdaDeviceRecallConnector,
   openFdaDrugRecallConnector,
@@ -46,29 +56,45 @@ const DEVICE_RECALL = required(deviceRecalls[0], "a device recall");
 const OPENFDA_SHORTAGE = required(openFdaShortages[0], "an openFDA shortage");
 const ASHP_SHORTAGE = required(ashpShortages[0], "an ASHP shortage");
 
+/**
+ * One adopted feed with its recorded payload, its raw type erased behind a closure.
+ *
+ * A plain array of connectors cannot be typed without an unsafe cast — `Connector<TRaw>` is
+ * covariant in its fetch result — so each case closes over its own TRaw and exposes only what the
+ * shared assertions need.
+ */
+function feedCase<TRaw>(connector: Connector<TRaw>, raws: TRaw[]) {
+  return {
+    source: connector.source,
+    riskDomain: connector.riskDomain,
+    entityType: connector.entityType,
+    count: raws.length,
+    normalize: (context: NormalizationContext = CONTEXT) =>
+      raws.map((raw) => connector.normalize(raw, context)),
+  };
+}
+
 /** Every adopted feed, paired with a recorded payload — the offline gate's whole surface. */
-const CASES: { connector: Connector<never>; raws: unknown[] }[] = [
-  { connector: openFdaShortageConnector as unknown as Connector<never>, raws: openFdaShortages },
-  { connector: ashpShortageConnector as unknown as Connector<never>, raws: ashpShortages },
-  { connector: openFdaDrugRecallConnector as unknown as Connector<never>, raws: drugRecalls },
-  { connector: openFdaDeviceRecallConnector as unknown as Connector<never>, raws: deviceRecalls },
+const CASES = [
+  feedCase(openFdaShortageConnector, openFdaShortages),
+  feedCase(ashpShortageConnector, ashpShortages),
+  feedCase(openFdaDrugRecallConnector, drugRecalls),
+  feedCase(openFdaDeviceRecallConnector, deviceRecalls),
 ];
 
 function normalizeAll(): NormalizedSignal[] {
-  return CASES.flatMap(({ connector, raws }) =>
-    raws.map((raw) => connector.normalize(raw as never, CONTEXT)),
-  );
+  return CASES.flatMap((c) => c.normalize());
 }
 
 describe("the connector contract", () => {
   it("has a recorded payload behind every adopted feed", () => {
-    expect(CASES.map((c) => c.connector.source)).toEqual([
+    expect(CASES.map((c) => c.source)).toEqual([
       "openfda_shortage",
       "ashp_shortage",
       "openfda_drug_recall",
       "openfda_device_recall",
     ]);
-    for (const { connector, raws } of CASES) expect(raws.length, connector.source).toBeGreaterThan(0);
+    for (const c of CASES) expect(c.count, c.source).toBeGreaterThan(0);
   });
 
   it("emits one shape from every feed, with every contract field populated", () => {
@@ -98,12 +124,11 @@ describe("the connector contract", () => {
   });
 
   it("declares each connector's domain and entity type consistently with what it emits", () => {
-    for (const { connector, raws } of CASES) {
-      for (const raw of raws) {
-        const signal = connector.normalize(raw as never, CONTEXT);
-        expect(signal.source).toBe(connector.source);
-        expect(signal.riskDomain).toBe(connector.riskDomain);
-        expect(signal.entityType).toBe(connector.entityType);
+    for (const c of CASES) {
+      for (const signal of c.normalize()) {
+        expect(signal.source).toBe(c.source);
+        expect(signal.riskDomain).toBe(c.riskDomain);
+        expect(signal.entityType).toBe(c.entityType);
       }
     }
   });
@@ -113,13 +138,7 @@ describe("the connector contract", () => {
   });
 
   it("normalizes deterministically — a repeated payload yields a stable key and an equal signal", () => {
-    for (const { connector, raws } of CASES) {
-      for (const raw of raws) {
-        expect(connector.normalize(raw as never, CONTEXT)).toEqual(
-          connector.normalize(raw as never, CONTEXT),
-        );
-      }
-    }
+    for (const c of CASES) expect(c.normalize()).toEqual(c.normalize());
   });
 
   it("reads the fetch time from its caller rather than from the clock", () => {
@@ -160,6 +179,20 @@ describe("dedupe on the contract's stable key", () => {
     expect(only.matchHints.ndcs).toContain("11111-111-11");
   });
 
+  it("keeps two id-less recalls apart instead of collapsing them onto one empty key", () => {
+    const anonymous = { ...DRUG_RECALL, recall_number: undefined, event_id: undefined };
+    const a = openFdaDrugRecallConnector.normalize(anonymous, CONTEXT);
+    const b = openFdaDrugRecallConnector.normalize(
+      { ...anonymous, product_description: "A different recalled product entirely" },
+      CONTEXT,
+    );
+    expect(a.sourceId).not.toBe("");
+    expect(a.dedupeKey).not.toBe(b.dedupeKey);
+    expect(dedupeSignals([a, b])).toHaveLength(2);
+    // Identical payloads must still land on the same key, or the fallback would defeat dedupe.
+    expect(openFdaDrugRecallConnector.normalize(anonymous, CONTEXT).dedupeKey).toBe(a.dedupeKey);
+  });
+
   it("keeps signals from different feeds apart rather than merging them by key collision", () => {
     const all = normalizeAll();
     expect(dedupeSignals(all)).toHaveLength(new Set(all.map((s) => s.dedupeKey)).size);
@@ -171,7 +204,10 @@ describe("source-resolved is not feed-absent", () => {
   it("keeps a terminated recall as a signal, flagged resolved rather than dropped", () => {
     const terminated = drugRecalls.find((r) => r.status === "Terminated");
     expect(terminated, "fixture must contain a terminated recall").toBeDefined();
-    const signal = openFdaDrugRecallConnector.normalize(required(terminated, "a terminated recall"), CONTEXT);
+    const signal = openFdaDrugRecallConnector.normalize(
+      required(terminated, "a terminated recall"),
+      CONTEXT,
+    );
     expect(signal.sourceResolved).toBe(true);
     expect(signal.severityScore).toBeGreaterThan(0);
     expect(dedupeSignals([signal])).toHaveLength(1);
@@ -181,7 +217,8 @@ describe("source-resolved is not feed-absent", () => {
     const ongoing = deviceRecalls.find((r) => r.status === "Ongoing");
     expect(ongoing).toBeDefined();
     expect(
-      openFdaDeviceRecallConnector.normalize(required(ongoing, "an ongoing recall"), CONTEXT).sourceResolved,
+      openFdaDeviceRecallConnector.normalize(required(ongoing, "an ongoing recall"), CONTEXT)
+        .sourceResolved,
     ).toBe(false);
     expect(shortageStatusResolved("unknown")).toBe(false);
     expect(shortageStatusResolved("current")).toBe(false);
@@ -230,6 +267,23 @@ describe("staleness", () => {
     expect(classifyStaleness("2026-01-10T00:00:00.000Z", "2026-07-28T00:00:00.000Z")).toBe("stale");
     expect(classifyStaleness("not a date", "2026-07-28T00:00:00.000Z")).toBe("stale");
     expect(classifyStaleness("2027-01-01T00:00:00.000Z", "2026-07-28T00:00:00.000Z")).toBe("stale");
+  });
+
+  it("calls a record the source dated nowhere stale, not fresh", () => {
+    const undated = openFdaDrugRecallConnector.normalize(
+      {
+        ...DRUG_RECALL,
+        report_date: undefined,
+        center_classification_date: undefined,
+        termination_date: undefined,
+        recall_initiation_date: undefined,
+      },
+      CONTEXT,
+    );
+    // The field still has to carry SOMETHING, so it falls back to the fetch time — the point is
+    // that staleness is not fooled by that fallback into calling a dateless record the freshest.
+    expect(undated.publishedAt).toBe(CONTEXT.fetchedAt);
+    expect(undated.staleness).toBe("stale");
   });
 
   it("marks the recorded 2015-era recall stale against a 2026 fetch", () => {
@@ -287,6 +341,25 @@ describe("fetch stays separate from normalize", () => {
     const raws = await openFdaDeviceRecallConnector.fetch({ fetchImpl: stub });
     expect(raws).toHaveLength(deviceRecalls.length);
     expect(required(raws[0], "a fetched raw record")).not.toHaveProperty("dedupeKey");
+  });
+
+  it("honours the contract's limit on ASHP, whose feed arrives as one unpaged document", async () => {
+    process.env.ASHP_AUTH_KEY = "test-key";
+    resetEnvCache();
+    try {
+      const stub = (async () =>
+        new Response(JSON.stringify(ashpFixture), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch;
+      expect(await ashpShortageConnector.fetch({ fetchImpl: stub, limit: 1 })).toHaveLength(1);
+      expect(await ashpShortageConnector.fetch({ fetchImpl: stub })).toHaveLength(
+        ashpShortages.length,
+      );
+    } finally {
+      delete process.env.ASHP_AUTH_KEY;
+      resetEnvCache();
+    }
   });
 
   it("treats openFDA's 404-for-empty as an empty result set, not a failure", async () => {

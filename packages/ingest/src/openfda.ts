@@ -3,11 +3,7 @@ import { getEnv } from "@stopgap/core/env";
 import { ShortageRecord } from "@stopgap/core";
 import { normalizeKey, normalizeStatus, parseUsDate } from "./normalize.js";
 import {
-  DEFAULT_SIGNAL_CONFIDENCE,
-  classifyStaleness,
-  shortageSeverity,
-  shortageStatusResolved,
-  signalDedupeKey,
+  shortageSignal,
   type Connector,
   type NormalizationContext,
   type NormalizedSignal,
@@ -34,13 +30,19 @@ export interface OpenFdaResponse {
 /** Map one openFDA result into a normalized ShortageRecord. */
 export function mapOpenFdaResult(r: OpenFdaResult): ShortageRecord {
   const genericName = r.generic_name?.trim() || "unknown";
-  const ndcs = [r.package_ndc, ...(r.openfda?.product_ndc ?? [])].filter((x): x is string => Boolean(x));
+  const ndcs = [r.package_ndc, ...(r.openfda?.product_ndc ?? [])].filter((x): x is string =>
+    Boolean(x),
+  );
   // openFDA has no stable record id. Must NOT include `status` — the same shortage's id
   // would otherwise change on a Current -> Resolved update, breaking the stable-identity
   // contract downstream persistence relies on for upsert. Fall back to a deterministic hash
   // of (generic name + presentation) instead of a shared "no-ndc" collision bucket.
   const sourceId =
-    r.package_ndc ?? createHash("sha256").update(`${genericName}:${r.presentation ?? ""}`).digest("hex").slice(0, 16);
+    r.package_ndc ??
+    createHash("sha256")
+      .update(`${genericName}:${r.presentation ?? ""}`)
+      .digest("hex")
+      .slice(0, 16);
   return ShortageRecord.parse({
     source: "openfda",
     sourceId,
@@ -67,35 +69,17 @@ export function normalizeOpenFdaShortage(
   raw: OpenFdaResult,
   context: NormalizationContext,
 ): NormalizedSignal {
-  const record = mapOpenFdaResult(raw);
-  const { severity, severityScore } = shortageSeverity(record.status);
-  const publishedAt = record.updatedAt ?? context.fetchedAt;
   const base = getEnv().OPENFDA_BASE_URL.replace(/\/+$/, "");
-  return {
-    source: "openfda_shortage",
-    sourceId: record.sourceId,
-    riskDomain: "shortage",
-    entityType: "drug",
-    entityIdentifier: record.genericName,
-    title: `Drug shortage — ${record.genericName}`,
-    summary: record.note?.replace(/\s+/g, " ").trim() || "No detail given by the source.",
-    severity,
-    severityScore,
-    confidence: DEFAULT_SIGNAL_CONFIDENCE,
-    observedAt: publishedAt,
-    publishedAt,
-    lastFetchedAt: context.fetchedAt,
-    staleness: classifyStaleness(publishedAt, context.fetchedAt),
-    sourceResolved: shortageStatusResolved(record.status),
-    evidenceUrl: `${base}/drug/shortages.json?search=generic_name:%22${encodeURIComponent(record.genericName)}%22`,
-    raw,
-    dedupeKey: signalDedupeKey(context.orgId, "openfda_shortage", record.sourceId),
-    matchHints: {
-      ndcs: [...new Set(record.ndcs)],
-      rxcuis: [...new Set(record.rxcuis)],
-      names: [...new Set([record.genericName, record.key].filter((n) => n.length > 0))],
+  const record = mapOpenFdaResult(raw);
+  return shortageSignal(
+    record,
+    {
+      source: "openfda_shortage",
+      evidenceUrl: `${base}/drug/shortages.json?search=generic_name:%22${encodeURIComponent(record.genericName)}%22`,
+      raw,
     },
-  };
+    context,
+  );
 }
 
 export const openFdaShortageConnector: Connector<OpenFdaResult> = {

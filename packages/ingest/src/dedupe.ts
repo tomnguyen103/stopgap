@@ -1,4 +1,5 @@
 import type { ShortageRecord } from "@stopgap/core";
+import { unique } from "./normalize.js";
 import type { NormalizedSignal } from "./signal.js";
 
 /** A shortage merged from one or more feed records sharing a dedup key. */
@@ -7,10 +8,6 @@ export interface MergedShortage extends ShortageRecord {
   sources: ShortageRecord["source"][];
   /** Original per-feed records, retained for provenance. */
   contributingRecords: ShortageRecord[];
-}
-
-function unique<T>(xs: T[]): T[] {
-  return [...new Set(xs)];
 }
 
 /** Later of two optional ISO timestamps (undefined sorts first). */
@@ -44,7 +41,9 @@ export function dedupeSignals(signals: NormalizedSignal[]): NormalizedSignal[] {
 
   const out: NormalizedSignal[] = [];
   for (const group of groups.values()) {
-    const base = group.reduce((a, b) => (Date.parse(b.publishedAt) > Date.parse(a.publishedAt) ? b : a));
+    const base = group.reduce((a, b) =>
+      Date.parse(b.publishedAt) > Date.parse(a.publishedAt) ? b : a,
+    );
     out.push({
       ...base,
       matchHints: {

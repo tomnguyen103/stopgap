@@ -1,4 +1,5 @@
-import type { ShortageStatus } from "@stopgap/core";
+import type { ShortageRecord, ShortageStatus } from "@stopgap/core";
+import { unique, uniqueNonBlank } from "./normalize.js";
 
 /**
  * The normalized signal contract (unified-platform-spec, "Ingestion — one connector contract";
@@ -67,6 +68,15 @@ export const STALENESS_DAYS = { fresh: 7, aging: 30 } as const;
  * not proof about this facility: the match to a catalog item still has to hold.
  */
 export const DEFAULT_SIGNAL_CONFIDENCE = 0.8;
+
+/**
+ * A severity label with the number the scorer uses. One named type rather than a repeated
+ * anonymous pair, because every feed's severity mapping has to return exactly these two together.
+ */
+export interface SeverityGrade {
+  severity: Severity;
+  severityScore: number;
+}
 
 /**
  * What a connector knows that lets a signal be tied to a catalog item later (ticket 16). Hints,
@@ -162,12 +172,16 @@ export function signalDedupeKey(orgId: string, source: SignalSource, sourceId: s
 }
 
 /**
- * Classify freshness from the two timestamps the signal already carries. Pure, and total: an
- * unparseable or future publication date classifies as `stale` rather than throwing, because a
- * feed with a bad date should not take the poll down — and treating unknown age as fresh would be
- * the optimistic direction, which is the wrong one for a hazard.
+ * Classify freshness from the two timestamps the signal already carries. Pure, and total: a
+ * missing, unparseable or future publication date classifies as `stale` rather than throwing,
+ * because a feed with a bad date should not take the poll down — and treating unknown age as fresh
+ * would be the optimistic direction, which is the wrong one for a hazard. The `undefined` case is
+ * why this takes the SOURCE's date rather than the value the signal ends up carrying: a normalizer
+ * that falls back to the fetch time would otherwise make a dateless record the freshest thing in
+ * the feed.
  */
-export function classifyStaleness(publishedAt: string, fetchedAt: string): Staleness {
+export function classifyStaleness(publishedAt: string | undefined, fetchedAt: string): Staleness {
+  if (publishedAt === undefined) return "stale";
   const published = Date.parse(publishedAt);
   const fetched = Date.parse(fetchedAt);
   if (Number.isNaN(published) || Number.isNaN(fetched)) return "stale";
@@ -196,7 +210,7 @@ export function shortageStatusResolved(status: ShortageStatus): boolean {
  * about meaning too. `unknown` sits ABOVE `resolved` — a feed that went vague is more concerning
  * than a feed that said "over", not less.
  */
-export function shortageSeverity(status: ShortageStatus): { severity: Severity; severityScore: number } {
+export function shortageSeverity(status: ShortageStatus): SeverityGrade {
   switch (status) {
     case "current":
       return { severity: "high", severityScore: 0.7 };
@@ -205,4 +219,49 @@ export function shortageSeverity(status: ShortageStatus): { severity: Severity; 
     default:
       return { severity: "moderate", severityScore: 0.4 };
   }
+}
+
+/**
+ * Build the normalized signal for a shortage record, whichever feed produced it.
+ *
+ * openFDA and ASHP differ in exactly two things — which source they are, and where a human can go
+ * to check — so those are the only two the caller supplies. Everything else (title, summary,
+ * severity, resolution, staleness, key, hints) is one shared derivation: two hand-written copies
+ * would eventually disagree about what a shortage signal means, and nothing would error when they
+ * did.
+ */
+export function shortageSignal(
+  record: ShortageRecord,
+  spec: { source: SignalSource; evidenceUrl: string; raw: unknown },
+  context: NormalizationContext,
+): NormalizedSignal {
+  const { severity, severityScore } = shortageSeverity(record.status);
+  // A source that gave no date leaves `publishedAt` at the fetch time so the field stays populated,
+  // but staleness is classified from the SOURCE's date — undefined classifies stale, not fresh.
+  const publishedAt = record.updatedAt ?? context.fetchedAt;
+  return {
+    source: spec.source,
+    sourceId: record.sourceId,
+    riskDomain: "shortage",
+    entityType: "drug",
+    entityIdentifier: record.genericName,
+    title: `Drug shortage — ${record.genericName}`,
+    summary: record.note?.replace(/\s+/g, " ").trim() || "No detail given by the source.",
+    severity,
+    severityScore,
+    confidence: DEFAULT_SIGNAL_CONFIDENCE,
+    observedAt: publishedAt,
+    publishedAt,
+    lastFetchedAt: context.fetchedAt,
+    staleness: classifyStaleness(record.updatedAt, context.fetchedAt),
+    sourceResolved: shortageStatusResolved(record.status),
+    evidenceUrl: spec.evidenceUrl,
+    raw: spec.raw,
+    dedupeKey: signalDedupeKey(context.orgId, spec.source, record.sourceId),
+    matchHints: {
+      ndcs: unique(record.ndcs),
+      rxcuis: unique(record.rxcuis),
+      names: uniqueNonBlank([record.genericName, record.key]),
+    },
+  };
 }

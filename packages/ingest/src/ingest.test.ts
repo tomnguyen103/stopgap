@@ -100,7 +100,9 @@ describe("RxNorm", () => {
 describe("cross-feed dedupe", () => {
   it("merges openFDA + ASHP records for the same key into one shortage", () => {
     const openfda = mapOpenFdaResult((openfdaHeparin as OpenFdaResponse).results![0]!);
-    const [ashpHeparin] = mapAshpFeed(ashpFixture as AshpFeed).filter((r) => r.key === "heparin sodium");
+    const [ashpHeparin] = mapAshpFeed(ashpFixture as AshpFeed).filter(
+      (r) => r.key === "heparin sodium",
+    );
     const merged = mergeRecords([openfda, ashpHeparin!]);
     const heparin = merged.find((m) => m.key === "heparin sodium");
     expect(heparin?.sources.sort()).toEqual(["ashp", "openfda"]);
@@ -111,7 +113,12 @@ describe("cross-feed dedupe", () => {
 
   it("keeps a case current if any feed still lists it, even when another says resolved", () => {
     const current = mapOpenFdaResult((openfdaHeparin as OpenFdaResponse).results![0]!);
-    const resolved = { ...current, source: "ashp" as const, sourceId: "x", status: "resolved" as const };
+    const resolved = {
+      ...current,
+      source: "ashp" as const,
+      sourceId: "x",
+      status: "resolved" as const,
+    };
     const [merged] = mergeRecords([resolved, current]);
     expect(merged!.status).toBe("current");
   });

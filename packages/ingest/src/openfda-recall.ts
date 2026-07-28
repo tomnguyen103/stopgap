@@ -1,5 +1,6 @@
 import { getEnv } from "@stopgap/core/env";
-import { parseCompactDate } from "./normalize.js";
+import { createHash } from "node:crypto";
+import { parseCompactDate, uniqueNonBlank } from "./normalize.js";
 import {
   DEFAULT_SIGNAL_CONFIDENCE,
   classifyStaleness,
@@ -8,7 +9,7 @@ import {
   type EntityType,
   type NormalizationContext,
   type NormalizedSignal,
-  type Severity,
+  type SeverityGrade,
   type SignalSource,
 } from "./signal.js";
 
@@ -62,13 +63,12 @@ export interface OpenFdaEnforcementResponse {
  * across rather than re-derived from the free-text reason. An unrecognised or missing class lands
  * at `moderate`, not `low`: an unclassified recall is unknown, not benign.
  */
-export function recallSeverity(classification: string | undefined): {
-  severity: Severity;
-  severityScore: number;
-} {
+export function recallSeverity(classification: string | undefined): SeverityGrade {
   const c = (classification ?? "").toLowerCase();
-  if (c.includes("class i") && !c.includes("class ii")) return { severity: "critical", severityScore: 0.95 };
-  if (c.includes("class ii") && !c.includes("class iii")) return { severity: "high", severityScore: 0.6 };
+  if (c.includes("class i") && !c.includes("class ii"))
+    return { severity: "critical", severityScore: 0.95 };
+  if (c.includes("class ii") && !c.includes("class iii"))
+    return { severity: "high", severityScore: 0.6 };
   if (c.includes("class iii")) return { severity: "moderate", severityScore: 0.3 };
   return { severity: "moderate", severityScore: 0.4 };
 }
@@ -92,10 +92,6 @@ function latestDate(values: (string | undefined)[]): string | undefined {
   return parsed.reduce((a, b) => (Date.parse(b) > Date.parse(a) ? b : a));
 }
 
-function unique(xs: (string | undefined)[]): string[] {
-  return [...new Set(xs.filter((x): x is string => typeof x === "string" && x.trim().length > 0))];
-}
-
 /** Collapse whitespace and clip to a headline length, without cutting mid-escape. */
 function headline(text: string, max = 120): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -115,6 +111,23 @@ function evidenceUrl(path: string, recallNumber: string): string {
   return `${base}/${path}/enforcement.json?search=recall_number:%22${encodeURIComponent(recallNumber)}%22`;
 }
 
+/**
+ * The record's stable identity.
+ *
+ * `recall_number` is the FDA's per-recall identifier and survives status updates. `event_id` groups
+ * SEVERAL recall numbers under one event, so it is a fallback only — as a first choice two distinct
+ * recalls from one event would collapse into a single signal. When the provider gives neither, a
+ * content hash stands in: an empty id would put every such record on ONE dedupe key and silently
+ * merge unrelated recalls, which is worse than an id nobody can look up. Same fallback shape the
+ * shortage mapper already uses for openFDA's id-less results.
+ */
+function enforcementSourceId(raw: OpenFdaEnforcementResult): string {
+  const given = raw.recall_number?.trim() || raw.event_id?.trim();
+  if (given) return given;
+  const material = `${raw.product_description ?? ""}:${raw.recalling_firm ?? ""}:${raw.recall_initiation_date ?? ""}`;
+  return `sha256-${createHash("sha256").update(material).digest("hex").slice(0, 16)}`;
+}
+
 function normalizeEnforcement(
   raw: OpenFdaEnforcementResult,
   context: NormalizationContext,
@@ -123,17 +136,17 @@ function normalizeEnforcement(
   const description = raw.product_description?.trim() ?? "";
   const genericName = raw.openfda?.generic_name?.[0]?.trim();
   const deviceName = raw.openfda?.device_name?.trim();
-  // recall_number is the FDA's stable per-recall identifier and survives status updates. event_id
-  // groups several recall numbers under one event, so it is a fallback only — never the first
-  // choice, or two distinct recalls from one event would collapse into a single signal.
-  const sourceId = raw.recall_number?.trim() || raw.event_id?.trim() || "";
+  const sourceId = enforcementSourceId(raw);
   const { severity, severityScore } = recallSeverity(raw.classification);
-  const publishedAt =
+  // Kept as the SOURCE's date (possibly undefined) so staleness can tell "the provider gave no
+  // date" from "the provider gave today's date". Only the emitted field falls back to fetch time.
+  const sourceDate =
     latestDate([raw.report_date, raw.center_classification_date, raw.termination_date]) ??
-    parseCompactDate(raw.recall_initiation_date) ??
-    context.fetchedAt;
+    parseCompactDate(raw.recall_initiation_date);
+  const publishedAt = sourceDate ?? context.fetchedAt;
   const observedAt = parseCompactDate(raw.recall_initiation_date) ?? publishedAt;
-  const entityIdentifier = (spec.entityType === "drug" ? genericName : deviceName) || description || "unknown";
+  const entityIdentifier =
+    (spec.entityType === "drug" ? genericName : deviceName) || description || "unknown";
 
   return {
     source: spec.source,
@@ -149,15 +162,23 @@ function normalizeEnforcement(
     observedAt,
     publishedAt,
     lastFetchedAt: context.fetchedAt,
-    staleness: classifyStaleness(publishedAt, context.fetchedAt),
+    staleness: classifyStaleness(sourceDate, context.fetchedAt),
     sourceResolved: recallResolved(raw.status),
     evidenceUrl: evidenceUrl(spec.path, sourceId),
     raw,
     dedupeKey: signalDedupeKey(context.orgId, spec.source, sourceId),
     matchHints: {
-      ndcs: unique([...(raw.openfda?.package_ndc ?? []), ...(raw.openfda?.product_ndc ?? [])]),
-      rxcuis: unique(raw.openfda?.rxcui ?? []),
-      names: unique([genericName, deviceName, ...(raw.openfda?.brand_name ?? []), description || undefined]),
+      ndcs: uniqueNonBlank([
+        ...(raw.openfda?.package_ndc ?? []),
+        ...(raw.openfda?.product_ndc ?? []),
+      ]),
+      rxcuis: uniqueNonBlank(raw.openfda?.rxcui ?? []),
+      names: uniqueNonBlank([
+        genericName,
+        deviceName,
+        ...(raw.openfda?.brand_name ?? []),
+        description,
+      ]),
     },
   };
 }
@@ -174,7 +195,8 @@ async function pollEnforcement(
   const url = `${env.OPENFDA_BASE_URL}/${path}/enforcement.json?${params.toString()}`;
   const res = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
   if (res.status === 404) return []; // openFDA answers 404 for an empty result set, not an error
-  if (!res.ok) throw new Error(`openFDA ${path} enforcement poll failed: ${res.status} ${res.statusText}`);
+  if (!res.ok)
+    throw new Error(`openFDA ${path} enforcement poll failed: ${res.status} ${res.statusText}`);
   const body = (await res.json()) as OpenFdaEnforcementResponse;
   return body.results ?? [];
 }
@@ -185,7 +207,11 @@ export const openFdaDrugRecallConnector: Connector<OpenFdaEnforcementResult> = {
   entityType: "drug",
   fetch: (options) => pollEnforcement("drug", options),
   normalize: (raw, context) =>
-    normalizeEnforcement(raw, context, { source: "openfda_drug_recall", entityType: "drug", path: "drug" }),
+    normalizeEnforcement(raw, context, {
+      source: "openfda_drug_recall",
+      entityType: "drug",
+      path: "drug",
+    }),
 };
 
 export const openFdaDeviceRecallConnector: Connector<OpenFdaEnforcementResult> = {
@@ -194,5 +220,9 @@ export const openFdaDeviceRecallConnector: Connector<OpenFdaEnforcementResult> =
   entityType: "device",
   fetch: (options) => pollEnforcement("device", options),
   normalize: (raw, context) =>
-    normalizeEnforcement(raw, context, { source: "openfda_device_recall", entityType: "device", path: "device" }),
+    normalizeEnforcement(raw, context, {
+      source: "openfda_device_recall",
+      entityType: "device",
+      path: "device",
+    }),
 };

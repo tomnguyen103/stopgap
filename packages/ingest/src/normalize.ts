@@ -15,7 +15,12 @@ export function normalizeKey(genericName: string): string {
 export function normalizeStatus(raw: string | undefined): ShortageStatus {
   const s = (raw ?? "").toLowerCase();
   if (s.includes("resolved")) return "resolved";
-  if (s.includes("current") || s.includes("active") || s.includes("discontinu") || s.includes("shortage"))
+  if (
+    s.includes("current") ||
+    s.includes("active") ||
+    s.includes("discontinu") ||
+    s.includes("shortage")
+  )
     return "current";
   return "unknown";
 }
@@ -32,7 +37,11 @@ export function parseUsDate(value: string | undefined): string | undefined {
   const date = new Date(Date.UTC(year, month - 1, day));
   // Date.UTC normalizes rollover values (e.g. 02/31 -> March 3); reject anything that
   // didn't round-trip instead of silently fabricating a different calendar date.
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     return undefined;
   }
   return date.toISOString();
@@ -54,10 +63,24 @@ export function parseCompactDate(value: string | undefined): string | undefined 
   const month = Number(mm);
   const day = Number(dd);
   const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     return undefined;
   }
   return date.toISOString();
+}
+
+/** Distinct values, order preserved. */
+export function unique<T>(xs: T[]): T[] {
+  return [...new Set(xs)];
+}
+
+/** Distinct non-blank strings, for identifier and name lists that arrive with gaps in them. */
+export function uniqueNonBlank(xs: (string | undefined)[]): string[] {
+  return unique(xs.filter((x): x is string => typeof x === "string" && x.trim().length > 0));
 }
 
 /** Stable content hash of a normalized payload, for skip-if-unchanged dedup. */
