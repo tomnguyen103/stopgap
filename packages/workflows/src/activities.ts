@@ -459,7 +459,7 @@ function evidenceForPoll(
     if (!signalId) continue;
     entries.push({
       signalId,
-      type: "provider_record",
+      type: "provider_record" as const,
       source: signal.source,
       sourceId: signal.sourceId,
       originUrl: signal.evidenceUrl,

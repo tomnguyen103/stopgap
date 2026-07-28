@@ -1,5 +1,5 @@
 {
-  "id": "02ad7b0b-5f2a-4c05-8727-273d7233beac",
+  "id": "e33ed758-15ed-469c-9e48-6cacd53aab06",
   "prevId": "36c44a0b-4277-47e4-aeca-c15fdbfc1c2b",
   "version": "7",
   "dialect": "postgresql",
@@ -1691,14 +1691,16 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "risk_score_snapshots_signal_id_risk_signals_id_fk": {
-          "name": "risk_score_snapshots_signal_id_risk_signals_id_fk",
+        "risk_score_snapshots_org_signal_fk": {
+          "name": "risk_score_snapshots_org_signal_fk",
           "tableFrom": "risk_score_snapshots",
           "tableTo": "risk_signals",
           "columnsFrom": [
+            "org_id",
             "signal_id"
           ],
           "columnsTo": [
+            "org_id",
             "id"
           ],
           "onDelete": "cascade",
@@ -1883,6 +1885,27 @@
             },
             {
               "expression": "dedupe_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "risk_signals_org_id_uq": {
+          "name": "risk_signals_org_id_uq",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2202,12 +2225,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "feed_record_id": {
-          "name": "feed_record_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "origin_url": {
           "name": "origin_url",
           "type": "text",
@@ -2303,30 +2320,19 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "signal_evidence_signal_id_risk_signals_id_fk": {
-          "name": "signal_evidence_signal_id_risk_signals_id_fk",
+        "signal_evidence_org_signal_fk": {
+          "name": "signal_evidence_org_signal_fk",
           "tableFrom": "signal_evidence",
           "tableTo": "risk_signals",
           "columnsFrom": [
+            "org_id",
             "signal_id"
           ],
           "columnsTo": [
+            "org_id",
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "signal_evidence_feed_record_id_feed_records_id_fk": {
-          "name": "signal_evidence_feed_record_id_feed_records_id_fk",
-          "tableFrom": "signal_evidence",
-          "tableTo": "feed_records",
-          "columnsFrom": [
-            "feed_record_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
