@@ -129,6 +129,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@stopgap/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@stopgap/core':
         specifier: workspace:*
         version: link:../core

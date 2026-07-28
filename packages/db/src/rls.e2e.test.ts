@@ -70,6 +70,23 @@ const ID = {
   signalB: "bbbb0009-0000-0000-0000-000000000009",
   scoreA: "aaaa0010-0000-0000-0000-000000000010",
   scoreB: "bbbb0010-0000-0000-0000-000000000010",
+  // Ticket 15 — the eight catalog tables.
+  itemA: "aaaa0009-0000-0000-0000-000000000009",
+  itemB: "bbbb0009-0000-0000-0000-000000000009",
+  identA: "aaaa0010-0000-0000-0000-000000000010",
+  identB: "bbbb0010-0000-0000-0000-000000000010",
+  suppA: "aaaa0011-0000-0000-0000-000000000011",
+  suppB: "bbbb0011-0000-0000-0000-000000000011",
+  siteA: "aaaa0012-0000-0000-0000-000000000012",
+  siteB: "bbbb0012-0000-0000-0000-000000000012",
+  isupA: "aaaa0013-0000-0000-0000-000000000013",
+  isupB: "bbbb0013-0000-0000-0000-000000000013",
+  facA: "aaaa0014-0000-0000-0000-000000000014",
+  facB: "bbbb0014-0000-0000-0000-000000000014",
+  invA: "aaaa0015-0000-0000-0000-000000000015",
+  invB: "bbbb0015-0000-0000-0000-000000000015",
+  procA: "aaaa0016-0000-0000-0000-000000000016",
+  procB: "bbbb0016-0000-0000-0000-000000000016",
 } as const;
 
 /**
@@ -115,6 +132,14 @@ async function seedOrg(
     keyId: string;
     signalId: string;
     scoreId: string;
+    itemId: string;
+    identId: string;
+    suppId: string;
+    siteId: string;
+    isupId: string;
+    facId: string;
+    invId: string;
+    procId: string;
   },
   suffix: string,
 ) {
@@ -157,6 +182,25 @@ async function seedOrg(
                                                reachable_max, scorer_version)
              values (${ids.scoreId}, ${orgId}, ${ids.signalId}, 42.5, 'moderate', '{}'::jsonb,
                      65, 'test-1')`;
+    // Ticket 15 — one row in every catalog table, seeded from inside this org's own scope so the
+    // seed itself exercises WITH CHECK before any isolation assertion runs.
+    await tx`insert into items (id, org_id, sku, name, generic_name)
+             values (${ids.itemId}, ${orgId}, ${"sku-" + suffix}, ${"Item " + suffix}, ${"generic-" + suffix})`;
+    await tx`insert into item_identifiers (id, org_id, item_id, type, value)
+             values (${ids.identId}, ${orgId}, ${ids.itemId}, 'ndc', ${"ndc-" + suffix})`;
+    await tx`insert into suppliers (id, org_id, code, name)
+             values (${ids.suppId}, ${orgId}, ${"sup-" + suffix}, ${"Supplier " + suffix})`;
+    await tx`insert into supplier_sites (id, org_id, supplier_id, code, name)
+             values (${ids.siteId}, ${orgId}, ${ids.suppId}, ${"site-" + suffix}, 'Site')`;
+    await tx`insert into item_suppliers (id, org_id, item_id, supplier_id, site_id, preferred)
+             values (${ids.isupId}, ${orgId}, ${ids.itemId}, ${ids.suppId}, ${ids.siteId}, true)`;
+    await tx`insert into facilities (id, org_id, code, name)
+             values (${ids.facId}, ${orgId}, ${"fac-" + suffix}, ${"Facility " + suffix})`;
+    await tx`insert into inventory_snapshots (id, org_id, facility_id, item_id, on_hand, captured_at)
+             values (${ids.invId}, ${orgId}, ${ids.facId}, ${ids.itemId}, 42, '2026-07-01T00:00:00Z')`;
+    await tx`insert into procurement_events (id, org_id, facility_id, item_id, supplier_id, ordered_at, quantity)
+             values (${ids.procId}, ${orgId}, ${ids.facId}, ${ids.itemId}, ${ids.suppId},
+                     '2026-07-01T00:00:00Z', 10)`;
   });
 }
 
@@ -218,6 +262,90 @@ const TENANT_TABLES: TenantTable[] = [
     updateOthers: (tx) =>
       tx`update risk_score_snapshots set band = 'hijacked' where id = ${ID.scoreB} returning id`,
     deleteOthers: (tx) => tx`delete from risk_score_snapshots where id = ${ID.scoreB} returning id`,
+  },
+  {
+    name: "items",
+    readOthers: (tx) => tx`select id from items where id = ${ID.itemB}`,
+    insertAs: (tx, org) =>
+      tx`insert into items (org_id, sku, name) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
+    readAll: (tx) => tx`select id from items`,
+    updateOthers: (tx) =>
+      tx`update items set name = 'hijacked' where id = ${ID.itemB} returning id`,
+    deleteOthers: (tx) => tx`delete from items where id = ${ID.itemB} returning id`,
+  },
+  {
+    name: "item_identifiers",
+    readOthers: (tx) => tx`select id from item_identifiers where id = ${ID.identB}`,
+    insertAs: (tx, org) =>
+      tx`insert into item_identifiers (org_id, item_id, type, value)
+         values (${org}, ${ID.itemA}, 'ndc', ${"x-" + org.slice(0, 4)})`,
+    readAll: (tx) => tx`select id from item_identifiers`,
+    updateOthers: (tx) =>
+      tx`update item_identifiers set value = 'hijacked' where id = ${ID.identB} returning id`,
+    deleteOthers: (tx) => tx`delete from item_identifiers where id = ${ID.identB} returning id`,
+  },
+  {
+    name: "suppliers",
+    readOthers: (tx) => tx`select id from suppliers where id = ${ID.suppB}`,
+    insertAs: (tx, org) =>
+      tx`insert into suppliers (org_id, code, name) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
+    readAll: (tx) => tx`select id from suppliers`,
+    updateOthers: (tx) =>
+      tx`update suppliers set name = 'hijacked' where id = ${ID.suppB} returning id`,
+    deleteOthers: (tx) => tx`delete from suppliers where id = ${ID.suppB} returning id`,
+  },
+  {
+    name: "supplier_sites",
+    readOthers: (tx) => tx`select id from supplier_sites where id = ${ID.siteB}`,
+    insertAs: (tx, org) =>
+      tx`insert into supplier_sites (org_id, supplier_id, code)
+         values (${org}, ${ID.suppA}, ${"x-" + org.slice(0, 4)})`,
+    readAll: (tx) => tx`select id from supplier_sites`,
+    updateOthers: (tx) =>
+      tx`update supplier_sites set name = 'hijacked' where id = ${ID.siteB} returning id`,
+    deleteOthers: (tx) => tx`delete from supplier_sites where id = ${ID.siteB} returning id`,
+  },
+  {
+    name: "item_suppliers",
+    readOthers: (tx) => tx`select id from item_suppliers where id = ${ID.isupB}`,
+    insertAs: (tx, org) =>
+      tx`insert into item_suppliers (org_id, item_id, supplier_id) values (${org}, ${ID.itemA}, ${ID.suppA})`,
+    readAll: (tx) => tx`select id from item_suppliers`,
+    updateOthers: (tx) =>
+      tx`update item_suppliers set preferred = false where id = ${ID.isupB} returning id`,
+    deleteOthers: (tx) => tx`delete from item_suppliers where id = ${ID.isupB} returning id`,
+  },
+  {
+    name: "facilities",
+    readOthers: (tx) => tx`select id from facilities where id = ${ID.facB}`,
+    insertAs: (tx, org) =>
+      tx`insert into facilities (org_id, code, name) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
+    readAll: (tx) => tx`select id from facilities`,
+    updateOthers: (tx) =>
+      tx`update facilities set name = 'hijacked' where id = ${ID.facB} returning id`,
+    deleteOthers: (tx) => tx`delete from facilities where id = ${ID.facB} returning id`,
+  },
+  {
+    name: "inventory_snapshots",
+    readOthers: (tx) => tx`select id from inventory_snapshots where id = ${ID.invB}`,
+    insertAs: (tx, org) =>
+      tx`insert into inventory_snapshots (org_id, facility_id, item_id, on_hand, captured_at)
+         values (${org}, ${ID.facA}, ${ID.itemA}, 1, '2026-01-01T00:00:00Z')`,
+    readAll: (tx) => tx`select id from inventory_snapshots`,
+    updateOthers: (tx) =>
+      tx`update inventory_snapshots set on_hand = 0 where id = ${ID.invB} returning id`,
+    deleteOthers: (tx) => tx`delete from inventory_snapshots where id = ${ID.invB} returning id`,
+  },
+  {
+    name: "procurement_events",
+    readOthers: (tx) => tx`select id from procurement_events where id = ${ID.procB}`,
+    insertAs: (tx, org) =>
+      tx`insert into procurement_events (org_id, facility_id, item_id, ordered_at, quantity)
+         values (${org}, ${ID.facA}, ${ID.itemA}, '2026-01-01T00:00:00Z', 1)`,
+    readAll: (tx) => tx`select id from procurement_events`,
+    updateOthers: (tx) =>
+      tx`update procurement_events set quantity = 0 where id = ${ID.procB} returning id`,
+    deleteOthers: (tx) => tx`delete from procurement_events where id = ${ID.procB} returning id`,
   },
 
   {
@@ -350,6 +478,14 @@ beforeAll(async () => {
       keyId: ID.keyA,
       signalId: ID.signalA,
       scoreId: ID.scoreA,
+      itemId: ID.itemA,
+      identId: ID.identA,
+      suppId: ID.suppA,
+      siteId: ID.siteA,
+      isupId: ID.isupA,
+      facId: ID.facA,
+      invId: ID.invA,
+      procId: ID.procA,
     },
     "a",
   );
@@ -366,6 +502,14 @@ beforeAll(async () => {
       keyId: ID.keyB,
       signalId: ID.signalB,
       scoreId: ID.scoreB,
+      itemId: ID.itemB,
+      identId: ID.identB,
+      suppId: ID.suppB,
+      siteId: ID.siteB,
+      isupId: ID.isupB,
+      facId: ID.facB,
+      invId: ID.invB,
+      procId: ID.procB,
     },
     "b",
   );
@@ -387,6 +531,16 @@ afterAll(async () => {
       // Snapshots first: they FK the signal they scored.
       await tx`delete from risk_score_snapshots where org_id = ${org}`;
       await tx`delete from risk_signals where org_id = ${org}`;
+      // Catalog teardown runs child-first: the FKs cascade, but an explicit order keeps the
+      // failure message useful if a policy ever stops one of these deletes from reaching a row.
+      await tx`delete from procurement_events where org_id = ${org}`;
+      await tx`delete from inventory_snapshots where org_id = ${org}`;
+      await tx`delete from item_suppliers where org_id = ${org}`;
+      await tx`delete from item_identifiers where org_id = ${org}`;
+      await tx`delete from supplier_sites where org_id = ${org}`;
+      await tx`delete from suppliers where org_id = ${org}`;
+      await tx`delete from facilities where org_id = ${org}`;
+      await tx`delete from items where org_id = ${org}`;
     });
   }
   // `audit_anchors` takes no writes from a tenant connection at all (migration 0014), so its rows

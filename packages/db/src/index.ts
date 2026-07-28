@@ -127,6 +127,7 @@ export {
   type ListSignalsOptions,
   type ScoreSnapshotInput,
 } from "./signals.js";
+export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
 export type {
   OrganizationRow,
   NewOrganizationRow,

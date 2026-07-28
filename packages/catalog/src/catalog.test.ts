@@ -17,7 +17,7 @@ describe("reading a delimited file", () => {
   });
 
   it("normalises header case and strips the BOM Excel writes", () => {
-    expect(parseCsv("﻿SKU,Name\nA,B\n").header).toEqual(["sku", "name"]);
+    expect(parseCsv("\u{FEFF}SKU,Name\nA,B\n").header).toEqual(["sku", "name"]);
   });
 
   it("reads CRLF files, and ignores the empty row a trailing newline leaves", () => {
