@@ -1,0 +1,120 @@
+/**
+ * CSV reading, one delimited document to a header and rows of cells.
+ *
+ * Hand-rolled rather than taken from a dependency because the surface actually needed is small
+ * (quotes, escaped quotes, embedded newlines, CRLF, a BOM) and every one of those cases is
+ * asserted below in `csv.test.ts`. A parser is also the one place an import can silently go wrong
+ * without erroring — a mis-split row lands as data, not as a failure — so it is worth owning.
+ *
+ * NOTHING here validates meaning. This layer answers "what cells did the file contain"; the
+ * schemas in `rows.ts` answer "is that a catalog row", and the write layer in `@stopgap/db`
+ * answers "does it belong to this tenant". Keeping the three apart is what lets the first two be
+ * tested with no database in front of them.
+ */
+
+export interface CsvDocument {
+  /** Header cells, in file order, trimmed and lowercased so `SKU` and `sku` name one column. */
+  header: string[];
+  /** Data rows, each already aligned to the header's width. */
+  rows: CsvRow[];
+}
+
+export interface CsvRow {
+  /** 1-based line number as a human reading the file in a spreadsheet would count it. */
+  line: number;
+  cells: string[];
+}
+
+/** A cell count that does not match the header — the failure a naive `split(",")` hides. */
+export class CsvShapeError extends Error {
+  constructor(
+    readonly line: number,
+    readonly expected: number,
+    readonly actual: number,
+  ) {
+    super(`line ${line}: expected ${expected} cells, found ${actual}`);
+    this.name = "CsvShapeError";
+  }
+}
+
+/**
+ * Split a CSV document into cells.
+ *
+ * Ragged rows are NOT silently padded or truncated: a row whose width disagrees with the header
+ * means the file's structure is not what the uploader thinks it is, and quietly filling the gap
+ * with an empty string would turn a structural error into a plausible-looking wrong value. It
+ * throws; the import layer catches it as a per-row error.
+ */
+export function parseCsv(text: string): CsvDocument {
+  const rows = splitRows(text);
+  const headerRow = rows[0];
+  if (!headerRow) return { header: [], rows: [] };
+  const header = headerRow.cells.map((c) => c.trim().toLowerCase());
+  const body: CsvRow[] = [];
+  for (const row of rows.slice(1)) {
+    // A trailing newline yields one empty row; that is formatting, not a defect.
+    if (row.cells.length === 1 && row.cells[0]?.trim() === "") continue;
+    if (row.cells.length !== header.length) {
+      throw new CsvShapeError(row.line, header.length, row.cells.length);
+    }
+    body.push(row);
+  }
+  return { header, rows: body };
+}
+
+/** Pair a row's cells with the header, so callers address columns by name rather than index. */
+export function toRecord(header: string[], row: CsvRow): Record<string, string> {
+  const record: Record<string, string> = {};
+  header.forEach((name, i) => {
+    record[name] = (row.cells[i] ?? "").trim();
+  });
+  return record;
+}
+
+function splitRows(text: string): CsvRow[] {
+  // A UTF-8 BOM is what Excel writes by default, and it would otherwise become part of the first
+  // header name — making every lookup of that column miss for reasons invisible on screen.
+  const input = text.replace(/^﻿/, "");
+  const rows: CsvRow[] = [];
+  let cells: string[] = [];
+  let cell = "";
+  let quoted = false;
+  let line = 1;
+
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (input[i + 1] === '"') {
+          cell += '"'; // an escaped quote inside a quoted cell
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === '"' && cell === "") {
+      quoted = true;
+    } else if (ch === ",") {
+      cells.push(cell);
+      cell = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && input[i + 1] === "\n") i++;
+      cells.push(cell);
+      rows.push({ line, cells });
+      cells = [];
+      cell = "";
+      line++;
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell !== "" || cells.length > 0) {
+    cells.push(cell);
+    rows.push({ line, cells });
+  }
+  return rows;
+}
