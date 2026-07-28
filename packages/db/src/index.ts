@@ -153,6 +153,17 @@ export {
   type EvidenceInput,
 } from "./signals.js";
 export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
+export {
+  listSignalsPage,
+  getSignalPublic,
+  listScoresPage,
+  listCatalogItemsPage,
+  type Page,
+  type PagedListOptions,
+  type SignalListRow,
+  type ScoreListRow,
+  type CatalogItemListRow,
+} from "./public-lists.js";
 export type {
   OrganizationRow,
   NewOrganizationRow,
