@@ -69,6 +69,11 @@ vi.mock("@stopgap/db", () => ({
     writtenSignals.push({ orgId, dedupeKeys: signals.map((s) => s.dedupeKey) });
     return signals.map((s, i) => ({ id: `sig-${orgId}-${i}`, dedupeKey: s.dedupeKey }));
   },
+  // Ticket 16 — the poll matches each signal against the tenant's catalog before scoring. Stubbed
+  // to "this tenant has no catalog", which is the state every existing assertion here was written
+  // under: the catalog components stay unavailable and the totals are unchanged.
+  matchSignalToCatalog: async () => [],
+  catalogExposure: async () => ({ soleSourcedItemIds: [] }),
   recordScoreSnapshots: async (
     _db: unknown,
     orgId: string,
