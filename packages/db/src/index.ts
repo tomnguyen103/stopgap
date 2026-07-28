@@ -152,6 +152,7 @@ export {
   type ScoreSnapshotInput,
   type EvidenceInput,
 } from "./signals.js";
+export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
 export type {
   OrganizationRow,
   NewOrganizationRow,

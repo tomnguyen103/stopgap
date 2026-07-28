@@ -18,7 +18,8 @@
     "@stopgap/core": "workspace:*",
     "drizzle-orm": "^0.38.0",
     "postgres": "^3.4.5",
-    "@stopgap/alerts": "workspace:*"
+    "@stopgap/alerts": "workspace:*",
+    "@stopgap/catalog": "workspace:*"
   },
   "devDependencies": {
     "drizzle-kit": "^0.30.0"
