@@ -341,14 +341,20 @@ export async function latestScoresForSignals(
   return out;
 }
 
+/**
+ * What an artifact points at.
+ *
+ * A closed vocabulary because `type` is part of the trail's unique key: a typo would not mislabel
+ * a row, it would fork one capture into two artifacts.
+ */
+export const EVIDENCE_TYPES = ["provider_record", "evidence_link"] as const;
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
+
 export interface EvidenceInput {
   signalId: string;
-  /** `provider_record` | `evidence_link`. */
-  type: string;
+  type: EvidenceType;
   source: string;
   sourceId: string;
-  /** The global feed record behind it, where one exists — the recall feeds have none. */
-  feedRecordId?: string;
   originUrl: string;
   /** SHA-256 of the payload as seen. NEVER the payload. */
   contentHash: string;
@@ -380,22 +386,30 @@ export async function recordEvidence(
         signalEvidence.type,
         signalEvidence.contentHash,
       ],
-      // Only the pointer may move — a record that has been re-published at a new URL is the same
-      // evidence. `captured_at` is deliberately absent: see the doc block.
-      set: { originUrl: sql`excluded.origin_url`, feedRecordId: sql`excluded.feed_record_id` },
+      // Only the pointer may move — a record re-published at a new URL is the same evidence.
+      // `captured_at` is deliberately absent: see the doc block.
+      set: { originUrl: sql`excluded.origin_url` },
     });
   return entries.length;
 }
 
-/** The evidence behind one signal, newest capture first. Org-scoped both ways. */
+/**
+ * The evidence behind one signal, newest capture first. Org-scoped both ways.
+ *
+ * Bounded, like `listSignals`: a signal whose provider record churns daily accumulates a row per
+ * change, and an unbounded read of a years-long trail is a page that stops loading rather than a
+ * page that shows everything.
+ */
 export async function listEvidenceForSignal(
   db: Db,
   orgId: string,
   signalId: string,
+  limit = 200,
 ): Promise<SignalEvidenceRow[]> {
   return db
     .select()
     .from(signalEvidence)
     .where(and(eq(signalEvidence.orgId, orgId), eq(signalEvidence.signalId, signalId)))
-    .orderBy(desc(signalEvidence.capturedAt));
+    .orderBy(desc(signalEvidence.capturedAt))
+    .limit(limit);
 }
