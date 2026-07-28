@@ -18,7 +18,9 @@ import { resolvePrincipal } from "./principal";
  * REACHING A ROUTE GRANTS NOTHING. This decides visibility only. Every page still reads its own
  * data through its own guard and every server action still calls `requireRole`, exactly as before.
  */
-export async function requireGroup(group: DashboardGroup): Promise<Awaited<ReturnType<typeof resolvePrincipal>>> {
+export async function requireGroup(
+  group: DashboardGroup,
+): Promise<Awaited<ReturnType<typeof resolvePrincipal>>> {
   const principal = await resolvePrincipal();
   if (!canViewGroup(principal.roles, group)) redirect(roleLandingRoute(principal.roles));
   return principal;

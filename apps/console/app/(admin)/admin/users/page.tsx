@@ -1,7 +1,7 @@
 import { ROLES } from "@stopgap/core";
-import { getUsers } from "../../lib/data";
-import { isActionAllowed } from "../../lib/authz";
-import { resolvePrincipal } from "../../lib/principal";
+import { getUsers } from "../../../lib/data";
+import { isActionAllowed } from "../../../lib/authz";
+import { resolvePrincipal } from "../../../lib/principal";
 import { UsersAdmin } from "./users-admin";
 
 export const dynamic = "force-dynamic";
