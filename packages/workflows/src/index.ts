@@ -34,3 +34,4 @@ export {
   type ImpactResult,
   type ResearchResult,
 } from "./shared.js";
+export { generateDailyBriefs } from "./brief.js";

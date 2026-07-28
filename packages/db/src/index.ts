@@ -116,6 +116,13 @@ export {
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export {
+  recordDailyBrief,
+  latestDailyBrief,
+  listDailyBriefs,
+  getDailyBrief,
+  type DailyBriefInput,
+} from "./briefs.js";
+export {
   upsertSignals,
   bumpSignalFeedMiss,
   listSignals,
