@@ -54,7 +54,7 @@ export default async function ProtocolsPage() {
           >
             <Table
               label={`${protocol.title} version history`}
-              head={["Version", "State", "Authored by", "Approved by", "Rationale", ""]}
+              head={["Version", "State", "Authored by", "Approved by", "Rationale", "Action"]}
             >
               {versions.map((version) => (
                 <tr key={version.id}>

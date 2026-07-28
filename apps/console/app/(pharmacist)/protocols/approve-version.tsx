@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import type { Role } from "@stopgap/core";
 import { approveProtocolVersionAction } from "../../lib/actions";
 import { RoleGatedButton } from "../../components/role-gated";
@@ -23,18 +23,33 @@ export function ApproveVersionButton({
   roles: readonly Role[];
 }) {
   const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string>();
   return (
-    <RoleGatedButton
-      roles={roles}
-      requires="pharmacy_director"
-      state={pending ? "loading" : undefined}
-      onClick={() => {
-        startTransition(async () => {
-          await approveProtocolVersionAction(versionId);
-        });
-      }}
-    >
-      Approve
-    </RoleGatedButton>
+    <>
+      <RoleGatedButton
+        roles={roles}
+        requires="pharmacy_director"
+        state={pending ? "loading" : undefined}
+        onClick={() => {
+          setError(undefined);
+          startTransition(async () => {
+            try {
+              await approveProtocolVersionAction(versionId);
+            } catch (err) {
+              // The server action refuses a caller without the role, and it refuses a superseded
+              // version. Both are answers a pharmacist needs to read, not unhandled rejections.
+              setError(err instanceof Error ? err.message : String(err));
+            }
+          });
+        }}
+      >
+        Approve
+      </RoleGatedButton>
+      {error ? (
+        <p className="sub" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </>
   );
 }

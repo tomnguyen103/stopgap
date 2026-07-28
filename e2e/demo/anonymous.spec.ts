@@ -12,14 +12,12 @@ import { expect, test } from "@playwright/test";
  * demo mode, and the console renders no control that would call one.
  */
 test.describe("the anonymous demo visitor", () => {
-  test.use({ storageState: { cookies: [], origins: [] } });
-
   test("reaches the viewer dashboard without signing in", async ({ page }) => {
     await page.goto("/");
     await expect(page).toHaveURL(/\/overview$/);
     // The banner is the honest label on a read-only deployment; its absence would mean the console
     // is NOT in demo mode and this whole spec is asserting against the wrong configuration.
-    await expect(page.getByText(/demo/i).first()).toBeVisible();
+    await expect(page.getByText(/read-only demo/i)).toBeVisible();
   });
 
   test("cannot reach a dashboard above the viewer role", async ({ page }) => {
@@ -34,5 +32,18 @@ test.describe("the anonymous demo visitor", () => {
     for (const label of [/approve/i, /review/i, /resolve/i, /revoke/i, /issue key/i]) {
       await expect(page.getByRole("button", { name: label })).toHaveCount(0);
     }
+  });
+
+  test("is refused when it ATTEMPTS a mutation anyway", async ({ request }) => {
+    // The absence of a button is not the guarantee — the server refusing is. A hand-crafted
+    // request bypasses the rendered surface entirely, which is exactly what an attacker does.
+    const response = await request.post("/api/v1/cases/any-key/review", {
+      data: { kind: "approve", reviewer: "anonymous" },
+      failOnStatusCode: false,
+    });
+    expect(
+      response.status(),
+      "a demo deployment must refuse every mutation",
+    ).toBeGreaterThanOrEqual(400);
   });
 });
