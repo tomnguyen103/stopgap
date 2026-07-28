@@ -886,6 +886,63 @@ export const riskScoreSnapshots = pgTable(
   ],
 );
 
+/**
+ * The evidence behind a signal (ticket 09). A TENANT table.
+ *
+ * WHAT IT DELIBERATELY DOES NOT HOLD: content. No provider body, no fetched page, no excerpt. An
+ * artifact records WHERE the claim came from, WHEN it was captured and a fingerprint of what was
+ * seen — enough for a pharmacist to go and check the source themselves, and enough for an auditor
+ * to prove the record has not changed underneath them.
+ *
+ * That is a retention decision, not an oversight. Provider payloads can carry text a hospital would
+ * have to treat as protected once it is stored, and a table whose whole purpose is "keep this for
+ * years" is the worst possible place to discover that. The raw payload already lives on the signal
+ * row as evidence with the signal's own lifetime; this table is the durable trail, and it stays
+ * free of content on purpose.
+ */
+export const signalEvidence = pgTable(
+  "signal_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    signalId: uuid("signal_id")
+      .notNull()
+      .references(() => riskSignals.id, { onDelete: "cascade" }),
+    /** `provider_record` | `evidence_link` — what KIND of thing is being pointed at. */
+    type: text("type").notNull(),
+    /** The feed that produced it, in the contract's vocabulary. */
+    source: text("source").notNull(),
+    /** The feed's own identifier for the record. */
+    sourceId: text("source_id").notNull(),
+    /**
+     * The GLOBAL feed record this evidence points at, where one exists.
+     *
+     * Nullable, and honestly so: `feed_records` holds the shortage snapshots the poll persists for
+     * the whole deployment, and the recall feeds have no row there. A foreign key that were NOT
+     * NULL would force either a fabricated row or a silently dropped artifact.
+     */
+    feedRecordId: uuid("feed_record_id").references(() => feedRecords.id, { onDelete: "set null" }),
+    /** Where a human goes to check the claim. */
+    originUrl: text("origin_url").notNull(),
+    /**
+     * SHA-256 of the payload as it was seen, from the same `contentHash` the poller already uses.
+     *
+     * A fingerprint rather than the payload: it proves the record has not changed since capture,
+     * which is the audit question, without retaining the text that would raise the retention one.
+     */
+    contentHash: text("content_hash").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // One artifact per (signal, type, content) — re-capturing an unchanged record restates the row
+    // rather than growing the trail by one entry per poll, forever.
+    uniqueIndex("signal_evidence_point_uq").on(t.orgId, t.signalId, t.type, t.contentHash),
+    index("signal_evidence_signal_idx").on(t.orgId, t.signalId, t.capturedAt),
+  ],
+);
+
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type RiskSignalRow = typeof riskSignals.$inferSelect;
 export type NewRiskSignalRow = typeof riskSignals.$inferInsert;
@@ -912,3 +969,5 @@ export type DemoRunRow = typeof demoRuns.$inferSelect;
 export type ApiKeyRow = typeof apiKeys.$inferSelect;
 export type NewApiKeyRow = typeof apiKeys.$inferInsert;
 export type ApiKeyRequestRow = typeof apiKeyRequests.$inferSelect;
+export type SignalEvidenceRow = typeof signalEvidence.$inferSelect;
+export type NewSignalEvidenceRow = typeof signalEvidence.$inferInsert;

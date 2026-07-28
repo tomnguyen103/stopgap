@@ -70,6 +70,9 @@ const ID = {
   signalB: "bbbb0009-0000-0000-0000-000000000009",
   scoreA: "aaaa0010-0000-0000-0000-000000000010",
   scoreB: "bbbb0010-0000-0000-0000-000000000010",
+  // Ticket 09 — the evidence trail behind a signal.
+  evidenceA: "aaaa0011-0000-0000-0000-000000000011",
+  evidenceB: "bbbb0011-0000-0000-0000-000000000011",
 } as const;
 
 /**
@@ -115,6 +118,7 @@ async function seedOrg(
     keyId: string;
     signalId: string;
     scoreId: string;
+    evidenceId: string;
   },
   suffix: string,
 ) {
@@ -157,6 +161,11 @@ async function seedOrg(
                                                reachable_max, scorer_version)
              values (${ids.scoreId}, ${orgId}, ${ids.signalId}, 42.5, 'moderate', '{}'::jsonb,
                      65, 'test-1')`;
+    await tx`insert into signal_evidence (id, org_id, signal_id, type, source, source_id,
+                                          origin_url, content_hash, captured_at)
+             values (${ids.evidenceId}, ${orgId}, ${ids.signalId}, 'provider_record',
+                     'openfda_shortage', ${"src-" + suffix}, 'https://example.test/evidence',
+                     ${"hash-" + suffix}, now())`;
   });
 }
 
@@ -185,6 +194,21 @@ interface TenantTable {
 }
 
 const TENANT_TABLES: TenantTable[] = [
+  {
+    name: "signal_evidence",
+    readOthers: (tx) => tx`select id from signal_evidence where id = ${ID.evidenceB}`,
+    insertAs: (tx, org) =>
+      tx`insert into signal_evidence (org_id, signal_id, type, source, source_id, origin_url,
+                                      content_hash, captured_at)
+         values (${org}, ${ID.signalA}, 'provider_record', 'openfda_shortage',
+                 ${"x-" + org.slice(0, 4)}, 'https://example.test/x', ${"h-" + org.slice(0, 4)},
+                 now())`,
+    readAll: (tx) => tx`select id from signal_evidence`,
+    updateOthers: (tx) =>
+      tx`update signal_evidence set origin_url = 'hijacked' where id = ${ID.evidenceB} returning id`,
+    deleteOthers: (tx) => tx`delete from signal_evidence where id = ${ID.evidenceB} returning id`,
+  },
+
   {
     name: "risk_signals",
     readOthers: (tx) => tx`select id from risk_signals where id = ${ID.signalB}`,
@@ -350,6 +374,7 @@ beforeAll(async () => {
       keyId: ID.keyA,
       signalId: ID.signalA,
       scoreId: ID.scoreA,
+      evidenceId: ID.evidenceA,
     },
     "a",
   );
@@ -366,6 +391,7 @@ beforeAll(async () => {
       keyId: ID.keyB,
       signalId: ID.signalB,
       scoreId: ID.scoreB,
+      evidenceId: ID.evidenceB,
     },
     "b",
   );
@@ -385,6 +411,7 @@ afterAll(async () => {
       await tx`delete from cases where org_id = ${org}`;
       await tx`delete from users where org_id = ${org}`;
       // Snapshots first: they FK the signal they scored.
+      await tx`delete from signal_evidence where org_id = ${org}`;
       await tx`delete from risk_score_snapshots where org_id = ${org}`;
       await tx`delete from risk_signals where org_id = ${org}`;
     });

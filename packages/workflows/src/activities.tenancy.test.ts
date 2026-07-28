@@ -46,6 +46,8 @@ const writtenSignals: { orgId: string; dedupeKeys: string[] }[] = [];
 const missSweeps: { orgId: string; sources: string[] }[] = [];
 /** Score snapshots written per org (ticket 07) — scoring rides the poll, not a second runtime. */
 const writtenSnapshots: { orgId: string; count: number; scorerVersion: string | undefined }[] = [];
+/** Evidence artifacts written per org (ticket 09) — a pointer and a fingerprint, never content. */
+const writtenEvidence: { orgId: string; entries: Record<string, unknown>[] }[] = [];
 
 vi.mock("@stopgap/db", () => ({
   withOrgDb: (orgId: string, fn: (db: unknown) => Promise<unknown>) => {
@@ -68,6 +70,10 @@ vi.mock("@stopgap/db", () => ({
   upsertSignals: async (_db: unknown, orgId: string, signals: { dedupeKey: string }[]) => {
     writtenSignals.push({ orgId, dedupeKeys: signals.map((s) => s.dedupeKey) });
     return signals.map((s, i) => ({ id: `sig-${orgId}-${i}`, dedupeKey: s.dedupeKey }));
+  },
+  recordEvidence: async (_db: unknown, orgId: string, entries: Record<string, unknown>[]) => {
+    writtenEvidence.push({ orgId, entries });
+    return entries.length;
   },
   recordScoreSnapshots: async (
     _db: unknown,
@@ -247,6 +253,7 @@ beforeEach(() => {
   writtenSignals.length = 0;
   missSweeps.length = 0;
   writtenSnapshots.length = 0;
+  writtenEvidence.length = 0;
   openFdaCalls = 0;
 });
 
@@ -344,6 +351,30 @@ describe("the scheduled feed poll (no session, no case)", () => {
     expect(writtenSnapshots.every((w) => w.count === 1)).toBe(true);
     // Version-pinned, so a score is reproducible after the weights move.
     expect(writtenSnapshots[0]?.scorerVersion).toBe(SCORER_VERSION);
+  });
+
+  /**
+   * Ticket 09 — the evidence trail is a POINTER and a FINGERPRINT, never content.
+   *
+   * A table whose purpose is long retention must not be where a hospital discovers it is holding
+   * provider text it now has to treat as protected. The assertion is deliberately about what is
+   * ABSENT: no payload, no body, no excerpt.
+   */
+  it("records evidence per signal without retaining any provider content", async () => {
+    await pollAndOpenCases();
+    expect(writtenEvidence.map((w) => w.orgId)).toEqual([ORG_A, ORG_B]);
+    const entry = writtenEvidence[0]?.entries[0] ?? {};
+    expect(Object.keys(entry).sort()).toEqual([
+      "capturedAt",
+      "contentHash",
+      "originUrl",
+      "signalId",
+      "source",
+      "sourceId",
+      "type",
+    ]);
+    expect(entry.type).toBe("provider_record");
+    expect(JSON.stringify(entry)).not.toMatch(/payload|"raw"|body/i);
   });
 
   it("sweeps misses only for feeds that returned something, never for a silent one", async () => {

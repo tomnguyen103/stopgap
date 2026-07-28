@@ -121,10 +121,13 @@ export {
   listSignals,
   getSignalByKey,
   recordScoreSnapshots,
+  recordEvidence,
+  listEvidenceForSignal,
   latestScoresForSignals,
   FEED_ABSENT_THRESHOLD,
   type ListSignalsOptions,
   type ScoreSnapshotInput,
+  type EvidenceInput,
 } from "./signals.js";
 export type {
   OrganizationRow,

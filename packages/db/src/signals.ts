@@ -1,6 +1,12 @@
 import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 
-import { riskScoreSnapshots, riskSignals, type RiskSignalRow } from "./schema.js";
+import {
+  riskScoreSnapshots,
+  riskSignals,
+  signalEvidence,
+  type RiskSignalRow,
+  type SignalEvidenceRow,
+} from "./schema.js";
 import type { Db } from "./client.js";
 
 /**
@@ -333,4 +339,63 @@ export async function latestScoresForSignals(
     });
   }
   return out;
+}
+
+export interface EvidenceInput {
+  signalId: string;
+  /** `provider_record` | `evidence_link`. */
+  type: string;
+  source: string;
+  sourceId: string;
+  /** The global feed record behind it, where one exists — the recall feeds have none. */
+  feedRecordId?: string;
+  originUrl: string;
+  /** SHA-256 of the payload as seen. NEVER the payload. */
+  contentHash: string;
+  capturedAt: Date;
+}
+
+/**
+ * Record the evidence behind this tenant's signals (ticket 09).
+ *
+ * Re-capturing an UNCHANGED record restates its row rather than appending: the trail answers "what
+ * did we see, and when did we first see it", and a poll running hourly would otherwise add an
+ * identical artifact every hour forever. `capturedAt` therefore keeps its FIRST value — the answer
+ * to "when was this claim first evidenced" is the interesting one, and the signal row already
+ * carries `lastFetchedAt` for the other question.
+ */
+export async function recordEvidence(
+  db: Db,
+  orgId: string,
+  entries: EvidenceInput[],
+): Promise<number> {
+  if (entries.length === 0) return 0;
+  await db
+    .insert(signalEvidence)
+    .values(entries.map((e) => ({ orgId, ...e })))
+    .onConflictDoUpdate({
+      target: [
+        signalEvidence.orgId,
+        signalEvidence.signalId,
+        signalEvidence.type,
+        signalEvidence.contentHash,
+      ],
+      // Only the pointer may move — a record that has been re-published at a new URL is the same
+      // evidence. `captured_at` is deliberately absent: see the doc block.
+      set: { originUrl: sql`excluded.origin_url`, feedRecordId: sql`excluded.feed_record_id` },
+    });
+  return entries.length;
+}
+
+/** The evidence behind one signal, newest capture first. Org-scoped both ways. */
+export async function listEvidenceForSignal(
+  db: Db,
+  orgId: string,
+  signalId: string,
+): Promise<SignalEvidenceRow[]> {
+  return db
+    .select()
+    .from(signalEvidence)
+    .where(and(eq(signalEvidence.orgId, orgId), eq(signalEvidence.signalId, signalId)))
+    .orderBy(desc(signalEvidence.capturedAt));
 }
