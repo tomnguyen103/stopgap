@@ -76,14 +76,6 @@ const EnvSchema = z.object({
   COMMS_PHARMACY_TO: z.string().default(""),
   COMMS_DEMO_INBOX: z.string().optional(),
   EHR_WEBHOOK_URL: z.string().default("http://localhost:4000/ehr/formulary-flag"),
-  /**
-   * Incoming-webhook URL for the team chat channel alerts go to (ticket 12).
-   *
-   * OPTIONAL, and absent by default. A deployment without it records every chat send as
-   * `delivered: false, reason: "SLACK_WEBHOOK_URL not configured"` — never as delivered. The
-   * repository's stance on unconfigured providers, applied to one more provider.
-   */
-  SLACK_WEBHOOK_URL: z.string().optional(),
 
   /**
    * Public-demo mode (PROJECT_PLAN §11). "on" makes the console a read-only guest surface:

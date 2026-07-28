@@ -1,5 +1,5 @@
 {
-  "id": "d1d79d05-fb60-430f-8971-cbeddd0348eb",
+  "id": "c2a3049f-1d16-4a49-b26a-944e38832d76",
   "prevId": "36c44a0b-4277-47e4-aeca-c15fdbfc1c2b",
   "version": "7",
   "dialect": "postgresql",
@@ -194,6 +194,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "delivered_any": {
+          "name": "delivered_any",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "idempotency_key": {
           "name": "idempotency_key",
           "type": "text",
@@ -240,6 +247,18 @@
             },
             {
               "expression": "rule_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "outcome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "delivered_any",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -353,6 +372,12 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true
+        },
+        "chat_webhook_url": {
+          "name": "chat_webhook_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",

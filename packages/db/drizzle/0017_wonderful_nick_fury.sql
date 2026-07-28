@@ -9,6 +9,13 @@
 -- `org_id` is written by the calling function, so an event naming ANOTHER tenant's rule would pass
 -- both the FK and `WITH CHECK`. Requiring the pair makes that unrepresentable.
 --
+-- WHY `chat_webhook_url` IS ON THE RULE. A deployment-wide webhook would post every organization's
+-- drug names into one room. Rules, events and cooldowns being tenant-scoped is worth nothing if
+-- delivery is not, so the destination is tenant data like everything else here.
+--
+-- WHY `delivered_any` EXISTS. The cooldown reads it rather than the mere existence of a `fired`
+-- row: a notification that reached nobody did not happen, and must not buy an hour of silence.
+--
 -- WHAT THESE TABLES DO NOT OWN: who is told, whether they acknowledged, and what happens when
 -- nobody does. That stays with `escalation_policies` and `acknowledgments`. Rules own TRIGGERING;
 -- the ladder owns OWNERSHIP.
@@ -23,6 +30,7 @@ CREATE TABLE "alert_events" (
 	"matched_count" integer NOT NULL,
 	"matched_keys" jsonb NOT NULL,
 	"deliveries" jsonb NOT NULL,
+	"delivered_any" boolean DEFAULT false NOT NULL,
 	"idempotency_key" text NOT NULL,
 	"fired_at" timestamp with time zone NOT NULL
 );--> statement-breakpoint
@@ -36,6 +44,7 @@ CREATE TABLE "alert_rules" (
 	"min_severity" text NOT NULL,
 	"cooldown_minutes" integer DEFAULT 60 NOT NULL,
 	"channels" jsonb NOT NULL,
+	"chat_webhook_url" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );--> statement-breakpoint
@@ -44,7 +53,7 @@ ALTER TABLE "alert_events" ADD CONSTRAINT "alert_events_org_id_organizations_id_
 ALTER TABLE "alert_events" ADD CONSTRAINT "alert_events_org_rule_fk" FOREIGN KEY ("org_id","rule_id") REFERENCES "public"."alert_rules"("org_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "alert_rules" ADD CONSTRAINT "alert_rules_org_id_organizations_id_fk" FOREIGN KEY ("org_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "alert_events_idempotency_uq" ON "alert_events" USING btree ("org_id","idempotency_key");--> statement-breakpoint
-CREATE INDEX "alert_events_rule_idx" ON "alert_events" USING btree ("org_id","rule_id","fired_at");--> statement-breakpoint
+CREATE INDEX "alert_events_rule_idx" ON "alert_events" USING btree ("org_id","rule_id","outcome","delivered_any","fired_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "alert_rules_name_uq" ON "alert_rules" USING btree ("org_id","name");--> statement-breakpoint
 CREATE INDEX "alert_rules_enabled_idx" ON "alert_rules" USING btree ("org_id","enabled");--> statement-breakpoint
 
