@@ -1,6 +1,7 @@
 import { getProtocols } from "../../lib/data";
 import { Card, Table } from "../../components/ui";
 import { requireGroup } from "../../lib/group-guard";
+import { ApproveVersionButton } from "./approve-version";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export const dynamic = "force-dynamic";
  * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
  */
 export default async function ProtocolsPage() {
-  await requireGroup("pharmacist");
+  const principal = await requireGroup("pharmacist");
   const protocols = await getProtocols();
 
   return (
@@ -53,7 +54,7 @@ export default async function ProtocolsPage() {
           >
             <Table
               label={`${protocol.title} version history`}
-              head={["Version", "State", "Authored by", "Approved by", "Rationale"]}
+              head={["Version", "State", "Authored by", "Approved by", "Rationale", ""]}
             >
               {versions.map((version) => (
                 <tr key={version.id}>
@@ -62,6 +63,11 @@ export default async function ProtocolsPage() {
                   <td>{version.authoredBy}</td>
                   <td>{version.approvedBy ?? "—"}</td>
                   <td className="is-subtle">{version.rationale ?? "—"}</td>
+                  <td>
+                    {version.state === "draft" ? (
+                      <ApproveVersionButton versionId={version.id} roles={principal.roles} />
+                    ) : null}
+                  </td>
                 </tr>
               ))}
             </Table>
