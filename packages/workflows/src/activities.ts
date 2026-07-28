@@ -45,6 +45,7 @@ import { incrementCounter } from "@stopgap/observability";
 import { componentsToRecord, scoreSignals, type ScorableSignal } from "@stopgap/scorer";
 import {
   evaluateAlerts,
+  suppressionKey,
   summarize,
   type AlertChannel,
   type AlertRule,
@@ -537,57 +538,75 @@ async function evaluateAndNotify(
     title: s.signal.title,
   }));
 
-  const { evaluation, newEvents } = await withOrgDb(orgId, async (db) => {
-    const rows = await listAlertRules(db, orgId);
-    const rules: AlertRule[] = rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      enabled: r.enabled,
-      riskDomain: r.riskDomain ?? undefined,
-      entityContains: r.entityContains ?? undefined,
-      minSeverity: r.minSeverity as AlertRule["minSeverity"],
-      cooldownMinutes: r.cooldownMinutes,
-      channels: r.channels as AlertChannel[],
-    }));
-    if (rules.length === 0) return { evaluation: { fired: [], suppressed: [] }, newEvents: [] };
+  const { evaluation, newEvents, webhookByRule, recipients } = await withOrgDb(
+    orgId,
+    async (db) => {
+      const rows = await listAlertRules(db, orgId);
+      const rules: AlertRule[] = rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        enabled: r.enabled,
+        riskDomain: r.riskDomain ?? undefined,
+        entityContains: r.entityContains ?? undefined,
+        minSeverity: r.minSeverity as AlertRule["minSeverity"],
+        cooldownMinutes: r.cooldownMinutes,
+        channels: r.channels as AlertChannel[],
+      }));
+      // This tenant's own webhooks, kept beside the rules rather than in the environment: a
+      // deployment-wide chat URL would put every organization's drug names in one room.
+      const webhookByRule = new Map(rows.map((r) => [r.id, r.chatWebhookUrl ?? undefined]));
+      if (rules.length === 0) {
+        return {
+          evaluation: { fired: [], suppressed: [] },
+          newEvents: [],
+          webhookByRule: new Map<string, string | undefined>(),
+          recipients: [] as string[],
+        };
+      }
 
-    const lastFiredAt = await lastFiredByRule(
-      db,
-      orgId,
-      rules.map((r) => r.id),
-    );
-    const result = evaluateAlerts({ rules, signals: alertable, lastFiredAt, evaluatedAt });
+      const lastFiredAt = await lastFiredByRule(
+        db,
+        orgId,
+        rules.map((r) => r.id),
+      );
+      const result = evaluateAlerts({ rules, signals: alertable, lastFiredAt, evaluatedAt });
 
-    // Suppressed evaluations are recorded too. "This rule matched twelve signals and stayed quiet
-    // until 14:20" is exactly what a director tuning a rule needs to read, and a table holding
-    // only successes answers "what did we send" but never "what did we decide".
-    const rows2 = await recordAlertEvents(db, orgId, [
-      ...result.fired.map((f) => ({
-        ruleId: f.rule.id,
-        outcome: "fired" as const,
-        matchedCount: f.matched.length,
-        matchedKeys: f.matched.map((m) => m.dedupeKey),
-        deliveries: [],
-        idempotencyKey: f.idempotencyKey,
-        firedAt: new Date(evaluatedAt),
-      })),
-      ...result.suppressed.map((sp) => ({
-        ruleId: sp.rule.id,
-        outcome: "suppressed_cooldown" as const,
-        matchedCount: sp.matched.length,
-        matchedKeys: sp.matched.map((m) => m.dedupeKey),
-        deliveries: [],
-        idempotencyKey: `${sp.rule.id}:suppressed:${evaluatedAt}`,
-        firedAt: new Date(evaluatedAt),
-      })),
-    ]);
-    return { evaluation: result, newEvents: rows2 };
-  });
+      // Suppressed evaluations are recorded too. "This rule matched twelve signals and stayed quiet
+      // until 14:20" is exactly what a director tuning a rule needs to read, and a table holding
+      // only successes answers "what did we send" but never "what did we decide".
+      const rows2 = await recordAlertEvents(db, orgId, [
+        ...result.fired.map((f) => ({
+          ruleId: f.rule.id,
+          outcome: "fired" as const,
+          matchedCount: f.matched.length,
+          matchedKeys: f.matched.map((m) => m.dedupeKey),
+          deliveries: [],
+          idempotencyKey: f.idempotencyKey,
+          firedAt: new Date(evaluatedAt),
+        })),
+        ...result.suppressed.map((sp) => ({
+          ruleId: sp.rule.id,
+          outcome: "suppressed_cooldown" as const,
+          matchedCount: sp.matched.length,
+          matchedKeys: sp.matched.map((m) => m.dedupeKey),
+          deliveries: [],
+          idempotencyKey: suppressionKey(sp.rule, evaluatedAt),
+          firedAt: new Date(evaluatedAt),
+        })),
+      ]);
+      // The tenant's OWN recipients, resolved through the ladder's existing helper. This module
+      // does not decide who is told — it asks the thing that owns that question.
+      const recipients = await listRoleRecipients(db, orgId, "pharmacist");
+      return { evaluation: result, newEvents: rows2, webhookByRule, recipients };
+    },
+  );
 
   for (const fired of evaluation.fired) {
     const event = newEvents.find((e) => e.idempotencyKey === fired.idempotencyKey);
-    // No new row means this notification already went out. The retry stops here.
-    if (!event || event.outcome !== "fired") continue;
+    // ALREADY DELIVERED is the stop condition, not "the row already existed". A poll that recorded
+    // a firing and then died before sending must be able to try again; stopping on the row's mere
+    // existence would leave that firing permanently silent while its cooldown ran.
+    if (!event || event.outcome !== "fired" || event.deliveredAny) continue;
 
     const { subject, body } = summarize(fired);
     const deliveries: { channel: string; delivered: boolean; reason?: string }[] = [];
@@ -596,8 +615,18 @@ async function evaluateAndNotify(
       // gets recorded. Never a faked success — "the pharmacy was told" has to stay falsifiable.
       const result =
         channel === "chat"
-          ? await sendChat({ idempotencyKey: fired.idempotencyKey, subject, body })
-          : await sendEmail({ idempotencyKey: fired.idempotencyKey, subject, body, to: [] });
+          ? await sendChat({
+              idempotencyKey: fired.idempotencyKey,
+              subject,
+              body,
+              webhookUrl: webhookByRule.get(fired.rule.id),
+            })
+          : await sendEmail({
+              idempotencyKey: fired.idempotencyKey,
+              subject,
+              body,
+              to: recipients,
+            });
       deliveries.push({
         channel: result.channel,
         delivered: result.delivered,

@@ -152,10 +152,36 @@ export function nextEligibleAt(rule: AlertRule, lastFired: string): string {
  * more matching signal, so the retry is a no-op rather than a second notification.
  */
 export function firingKey(rule: AlertRule, evaluatedAt: string): string {
-  const windowMs = Math.max(1, rule.cooldownMinutes) * 60_000;
-  const window = Math.floor(Date.parse(evaluatedAt) / windowMs);
-  return `${rule.id}:${window}`;
+  return `${rule.id}:fired:${windowOf(rule, evaluatedAt)}`;
 }
+
+/**
+ * The key for a SUPPRESSED evaluation.
+ *
+ * Also bucketed by window, not stamped with the evaluation time. Stamped, a five-minute poll would
+ * write 288 rows per rule per day forever to record the same fact — "this rule is in cooldown" —
+ * and a decision log nobody can read is not a decision log. One row per rule per window says it
+ * once, and the row is restated with the latest match count.
+ */
+export function suppressionKey(rule: AlertRule, evaluatedAt: string): string {
+  return `${rule.id}:suppressed:${windowOf(rule, evaluatedAt)}`;
+}
+
+/** Which cooldown window an instant falls in. */
+function windowOf(rule: AlertRule, evaluatedAt: string): number {
+  return Math.floor(Date.parse(evaluatedAt) / (Math.max(1, rule.cooldownMinutes) * 60_000));
+}
+
+/**
+ * The floor on a cooldown.
+ *
+ * ONE MINUTE, not zero. A zero cooldown is a director asking to be told about every signal, which
+ * is the fifty-seven-notifications failure spelled out at the top of this file — and it would also
+ * collapse the window arithmetic above, since two firings in the same minute would share a key and
+ * the second would be silently swallowed rather than sent. Refusing zero is the honest answer to a
+ * request the system cannot serve safely.
+ */
+export const MIN_COOLDOWN_MINUTES = 1;
 
 /**
  * Decide what fires.

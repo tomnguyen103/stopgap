@@ -283,10 +283,13 @@ const TENANT_TABLES: TenantTable[] = [
     name: "alert_events",
     readOthers: (tx) => tx`select id from alert_events where id = ${ID.alertB}`,
     insertAs: (tx, org) =>
+      // The org's OWN rule, so a refusal is the POLICY refusing and not the composite foreign key
+      // complaining that org B has no rule `ruleA`. Testing the wrong constraint passes for the
+      // wrong reason.
       tx`insert into alert_events (org_id, rule_id, outcome, matched_count, matched_keys,
                                    deliveries, idempotency_key, fired_at)
-         values (${org}, ${ID.ruleA}, 'fired', 1, '[]'::jsonb, '[]'::jsonb,
-                 ${"x-" + org.slice(0, 4)}, now())`,
+         values (${org}, ${org === ORG_A ? ID.ruleA : ID.ruleB}, 'fired', 1, '[]'::jsonb,
+                 '[]'::jsonb, ${"x-" + org.slice(0, 4)}, now())`,
     readAll: (tx) => tx`select id from alert_events`,
     updateOthers: (tx) =>
       tx`update alert_events set outcome = 'hijacked' where id = ${ID.alertB} returning id`,

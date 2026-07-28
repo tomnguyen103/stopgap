@@ -1,5 +1,6 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { alertEvents, alertRules, type AlertEventRow, type AlertRuleRow } from "./schema.js";
+import { MIN_COOLDOWN_MINUTES } from "@stopgap/alerts";
 import type { Db } from "./client.js";
 
 /**
@@ -13,12 +14,31 @@ import type { Db } from "./client.js";
 
 export interface AlertRuleInput {
   name: string;
+  /** This tenant's chat webhook, when the rule notifies a channel. */
+  chatWebhookUrl?: string | null;
   enabled?: boolean;
   riskDomain?: string | null;
   entityContains?: string | null;
   minSeverity: string;
   cooldownMinutes: number;
   channels: string[];
+}
+
+/**
+ * A cooldown of zero is refused, not clamped.
+ *
+ * Zero means "tell me about every signal", which is the fifty-seven-notifications failure the
+ * cooldown exists to prevent — and it would collapse the window arithmetic the idempotency key
+ * depends on, so two firings in one minute would share a key and the second would vanish rather
+ * than send. Refusing is the honest answer to a request the system cannot serve safely.
+ */
+function assertCooldown(minutes: number): number {
+  if (!Number.isInteger(minutes) || minutes < MIN_COOLDOWN_MINUTES) {
+    throw new Error(
+      `alert rule cooldown must be a whole number of minutes, at least ${String(MIN_COOLDOWN_MINUTES)}`,
+    );
+  }
+  return minutes;
 }
 
 /** This tenant's rules. Ordered by name so a list a director reads does not reshuffle itself. */
@@ -40,8 +60,9 @@ export async function createAlertRule(
       riskDomain: input.riskDomain ?? null,
       entityContains: input.entityContains ?? null,
       minSeverity: input.minSeverity,
-      cooldownMinutes: input.cooldownMinutes,
+      cooldownMinutes: assertCooldown(input.cooldownMinutes),
       channels: input.channels,
+      chatWebhookUrl: input.chatWebhookUrl ?? null,
     })
     .returning();
   if (!row) throw new Error(`alert rule ${input.name} was not created`);
@@ -68,8 +89,9 @@ export async function updateAlertRule(
       riskDomain: input.riskDomain ?? null,
       entityContains: input.entityContains ?? null,
       minSeverity: input.minSeverity,
-      cooldownMinutes: input.cooldownMinutes,
+      cooldownMinutes: assertCooldown(input.cooldownMinutes),
       channels: input.channels,
+      chatWebhookUrl: input.chatWebhookUrl ?? null,
       updatedAt: new Date(),
     })
     .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
@@ -93,10 +115,15 @@ export async function deleteAlertRule(db: Db, orgId: string, ruleId: string): Pr
 }
 
 /**
- * When each of these rules last FIRED — the input the cooldown decision needs.
+ * When each of these rules last NOTIFIED SOMEBODY — the input the cooldown decision needs.
  *
- * Only `fired` events count. A suppressed evaluation is a record that the rule stayed quiet, and
- * counting it would restart the cooldown every poll, which is a rule that never fires again.
+ * Two filters, and both matter:
+ *
+ *  - `outcome = 'fired'`. A suppressed evaluation records that the rule stayed quiet; counting it
+ *    would restart the cooldown every poll, which is a rule that never fires again.
+ *  - `delivered_any`. A firing that reached nobody — a missing webhook, a 500, a process that died
+ *    between recording and sending — did not happen, and must not start an hour of silence on the
+ *    strength of it. The next poll retries.
  */
 export async function lastFiredByRule(
   db: Db,
@@ -104,23 +131,24 @@ export async function lastFiredByRule(
   ruleIds: string[],
 ): Promise<Record<string, string>> {
   if (ruleIds.length === 0) return {};
+  // DISTINCT ON gives one row per rule in the database rather than fetching a rule's whole history
+  // and discarding all but the newest in JavaScript.
   const rows = await db
-    .select({ ruleId: alertEvents.ruleId, firedAt: alertEvents.firedAt })
+    .selectDistinctOn([alertEvents.ruleId], {
+      ruleId: alertEvents.ruleId,
+      firedAt: alertEvents.firedAt,
+    })
     .from(alertEvents)
     .where(
       and(
         eq(alertEvents.orgId, orgId),
         eq(alertEvents.outcome, "fired"),
+        eq(alertEvents.deliveredAny, true),
         inArray(alertEvents.ruleId, ruleIds),
       ),
     )
-    .orderBy(desc(alertEvents.firedAt));
-  const out: Record<string, string> = {};
-  // Newest first, so the FIRST row seen for a rule is its latest firing.
-  for (const row of rows) {
-    if (!out[row.ruleId]) out[row.ruleId] = row.firedAt.toISOString();
-  }
-  return out;
+    .orderBy(alertEvents.ruleId, desc(alertEvents.firedAt));
+  return Object.fromEntries(rows.map((row) => [row.ruleId, row.firedAt.toISOString()]));
 }
 
 export interface AlertEventInput {
@@ -134,11 +162,16 @@ export interface AlertEventInput {
 }
 
 /**
- * Record what the evaluation decided, and what became of each send.
+ * Record what the evaluation decided.
  *
- * Returns the rows that were genuinely NEW. That is the idempotency contract: a retried poll
- * conflicts on `(org, idempotency_key)`, gets an empty list back, and therefore sends nothing —
- * the send is guarded by the row, not by the caller remembering.
+ * Returns the row for EVERY event, whether it was inserted or already existed — because "already
+ * existed" is not the same as "already delivered". A poll that recorded a firing and then died
+ * before sending must be able to try again; returning nothing on conflict would have made that
+ * firing permanently silent while its cooldown ran.
+ *
+ * The idempotency contract is therefore the row's `deliveredAny`, not the insert's outcome: the
+ * caller sends only for a row that has not delivered yet, and a genuine retry after a successful
+ * send finds `deliveredAny` true and stops.
  */
 export async function recordAlertEvents(
   db: Db,
@@ -146,18 +179,28 @@ export async function recordAlertEvents(
   events: AlertEventInput[],
 ): Promise<AlertEventRow[]> {
   if (events.length === 0) return [];
-  return (
-    db
-      .insert(alertEvents)
-      .values(events.map((e) => ({ orgId, ...e })))
-      // DO NOTHING, not DO UPDATE: a conflict means this notification already happened, and the
-      // right response is to leave the original record exactly as it was written.
-      .onConflictDoNothing({ target: [alertEvents.orgId, alertEvents.idempotencyKey] })
-      .returning()
-  );
+  return db
+    .insert(alertEvents)
+    .values(events.map((e) => ({ orgId, ...e })))
+    .onConflictDoUpdate({
+      target: [alertEvents.orgId, alertEvents.idempotencyKey],
+      // The match count may legitimately have grown since the first attempt — the feed returns
+      // more each poll. `delivered_any` and `deliveries` are NOT touched: they are the record of
+      // what actually happened, and only the send path may write them.
+      set: {
+        matchedCount: sql`excluded.matched_count`,
+        matchedKeys: sql`excluded.matched_keys`,
+      },
+    })
+    .returning();
 }
 
-/** Attach the send results to an event already recorded. */
+/**
+ * Attach the send results to an event already recorded.
+ *
+ * `deliveredAny` is derived here rather than passed in, so the flag the cooldown reads cannot
+ * disagree with the per-channel results sitting beside it.
+ */
 export async function recordAlertDeliveries(
   db: Db,
   orgId: string,
@@ -166,7 +209,7 @@ export async function recordAlertDeliveries(
 ): Promise<void> {
   await db
     .update(alertEvents)
-    .set({ deliveries })
+    .set({ deliveries, deliveredAny: deliveries.some((d) => d.delivered) })
     .where(and(eq(alertEvents.orgId, orgId), eq(alertEvents.id, eventId)));
 }
 

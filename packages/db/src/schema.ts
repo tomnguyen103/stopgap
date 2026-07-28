@@ -1011,6 +1011,15 @@ export const alertRules = pgTable(
      */
     cooldownMinutes: integer("cooldown_minutes").notNull().default(60),
     channels: jsonb("channels").$type<string[]>().notNull(),
+    /**
+     * This tenant's chat webhook, when the rule notifies a channel.
+     *
+     * On the RULE rather than in the environment, because a deployment-wide webhook would post
+     * every organization's drug names into one room — and rules, events and cooldowns being
+     * tenant-scoped is worth nothing if delivery is not. Absent means chat sends are recorded as
+     * non-deliveries, never faked.
+     */
+    chatWebhookUrl: text("chat_webhook_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1058,6 +1067,15 @@ export const alertEvents = pgTable(
       .$type<{ channel: string; delivered: boolean; reason?: string }[]>()
       .notNull(),
     /**
+     * Did ANY channel actually deliver?
+     *
+     * The cooldown reads this rather than the mere existence of a `fired` row, because a
+     * notification that reached nobody did not happen. Without it a single failed send — a missing
+     * webhook, a 500, a process that died between recording and sending — starts the cooldown and
+     * the rule goes quiet for an hour having told no one, which is the worst of both behaviours.
+     */
+    deliveredAny: boolean("delivered_any").notNull().default(false),
+    /**
      * Stable per (rule, cooldown window).
      *
      * This is what makes a retried send a no-op: the insert conflicts, the row is restated, and no
@@ -1069,7 +1087,9 @@ export const alertEvents = pgTable(
   },
   (t) => [
     uniqueIndex("alert_events_idempotency_uq").on(t.orgId, t.idempotencyKey),
-    index("alert_events_rule_idx").on(t.orgId, t.ruleId, t.firedAt),
+    // `outcome` and `delivered_any` lead because the cooldown lookup filters on both before it
+    // orders; without them it walks every event the rule ever produced.
+    index("alert_events_rule_idx").on(t.orgId, t.ruleId, t.outcome, t.deliveredAny, t.firedAt),
     // Composite, for the reason spelled out on the snapshot and evidence tables: a plain foreign
     // key proves the rule exists, not that it belongs to this tenant.
     foreignKey({
