@@ -12,6 +12,8 @@
     "typecheck": "pnpm -r --no-bail typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:browser": "playwright test --config e2e/playwright.config.ts --project=auth",
+    "test:browser:demo": "playwright test --config e2e/playwright.config.ts --project=demo",
     "eval": "vitest run --config vitest.eval.config.ts",
     "build": "pnpm -r --no-bail --if-present build",
     "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
+    "@playwright/test": "^1.62.0",
     "@types/node": "^22.10.0",
     "eslint": "^9.18.0",
     "prettier": "^3.4.0",
