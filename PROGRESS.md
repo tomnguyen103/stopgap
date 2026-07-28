@@ -349,3 +349,17 @@ Recorded as they are made, so the reasoning survives the pull request that carri
   (#13). A false positive is only fixable if somebody can see the line that tripped it; a `reason`
   string travels into logs and metric labels, a wider audience than suspected protected information
   should reach.
+- **Retention is per record KIND, and the audit chain is not a kind** (#18 / ticket 18). The kinds
+  age differently — an alert event is operational noise a week later, a procurement history is what
+  next year's burn-rate arithmetic reads — so one deployment-wide window would force the shortest
+  requirement onto the longest-lived data. The hash-chained audit log has no window at all: removing
+  an entry reclaims little and makes every later entry unverifiable while the next anchor comparison
+  reports tampering that never happened. It is absent from `RETENTION_KINDS` rather than defaulted
+  off, so no configuration can switch it on.
+- **"Keep forever" is a sentinel, never `0` days** (#18). Zero reads to the cutoff arithmetic as
+  "delete everything older than now", which is the whole table. A negative env value means keep
+  forever and is translated before it reaches the arithmetic, so the two opposite intentions are
+  never one keystroke apart.
+- **The sweep batches, one transaction per kind** (#18). A killed sweep has removed some expired
+  rows and no live ones, with nothing to resume and nothing to roll back — which is what makes
+  "an interrupted cleanup leaves the database consistent" a property rather than a hope.

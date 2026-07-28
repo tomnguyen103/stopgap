@@ -179,6 +179,18 @@ export {
   type SignalPageOptions,
 } from "./signals.js";
 export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
+export {
+  retentionPlan,
+  sweepOrgRetention,
+  totalRemoved,
+  RETENTION_KINDS,
+  RETENTION_BATCH_SIZE,
+  RETAINED_FOREVER,
+  type RetentionKind,
+  type RetentionWindows,
+  type RetentionCounts,
+  type RetentionSweepResult,
+} from "./retention.js";
 export type {
   AlertRuleRow,
   AlertEventRow,

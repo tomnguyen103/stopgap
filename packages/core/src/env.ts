@@ -142,6 +142,26 @@ const EnvSchema = z.object({
   WORKER_HTTP_PORT: z.coerce.number().int().positive().max(65535).default(9464),
 
   /**
+   * Retention windows, in days, per record kind (ticket 18). The scheduled sweep removes rows
+   * older than these; the audit chain has no window here and is never swept.
+   *
+   * Configurable per KIND rather than one deployment-wide number, because the kinds age
+   * differently: an alert event is operational noise a week later, while a procurement history is
+   * what next year's burn-rate arithmetic is computed from. A single window forces the shortest
+   * requirement onto the longest-lived data or the other way round.
+   *
+   * `0` is a legal window and means "sweep everything older than this instant" — the honest
+   * reading of zero days. A kind that should never be swept is switched off with `-1`, which is
+   * refused as a WINDOW and handled as `RETAINED_FOREVER` by the caller, so "keep forever" and
+   * "delete everything" are never one keystroke apart.
+   */
+  RETENTION_SIGNAL_DAYS: z.coerce.number().int().default(180),
+  RETENTION_SCORE_SNAPSHOT_DAYS: z.coerce.number().int().default(180),
+  RETENTION_ALERT_EVENT_DAYS: z.coerce.number().int().default(90),
+  RETENTION_INVENTORY_SNAPSHOT_DAYS: z.coerce.number().int().default(365),
+  RETENTION_PROCUREMENT_EVENT_DAYS: z.coerce.number().int().default(365),
+
+  /**
    * OIDC SSO / RBAC (PHASE6 §6.1). Every field defaults so the local gate and the public demo
    * run zero-config — but the stance mirrors comms: an UNSET secret is honest non-configuration,
    * never faked auth. `authConfigured()` below reports whether a real IdP session can be

@@ -6,6 +6,11 @@ import { ANCHOR_AUDIT_WORKFLOW, DAILY_BRIEF_WORKFLOW, POLL_FEEDS_WORKFLOW } from
 const POLL_SCHEDULE_ID = "poll-feeds";
 const ANCHOR_SCHEDULE_ID = "anchor-audit";
 const BRIEF_SCHEDULE_ID = "daily-brief";
+import { ANCHOR_AUDIT_WORKFLOW, POLL_FEEDS_WORKFLOW, RETENTION_SWEEP_WORKFLOW } from "../shared.js";
+
+const POLL_SCHEDULE_ID = "poll-feeds";
+const ANCHOR_SCHEDULE_ID = "anchor-audit";
+const RETENTION_SCHEDULE_ID = "retention-sweep";
 
 /** Create one schedule, treating "already exists" as success (idempotent re-run). */
 async function ensureSchedule(
@@ -40,6 +45,9 @@ async function ensureSchedule(
  *   - poll-feeds (15m): the auto-open spine (PROJECT_PLAN §4).
  *   - anchor-audit (1h): the external audit-chain anchor (PHASE6 §6.2).
  *   - daily-brief (24h): the per-tenant daily brief (ticket 13).
+ *   - retention-sweep (24h): removes records past their retention window (ticket 18). Daily
+ *     rather than hourly because the windows are measured in months — an hourly sweep would spend
+ *     twenty-four scans a day to find what one finds.
  * Idempotent — safe to re-run.
  *
  *   pnpm --filter @stopgap/workflows start-schedule
@@ -67,6 +75,10 @@ async function main() {
       every: "24h",
       workflowType: DAILY_BRIEF_WORKFLOW,
       workflowId: "daily-brief-run",
+      scheduleId: RETENTION_SCHEDULE_ID,
+      every: "24h",
+      workflowType: RETENTION_SWEEP_WORKFLOW,
+      workflowId: "retention-sweep-run",
       taskQueue: env.TEMPORAL_TASK_QUEUE,
     });
   } finally {

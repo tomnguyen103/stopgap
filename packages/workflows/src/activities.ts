@@ -39,6 +39,11 @@ import {
   dedupeByKey,
   type ScoreSnapshotInput,
   resetFeedMiss,
+  sweepOrgRetention,
+  totalRemoved,
+  RETAINED_FOREVER,
+  type RetentionWindows,
+  type RetentionSweepResult,
   upsertSignals,
   updateCaseStatus,
   upsertCaseForRecord,
@@ -1098,6 +1103,62 @@ export async function anchorAuditChain(): Promise<
     sink: row.sink,
   }));
 }
+
+/**
+ * Read the configured windows, translating the "never sweep this" sentinel.
+ *
+ * A NEGATIVE env value means keep forever; `retentionPlan` refuses a negative window outright, so
+ * the sentinel is converted here rather than being allowed anywhere near the cutoff arithmetic.
+ * Zero is left alone and means what it says: sweep everything older than this instant.
+ */
+function retentionWindowsFromEnv(env: ReturnType<typeof getEnv>): RetentionWindows {
+  const window = (days: number) => (days < 0 ? RETAINED_FOREVER : days);
+  return {
+    riskSignals: window(env.RETENTION_SIGNAL_DAYS),
+    riskScoreSnapshots: window(env.RETENTION_SCORE_SNAPSHOT_DAYS),
+    alertEvents: window(env.RETENTION_ALERT_EVENT_DAYS),
+    inventorySnapshots: window(env.RETENTION_INVENTORY_SNAPSHOT_DAYS),
+    procurementEvents: window(env.RETENTION_PROCUREMENT_EVENT_DAYS),
+  };
+}
+
+/**
+ * The retention sweep (ticket 18) — one run removes every organization's expired records.
+ *
+ * On the DURABLE runtime, as an activity of a scheduled workflow, because a second scheduler is a
+ * second thing that can silently stop: Temporal already reports a schedule that has not fired, and
+ * a cron entry on one host does not.
+ *
+ * ONE TENANT'S FAILURE MUST NOT STOP THE SWEEP, the same containment the poll applies. A sweep
+ * that abandoned every later organization because one hit a lock would quietly leave most of the
+ * deployment ungoverned while reporting a single error.
+ */
+export async function sweepRetention(): Promise<RetentionSweepResult[]> {
+  const env = getEnv();
+  const windows = retentionWindowsFromEnv(env);
+  const orgs = await withBypassDb(() => listOrganizations());
+  // ONE instant for the whole run, not one per org: cutoffs computed from a moving clock would
+  // make two tenants' sweeps incomparable and the run irreproducible from its own audit entries.
+  const now = new Date();
+  const results: RetentionSweepResult[] = [];
+  for (const org of orgs) {
+    try {
+      const result = await sweepOrgRetention(org.id, now, windows);
+      results.push(result);
+      const removed = totalRemoved(result.counts);
+      if (removed > 0) console.log(`[retention] org ${org.id}: removed ${removed} rows`, result.counts);
+    } catch (err) {
+      incrementCounter("stopgap_retention_failures_total");
+      console.error(
+        `[retention] sweep failed for org ${org.id}: ${err instanceof Error ? err.message : String(err)}. ` +
+          "That tenant keeps its expired rows and the next scheduled run retries it; every other " +
+          "organization in this run continues.",
+      );
+    }
+  }
+  return results;
+}
+
 
 /**
  * Look up the approved protocol for this shortage key — the organizational-memory read

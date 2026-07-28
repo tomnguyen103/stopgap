@@ -10,7 +10,7 @@ import { defineConfig } from "vitest/config";
  *
  *   pnpm test:rls
  *
- * Three suites, with different connection requirements — both stated in each file's header:
+ * Four suites, with different connection requirements — both stated in each file's header:
  *  - `rls.e2e.test.ts` needs `DATABASE_URL` to name a role the policies APPLY to, and refuses to
  *    run otherwise (a green isolation suite under a superuser proves nothing);
  *  - `migrations.e2e.test.ts` needs `DATABASE_URL_MAINTENANCE` to name the OWNER, because it
@@ -21,7 +21,10 @@ import { defineConfig } from "vitest/config";
  *    policies do not apply to that assertion proves nothing.
  *  - `catalog.e2e.test.ts` (ticket 15) needs `DATABASE_URL` to name the APPLICATION role, for the
  *    same reason `rls.e2e.test.ts` does: it asserts that one tenant's catalog import is invisible
- *    to another, and under the owner that assertion passes without proving anything.
+ *    to another, and under the owner that assertion passes without proving anything;
+ *  - `retention.e2e.test.ts` (ticket 18) needs the APPLICATION role too: it asserts that one
+ *    tenant's cleanup cannot reach another tenant's rows, and that the audit chain still verifies
+ *    after a sweep.
  *
  * `fileParallelism` is off: the suites seed and tear down fixed row ids, so two files racing over
  * the same rows would produce failures that look like isolation bugs and are not.
@@ -33,6 +36,7 @@ export default defineConfig({
       "packages/db/src/migrations.e2e.test.ts",
       "packages/db/src/signals.e2e.test.ts",
       "packages/db/src/catalog.e2e.test.ts",
+      "packages/db/src/retention.e2e.test.ts",
     ],
     fileParallelism: false,
     testTimeout: 60_000,
