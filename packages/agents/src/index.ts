@@ -1,4 +1,10 @@
 export { assessImpact } from "./impact.js";
 export { researchAlternatives } from "./alternatives.js";
-export { ImpactAssessment, AlternativesResearch, CONFIDENCE_THRESHOLD } from "./schemas.js";
+export { draftDailyBrief, type BriefInput } from "./brief.js";
+export {
+  ImpactAssessment,
+  AlternativesResearch,
+  DailyBrief,
+  CONFIDENCE_THRESHOLD,
+} from "./schemas.js";
 export { GOLDEN_DATASET, evalSubset, severityMeetsFloor, severityWithinCeiling, type GoldenCase } from "./golden-dataset.js";

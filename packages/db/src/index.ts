@@ -129,6 +129,13 @@ export {
 } from "./alerts.js";
 export {
   dedupeByKey,
+  recordDailyBrief,
+  latestDailyBrief,
+  listDailyBriefs,
+  getDailyBrief,
+  type DailyBriefInput,
+} from "./briefs.js";
+export {
   upsertSignals,
   bumpSignalFeedMiss,
   listSignals,
