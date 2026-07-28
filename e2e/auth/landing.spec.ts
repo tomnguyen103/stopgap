@@ -8,13 +8,11 @@ import { SEEDED_USERS, signIn } from "./sign-in";
  * what is NOT covered below a browser is that a real Keycloak session, a real middleware pass and a
  * real redirect chain end at the route that function names.
  *
- * Each user gets a fresh browser context, so one signed-in session cannot satisfy the next
- * assertion by accident.
+ * Playwright gives every test its own browser context, so one signed-in session cannot satisfy the
+ * next assertion by accident.
  */
 for (const user of SEEDED_USERS) {
   test.describe(`${user.username}`, () => {
-    test.use({ storageState: { cookies: [], origins: [] } });
-
     test(`signs in and lands on ${user.landing}`, async ({ page }) => {
       await signIn(page, user.username, user.password);
       await expect(page).toHaveURL(new RegExp(`${user.landing}$`));
@@ -31,15 +29,19 @@ test.describe("an above-role control", () => {
     await signIn(page, "pharmacist", "pharmacist-dev");
     await page.goto("/protocols");
 
-    const approve = page.getByRole("button", { name: /approve/i }).first();
-    // Nothing to assert if this deployment has no drafted version — and a test that silently
-    // passes on an empty page is worse than one that says why it could not run.
-    const count = await page.getByRole("button", { name: /approve/i }).count();
-    test.skip(count === 0, "no drafted protocol version in this deployment to gate");
+    const approve = page.getByRole("button", { name: /approve/i });
+    // FAILS rather than skips when there is nothing to gate. A skip here would let the one
+    // assertion that covers this ticket's disabled-control requirement vanish silently the day the
+    // fixture data changed, and the tier would still report green.
+    await expect(
+      approve,
+      "the auth tier needs at least one DRAFTED protocol version to gate — seed one",
+    ).not.toHaveCount(0);
+    const first = approve.first();
 
     // REFUSED, NOT HIDDEN, and still reachable by keyboard: `aria-disabled` rather than `disabled`,
     // so the explanation stays in the tab order for the people who most need it.
-    await expect(approve).toHaveAttribute("aria-disabled", "true");
-    await expect(approve).toHaveAccessibleName(/requires the pharmacy director role/i);
+    await expect(first).toHaveAttribute("aria-disabled", "true");
+    await expect(first).toHaveAccessibleName(/requires the pharmacy director role/i);
   });
 });
