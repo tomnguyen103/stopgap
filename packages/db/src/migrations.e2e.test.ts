@@ -103,7 +103,8 @@ beforeAll(async () => {
 
   const tags = await migrationTags();
   const boundary = tags.findIndex((t) => t.startsWith("0013"));
-  if (boundary < 1) throw new Error("migrations.e2e: could not locate migration 0013 in the journal");
+  if (boundary < 1)
+    throw new Error("migrations.e2e: could not locate migration 0013 in the journal");
 
   // --- everything BEFORE multi-tenancy ------------------------------------------------------
   for (const tag of tags.slice(0, boundary)) await applyMigration(scratch, tag);
@@ -214,5 +215,26 @@ describe("migrations 0013/0014 against a database that already had rows", () => 
     const leftovers = await scratch`select 1 from pg_indexes
                                     where tablename = 'cases' and indexname = 'cases_key_idx'`;
     expect(leftovers).toHaveLength(0);
+  });
+
+  /**
+   * Ticket 06 — the two signal tables arrive POLICED, applied as the role a deployment migrates as.
+   *
+   * The whole migration set already ran above, as the owner, against a throwaway database. What
+   * this adds is the assertion that the hand-written half of 0015 ran too: a table created without
+   * its policy is not a missing feature, it is a table every tenant can read in full, and the DDL
+   * would succeed either way.
+   */
+  it("creates the signal tables with row-level security FORCED and a policy on each", async () => {
+    for (const table of ["risk_signals", "risk_score_snapshots"]) {
+      const [rel] = await scratch`select relrowsecurity, relforcerowsecurity
+                                  from pg_class where relname = ${table}`;
+      expect(rel?.relrowsecurity, `${table} RLS enabled`).toBe(true);
+      // FORCE is what makes the policy apply to the OWNER — which is what this very connection is.
+      // Without it the isolation suite passes while nothing is enforced.
+      expect(rel?.relforcerowsecurity, `${table} RLS forced`).toBe(true);
+      const policies = await scratch`select policyname from pg_policies where tablename = ${table}`;
+      expect(policies.map((p) => p.policyname)).toEqual([`${table}_org_isolation`]);
+    }
   });
 });

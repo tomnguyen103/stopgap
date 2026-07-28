@@ -42,7 +42,9 @@ import {
   openFdaDeviceRecallConnector,
   openFdaDrugRecallConnector,
   openFdaShortageConnector,
+  type AshpEntry,
   type NormalizedSignal,
+  type OpenFdaResult,
 } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, markResolved, startCase } from "./client.js";
@@ -308,53 +310,84 @@ export async function recordDecision(
  * deployment-wide job it exists for.
  */
 /**
- * Fetch a feed, or report an empty one.
+ * One adopted feed, with its raw type erased.
  *
- * Only for feeds that are ADDITIVE to a poll that already worked. The shortage feeds keep their
- * throwing behaviour, because a poll that silently opened no cases would be worse than a failed
- * one — but a recall endpoint that is down must not stop this deployment noticing shortages.
+ * A registry rather than four named constants threaded through four places: adding a fifth feed
+ * was otherwise an edit to the fetch block, the raw-payload type, the normalizer and the
+ * polled-source list — four chances to add a feed that fetches but never persists. Methods rather
+ * than function properties, so a `Connector<OpenFdaResult>` satisfies it without a cast.
  */
-async function fetchOrEmpty<T>(
-  fetch: () => Promise<T[]>,
-  source: string,
-): Promise<{ rows: T[]; ok: boolean }> {
-  try {
-    return { rows: await fetch(), ok: true };
-  } catch (err) {
-    incrementCounter("stopgap_feed_fetch_failures_total");
-    console.error(
-      `[poll] ${source} fetch failed: ${err instanceof Error ? err.message : String(err)}. ` +
-        "The poll continues without that feed. Its existing signals are left alone — they are " +
-        "NOT counted as missing, because an outage is not the feed saying the hazard ended.",
-    );
-    return { rows: [], ok: false };
-  }
+interface PollableFeed {
+  readonly source: string;
+  fetch(): Promise<unknown[]>;
+  normalize(raw: never, context: { orgId: string; fetchedAt: string }): NormalizedSignal;
 }
 
-/** Every adopted feed's raw payloads, fetched once for the deployment. */
-interface RawFeeds {
-  openFdaRaw: Awaited<ReturnType<typeof openFdaShortageConnector.fetch>>;
-  ashpRaw: Awaited<ReturnType<typeof ashpShortageConnector.fetch>>;
-  drugRecallRaw: Awaited<ReturnType<typeof openFdaDrugRecallConnector.fetch>>;
-  deviceRecallRaw: Awaited<ReturnType<typeof openFdaDeviceRecallConnector.fetch>>;
+/**
+ * Every feed the poll reads, and whether its failure may stop the poll.
+ *
+ * The shortage feeds are `required`: a poll that silently opened no cases would be worse than a
+ * failed one, and that is the behaviour this activity has always had. Recalls are additive to a
+ * poll that already worked, so a recall endpoint being down must not stop this deployment
+ * noticing shortages.
+ */
+const POLLED_FEEDS: { feed: PollableFeed; required: boolean }[] = [
+  { feed: openFdaShortageConnector, required: true },
+  { feed: ashpShortageConnector, required: true },
+  { feed: openFdaDrugRecallConnector, required: false },
+  { feed: openFdaDeviceRecallConnector, required: false },
+];
+
+interface FeedResult {
+  source: string;
+  rows: unknown[];
+  normalize: PollableFeed["normalize"];
+  /**
+   * Whether this poll can tell this feed apart from a broken one.
+   *
+   * TRUE only when the fetch resolved AND returned at least one row. A feed that returned nothing
+   * is indistinguishable IN THE DATA from a feed that failed quietly — ASHP answers `[]` with no
+   * auth key, and openFDA answers 404 for an empty result set exactly as it does for a bad path —
+   * so its existing signals are left out of the miss sweep. The cost is that a genuinely emptied
+   * feed never retires its signals by absence; the alternative is retiring live recalls because a
+   * key expired, and between those two the conservative reading is the one that keeps the case
+   * open.
+   */
+  attested: boolean;
+}
+
+/** Fetch every feed once for the deployment. Required feeds still throw; additive ones do not. */
+async function fetchFeeds(): Promise<FeedResult[]> {
+  return Promise.all(
+    POLLED_FEEDS.map(async ({ feed, required }) => {
+      try {
+        const rows = await feed.fetch();
+        return { source: feed.source, rows, normalize: feed.normalize, attested: rows.length > 0 };
+      } catch (err) {
+        if (required) throw err;
+        incrementCounter("stopgap_feed_fetch_failures_total");
+        console.error(
+          `[poll] ${feed.source} fetch failed: ${err instanceof Error ? err.message : String(err)}. ` +
+            "The poll continues without that feed. Its existing signals are left alone - they are " +
+            "NOT counted as missing, because an outage is not the feed saying the hazard ended.",
+        );
+        return { source: feed.source, rows: [], normalize: feed.normalize, attested: false };
+      }
+    }),
+  );
 }
 
 /**
  * Turn one deployment-wide fetch into ONE tenant's signals.
  *
- * Pure: no network, no database, no clock — the fetch time comes from the caller, so two orgs in
- * the same poll get the same `lastFetchedAt` and the whole poll stays reproducible.
+ * Pure: no network, no database, no clock — the fetch time comes from the caller, so every org in
+ * one poll shares a `lastFetchedAt` and the whole poll stays reproducible.
  */
 function normalizeForOrg(
-  raw: RawFeeds,
+  feeds: FeedResult[],
   context: { orgId: string; fetchedAt: string },
 ): NormalizedSignal[] {
-  return [
-    ...raw.openFdaRaw.map((r) => openFdaShortageConnector.normalize(r, context)),
-    ...raw.ashpRaw.map((r) => ashpShortageConnector.normalize(r, context)),
-    ...raw.drugRecallRaw.map((r) => openFdaDrugRecallConnector.normalize(r, context)),
-    ...raw.deviceRecallRaw.map((r) => openFdaDeviceRecallConnector.normalize(r, context)),
-  ];
+  return feeds.flatMap((f) => f.rows.map((row) => f.normalize(row as never, context)));
 }
 
 export async function pollAndOpenCases(): Promise<{
@@ -367,24 +400,12 @@ export async function pollAndOpenCases(): Promise<{
   // `ShortageRecord` path that opens cases, and the normalized-signal path (ticket 06) that
   // persists per tenant. Fetching twice for the two shapes would double every provider call to
   // store the same bytes.
-  const [openFdaRaw, ashpRaw] = await Promise.all([
-    openFdaShortageConnector.fetch(),
-    ashpShortageConnector.fetch(),
-  ]);
-  // Recalls are ADDITIVE to a poll that already worked. A new endpoint going down must not stop
-  // this deployment opening shortage cases, so its failure is contained and counted rather than
-  // thrown — the same stance the resolution loop below takes for one case's failure.
-  const [drugRecall, deviceRecall] = await Promise.all([
-    fetchOrEmpty(() => openFdaDrugRecallConnector.fetch(), openFdaDrugRecallConnector.source),
-    fetchOrEmpty(() => openFdaDeviceRecallConnector.fetch(), openFdaDeviceRecallConnector.source),
-  ]);
-  const { rows: drugRecallRaw, ok: drugRecallOk } = drugRecall;
-  const { rows: deviceRecallRaw, ok: deviceRecallOk } = deviceRecall;
-  // Only the feeds this poll actually reached. A source that failed is excluded from the
-  // miss sweep below, so an outage cannot retire its signals.
-  const polledSources: string[] = [openFdaShortageConnector.source, ashpShortageConnector.source];
-  if (drugRecallOk) polledSources.push(openFdaDrugRecallConnector.source);
-  if (deviceRecallOk) polledSources.push(openFdaDeviceRecallConnector.source);
+  const feeds = await fetchFeeds();
+  const rowsOf = (source: string) => feeds.find((f) => f.source === source)?.rows ?? [];
+  const openFdaRaw = rowsOf(openFdaShortageConnector.source) as OpenFdaResult[];
+  const ashpRaw = rowsOf(ashpShortageConnector.source) as AshpEntry[];
+  // Only the feeds this poll can vouch for. See `FeedResult.attested`.
+  const attestedSources = feeds.filter((f) => f.attested).map((f) => f.source);
   const fetched = [
     ...openFdaRaw.map(mapOpenFdaResult),
     ...ashpRaw.map((entry) => mapAshpShortage(entry.key, entry.shortage)),
@@ -430,22 +451,33 @@ export async function pollAndOpenCases(): Promise<{
       // Ticket 06 — this tenant's INTERPRETATION of what the feeds returned. Normalized per org
       // (the dedupe key is org-scoped), written inside this org's own transaction, and never
       // shared: two hospitals reading the same recall hold genuinely different signals.
-      const signals = normalizeForOrg(
-        { openFdaRaw, ashpRaw, drugRecallRaw, deviceRecallRaw },
-        { orgId: org.id, fetchedAt: pollTimestamp },
-      );
-      await withOrgDb(org.id, async (db) => {
-        await upsertSignals(db, org.id, signals);
-        // The FEED-ABSENT half, kept distinct from `sourceResolved`: a signal the poll did not
-        // return has said nothing about whether the hazard is over.
-        await bumpSignalFeedMiss(
-          db,
-          org.id,
-          signals.map((s) => s.dedupeKey),
-          pollRun,
-          polledSources,
+      const signals = normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp });
+      // ONE TENANT'S SIGNAL WRITE MUST NOT STOP THE POLL — the containment the resolution loop
+      // below already applies per case, and the reason `fetchFeeds` contains an additive feed's
+      // failure. Unguarded, one org's write error means every LATER org gets no case opened this
+      // cycle, which reads in the runbook as "the poller stopped".
+      try {
+        await withOrgDb(org.id, async (db) => {
+          await upsertSignals(db, org.id, signals);
+          // The FEED-ABSENT half, kept distinct from `sourceResolved`: a signal the poll did not
+          // return has said nothing about whether the hazard is over.
+          await bumpSignalFeedMiss(
+            db,
+            org.id,
+            signals.map((s) => s.dedupeKey),
+            pollRun,
+            attestedSources,
+          );
+        });
+      } catch (err) {
+        incrementCounter("stopgap_signal_persist_failures_total");
+        console.error(
+          `[poll] signal persistence failed for org ${org.id}: ` +
+            `${err instanceof Error ? err.message : String(err)}. ` +
+            "That tenant keeps its previous signals and its miss counters are unchanged, so the " +
+            "next poll retries it; case opening for this org and every later one continues.",
         );
-      });
+      }
 
       const { existingWorkflowIds, openCases } = await withOrgDb(org.id, async (db) => {
         const rows = await getCasesByKeys(db, org.id, currentKeyList);
