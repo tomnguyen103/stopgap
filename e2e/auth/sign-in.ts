@@ -34,6 +34,7 @@ export async function signIn(page: Page, username: string, password: string): Pr
   await page.locator("#password").fill(password);
   await page.locator("#kc-login").click();
 
-  // Back on the console, not still on the IdP.
-  await expect(page).toHaveURL(/localhost:3000/);
+  // Back on the console, not still on the IdP. Asserted as "no longer on Keycloak" rather than
+  // against a literal host, because the base URL is configurable (`STOPGAP_BASE_URL`).
+  await expect(page).not.toHaveURL(/\/realms\//);
 }
