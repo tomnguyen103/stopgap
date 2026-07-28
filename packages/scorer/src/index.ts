@@ -80,8 +80,11 @@ export const SOURCE_RESOLVED_FACTOR = 0.35;
  * indexed by RANK, not by domain — the strongest domain takes the first weight — which is what
  * keeps the sum monotone when a new domain appears.
  *
- * Its length is the number of risk domains the contract admits. Adding a domain means adding a
- * weight here and bumping `SCORER_VERSION`.
+ * Its length is EXACTLY the number of risk domains the contract admits, and that is what makes
+ * "shrinking but strictly positive" true of every domain that can actually occur. A domain beyond
+ * the table would contribute nothing — deliberately, because the 65-point budget is fixed and a
+ * weight invented at runtime would silently change what a score means. Adding a risk domain is
+ * therefore a code change: a weight here, and a `SCORER_VERSION` bump.
  */
 export const DOMAIN_RANK_WEIGHTS = [1, 0.5] as const;
 
@@ -91,12 +94,20 @@ const DOMAIN_WEIGHT_TOTAL = DOMAIN_RANK_WEIGHTS.reduce((a, b) => a + b, 0);
 export const SCORE_BANDS = ["low", "moderate", "high", "critical"] as const;
 export type ScoreBand = (typeof SCORE_BANDS)[number];
 
-/** Lower bound of each band, in points. */
+/**
+ * Lower bound of each band, as a FRACTION of what this score could reach.
+ *
+ * A fraction rather than absolute points, because the reachable maximum moves: today 65 of 100 can
+ * be earned, and after the catalog slice lands it is 100. Banding against the absolute ladder while
+ * two components are dormant would put `critical` permanently out of reach — a ranked queue on
+ * which nothing can ever be critical is not a ranked queue. The fraction keeps the bands meaningful
+ * at both stages and comparable across them.
+ */
 export const BAND_THRESHOLDS: Record<ScoreBand, number> = {
   low: 0,
-  moderate: 20,
-  high: 40,
-  critical: 60,
+  moderate: 0.2,
+  high: 0.4,
+  critical: 0.6,
 };
 
 /** What the scorer needs from a signal. A subset of the normalized contract, and nothing raw. */
@@ -248,9 +259,12 @@ function scoreSignalExposure(
       riskDomain,
       strength: combineWithinDomain(strengths),
     }))
-    // Strength first, then the domain name — so two domains of equal strength always rank the same
-    // way and the score does not depend on Map insertion order.
-    .sort((a, b) => b.strength - a.strength || a.riskDomain.localeCompare(b.riskDomain));
+    // Strength first, then the domain name by CODE POINT — so two domains of equal strength always
+    // rank the same way and the score does not depend on Map insertion order. Deliberately not
+    // `localeCompare`: its result depends on the runtime's ICU data and the ambient locale, so the
+    // same input could rank differently on two machines, which is exactly the non-determinism this
+    // scorer exists to avoid.
+    .sort((a, b) => b.strength - a.strength || (a.riskDomain < b.riskDomain ? -1 : 1));
 
   let weighted = 0;
   ranking.forEach((entry, rank) => {
@@ -334,11 +348,18 @@ function scoreSoleSource(catalog: CatalogExposure | undefined): ScoreComponent {
   };
 }
 
-/** Read the band off the score. */
-export function bandFor(score: number): ScoreBand {
+/**
+ * Read the band off the score, as a fraction of what that score could have reached.
+ *
+ * `reachableMax` of 0 (nothing is computable at all) bands as `low` rather than dividing by zero —
+ * no basis for a reading is not the same as a high reading.
+ */
+export function bandFor(score: number, reachableMax: number): ScoreBand {
+  if (!Number.isFinite(score) || !Number.isFinite(reachableMax) || reachableMax <= 0) return "low";
+  const fraction = score / reachableMax;
   // Walk high to low so the first threshold met wins.
   for (const band of [...SCORE_BANDS].reverse()) {
-    if (score >= BAND_THRESHOLDS[band]) return band;
+    if (fraction >= BAND_THRESHOLDS[band]) return band;
   }
   return "low";
 }
@@ -361,7 +382,7 @@ export function scoreSignals(input: ScoreInput): ScoreResult {
   const reachableMax = components.filter((c) => c.available).reduce((total, c) => total + c.max, 0);
   return {
     score,
-    band: bandFor(score),
+    band: bandFor(score, reachableMax),
     components,
     reachableMax,
     scorerVersion: SCORER_VERSION,
@@ -377,7 +398,32 @@ export function scoreSignals(input: ScoreInput): ScoreResult {
   };
 }
 
-/** The component breakdown as the flat map a snapshot row stores. */
-export function componentsToRecord(result: ScoreResult): Record<string, number> {
-  return Object.fromEntries(result.components.map((c) => [c.name, c.points]));
+/** What one component looks like in a persisted snapshot. */
+export interface PersistedComponent {
+  points: number;
+  max: number;
+  available: boolean;
+  unavailableReason?: string;
+}
+
+/**
+ * The component breakdown as a snapshot row stores it.
+ *
+ * Keeps `available` and its reason, because a bare number cannot tell "this facility has plenty of
+ * stock" from "nobody has told us what this facility stocks" — and a console reading the second as
+ * the first is making a claim the system has no basis for. Storing only points would put that
+ * ambiguity into every row the poll writes.
+ */
+export function componentsToRecord(result: ScoreResult): Record<string, PersistedComponent> {
+  return Object.fromEntries(
+    result.components.map((c) => [
+      c.name,
+      {
+        points: c.points,
+        max: c.max,
+        available: c.available,
+        ...(c.unavailableReason ? { unavailableReason: c.unavailableReason } : {}),
+      },
+    ]),
+  );
 }

@@ -4,6 +4,7 @@ import {
   COMPONENT_BUDGET,
   FRESHNESS_FLOOR,
   SCORER_VERSION,
+  SCORE_BANDS,
   SOURCE_RESOLVED_FACTOR,
   bandFor,
   componentsToRecord,
@@ -204,26 +205,57 @@ describe("the audit capture", () => {
 });
 
 describe("bands and the persisted shape", () => {
-  it("reads the band off the score at each threshold", () => {
-    expect(bandFor(0)).toBe("low");
-    expect(bandFor(BAND_THRESHOLDS.moderate)).toBe("moderate");
-    expect(bandFor(BAND_THRESHOLDS.high)).toBe("high");
-    expect(bandFor(BAND_THRESHOLDS.critical)).toBe("critical");
-    expect(bandFor(100)).toBe("critical");
+  it("reads the band off the FRACTION of what the score could reach", () => {
+    expect(bandFor(0, 100)).toBe("low");
+    expect(bandFor(BAND_THRESHOLDS.moderate * 100, 100)).toBe("moderate");
+    expect(bandFor(BAND_THRESHOLDS.high * 100, 100)).toBe("high");
+    expect(bandFor(BAND_THRESHOLDS.critical * 100, 100)).toBe("critical");
+    expect(bandFor(100, 100)).toBe("critical");
   });
 
-  it("flattens the components to what a snapshot row stores", () => {
+  it("bands against what is REACHABLE, so critical is not unreachable while components are dormant", () => {
+    // 43.33 of a 65-point ceiling is two thirds of everything that can be earned today. On an
+    // absolute 0-100 ladder it would read `high` at best and `critical` would be impossible —
+    // a ranked queue on which nothing can ever be critical is not a ranked queue.
+    expect(bandFor(43.33, 65)).toBe("critical");
+    expect(bandFor(43.33, 100)).toBe("high");
+  });
+
+  it("bands a score with no computable basis as low, rather than dividing by zero", () => {
+    expect(bandFor(0, 0)).toBe("low");
+    expect(bandFor(Number.NaN, 65)).toBe("low");
+  });
+
+  it("keeps availability in what a snapshot row stores, so a zero is never mistaken for a gap", () => {
     const result = scoreSignals({ signals: [signal()], evaluatedAt: AT });
-    expect(Object.keys(componentsToRecord(result))).toEqual([
-      "signalExposure",
-      "daysOnHand",
-      "soleSource",
-    ]);
+    const record = componentsToRecord(result);
+    expect(Object.keys(record)).toEqual(["signalExposure", "daysOnHand", "soleSource"]);
+    expect(record.signalExposure).toMatchObject({ available: true, max: 65 });
+    // A bare `0` here would be indistinguishable from "this facility has plenty of stock".
+    expect(record.daysOnHand).toMatchObject({
+      points: 0,
+      max: 20,
+      available: false,
+      unavailableReason: expect.stringContaining("catalog slice"),
+    });
   });
 
   it("rounds to two decimals, so a numeric(6,2) column round-trips exactly", () => {
     const result = scoreSignals({ signals: [signal({ severityScore: 0.3333 })], evaluatedAt: AT });
     expect(result.score).toBe(Number(result.score.toFixed(2)));
+  });
+
+  it("ranks a single maximal signal above a weak one once both are banded", () => {
+    const strong = scoreSignals({
+      signals: [signal({ severityScore: 1, confidence: 1 })],
+      evaluatedAt: AT,
+    });
+    const weak = scoreSignals({
+      signals: [signal({ severityScore: 0.1, confidence: 0.3 })],
+      evaluatedAt: AT,
+    });
+    expect(strong.score).toBeGreaterThan(weak.score);
+    expect(SCORE_BANDS.indexOf(strong.band)).toBeGreaterThan(SCORE_BANDS.indexOf(weak.band));
   });
 
   it("scores nothing as zero, in the lowest band", () => {
