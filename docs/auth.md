@@ -37,6 +37,16 @@ Two sources, unioned and filtered to the known role set:
    users get their role with no manual step.
 2. **Local grants** — the `user_roles` table, managed by an admin at `/admin/users`.
 
+The union and the filter live in `apps/console/app/lib/role-claims.ts` as pure functions, so the
+rule is unit-tested without a live realm. The filter is a boundary rather than tidiness: a Keycloak
+realm is shared infrastructure carrying built-in roles (`offline_access`, `uma_authorization`) and
+roles belonging to every other client on it, and a name collision must not become a grant. Local
+grants are filtered too, as belt-and-braces: `getUserRoles` already filters what it reads, but the
+second check keeps the function total for any future caller, since a retired role riding into a
+token would be compared against a rank that no longer contains it. A malformed or absent claim
+yields no realm roles rather than throwing — this runs in the Auth.js `jwt` callback, where a throw
+is a failed login for a legitimate user.
+
 ## Demo mode → anonymous viewer
 
 When `STOPGAP_DEMO_MODE=on`, the middleware lets requests through **without** authentication and
@@ -96,6 +106,34 @@ The seeded client secret is `stopgap-console-dev-secret` (DEV-ONLY). To exercise
 + matrix locally, set BOTH `AUTH_SECRET` and `KEYCLOAK_CLIENT_SECRET=stopgap-console-dev-secret`
 in `.env`, plus `STOPGAP_DEMO_MODE=off` — auth stays unconfigured (read-only) if either secret is
 missing. Leave them at defaults for the read-only demo.
+
+### Verifying the seeded users without a browser
+
+The realm's `realm-roles-in-id-token` mapper is what carries a user's role into the ID token that
+Auth.js reads, so it is worth checking directly when changing the realm — the browser tier (ticket
+04) proves the sign-in flow, this proves the claim shape:
+
+The command below asks Keycloak for a token and then decodes the `id_token` payload, so it prints
+the claim itself rather than an opaque string you would still have to paste somewhere to read:
+
+```bash
+curl -s -X POST http://localhost:8080/realms/stopgap/protocol/openid-connect/token -d grant_type=password -d scope=openid -d client_id=stopgap-console -d client_secret=stopgap-console-dev-secret -d username=director -d password=director-dev | jq -r .id_token | cut -d. -f2 | base64 -d 2>/dev/null | jq .realm_access.roles
+```
+
+It should print:
+
+```json
+[
+  "pharmacy_director"
+]
+```
+
+(`cut -d. -f2` takes the JWT's payload segment; `base64 -d` reports trailing-garbage on the
+unpadded base64url JWTs use, which is why its stderr is discarded — the decode itself succeeds.)
+
+The `id_token` payload must carry `realm_access.roles: ["pharmacy_director"]`. Omitting
+`scope=openid` returns an access token only and no `id_token`, which looks like a broken realm and
+is not one. Verified against `quay.io/keycloak/keycloak:26.0` for all four seeded users.
 
 > **DEV-ONLY realm.** `deploy/keycloak/realm-stopgap.json` carries a fixed confidential client
 > secret and known demo passwords (incl. an `admin`). It is imported ONLY by the dev

@@ -286,22 +286,22 @@ is never merged without its review.
 
 | # | Ticket | State | PR |
 | --- | --- | --- | --- |
-| — | Role landing route + pure list-state module (foundation for 03, 08) | parked on refill | #11 |
-| 01 | Keycloak with seeded per-role users | draft, awaiting refill | #12 |
-| 02 | Design tokens and shared primitives | not started | — |
-| 03 | Route groups and per-role landing | blocked by 01, 02 | — |
+| — | Role landing route + pure list-state module (foundation for 03, 08) | **merged** | #11 |
+| 01 | Keycloak with seeded per-role users | **merged** | #12 |
+| 02 | Design tokens and shared primitives | draft, awaiting refill | #16 |
+| 03 | Route groups and per-role landing | in progress, stacked on #16 | — |
 | 04 | Browser smoke tier | blocked by 03 | — |
-| 05 | Normalized signal contract, recall and device feeds | not started | — |
-| 06 | Risk signal and snapshot persistence | blocked by 05 | — |
-| 07 | Deterministic risk scorer | blocked by 06 | — |
+| 05 | Normalized signal contract, recall and device feeds | draft, awaiting refill | #14 |
+| 06 | Risk signal and snapshot persistence | draft, stacked on #14 | #18 |
+| 07 | Deterministic risk scorer | draft, stacked on #18 | #19 |
 | 08 | Viewer dashboard | blocked by 03, 07 | — |
-| 09 | Evidence artifacts | blocked by 06 | — |
+| 09 | Evidence artifacts | draft, stacked on #19 | #20 |
 | 10 | Compliance guard | draft, awaiting refill | #13 |
 | 11 | Pharmacist dashboard | blocked by 03, 07, 09, 10 | — |
 | 12 | Alert rules, cooldowns and delivery | blocked by 07 | — |
 | 13 | Daily brief | blocked by 07 | — |
 | 14 | Pharmacy director dashboard | blocked by 03, 12, 13 | — |
-| 15 | Catalog schema and CSV import | not started | — |
+| 15 | Catalog schema and CSV import | draft, awaiting refill | #15 |
 | 16 | Signal matching and score completion | blocked by 07, 15 | — |
 | 17 | Administrator dashboard | blocked by 03, 15, 16 | — |
 | 18 | Retention schedule | blocked by 06, 15 | — |
@@ -312,6 +312,16 @@ is never merged without its review.
 
 Recorded as they are made, so the reasoning survives the pull request that carried it.
 
+- **Blocked tickets are built on STACKED branches while CodeRabbit quota refills** (#18, #19, #20).
+  Drafts cost no review event and `auto_incremental_review` is off, so a branch cut from its
+  parent can be built, gated, locally reviewed and rebased for free; only the ready-flip spends
+  quota. The cost is stated rather than hidden: everything stacked on ticket 05 rests on a contract
+  CodeRabbit has not reviewed yet, and migration numbering now collides between the catalog branch
+  and the signal branch — whichever merges second is renumbered on rebase.
+- **The new connectors are not wired into the poll workflow yet** (#14). A normalized signal has
+  nowhere to land until ticket 06 creates `risk_signal` and its policies, and polling the
+  enforcement endpoints to discard the results would spend provider quota for no observable
+  effect. Ticket 06 owns the wiring.
 - **openFDA publishes no device-shortages endpoint, so ticket 05 delivers device RECALLS** (#14).
   The spec named a device-shortage feed. `https://api.fda.gov/device/shortages.json` returns 404 —
   verified live, not inferred from the documentation, which lists the resource without shipping it.
@@ -320,7 +330,6 @@ Recorded as they are made, so the reasoning survives the pull request that carri
   rather than silently substituted, because a reader comparing the spec to the code would otherwise
   find a feed named one thing and doing another and have no way to tell whether that was a decision
   or a mistake.
-
 - **Highest-role resolution belongs in the pure authorization module, not the middleware** (#11).
   The spec first described a single-role landing function with the rank arithmetic in middleware.
   In `authz.ts` instead, routing and permission cannot disagree about which role a multi-role user
