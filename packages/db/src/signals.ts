@@ -240,7 +240,12 @@ export interface ScoreSnapshotInput {
   signalId: string;
   score: number;
   band: string;
-  components: Record<string, number>;
+  components: Record<
+    string,
+    { points: number; max: number; available: boolean; unavailableReason?: string }
+  >;
+  /** The points this score could have earned — see the column comment on the table. */
+  reachableMax: number;
   scorerVersion: string;
   /**
    * REQUIRED, not defaulted to the clock.
@@ -273,6 +278,7 @@ export async function recordScoreSnapshots(
         score: s.score.toString(),
         band: s.band,
         components: s.components,
+        reachableMax: s.reachableMax.toString(),
         scorerVersion: s.scorerVersion,
         computedAt: s.computedAt,
       })),

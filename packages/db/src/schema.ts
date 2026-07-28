@@ -849,7 +849,24 @@ export const riskScoreSnapshots = pgTable(
      * ADR-0002 is explicit that the number is arithmetic rather than a model's opinion — which is
      * only meaningful if the arithmetic is visible.
      */
-    components: jsonb("components").$type<Record<string, number>>().notNull(),
+    components: jsonb("components")
+      .$type<
+        Record<
+          string,
+          { points: number; max: number; available: boolean; unavailableReason?: string }
+        >
+      >()
+      .notNull(),
+    /**
+     * The points this score COULD have earned, given what was known when it was computed.
+     *
+     * Stored rather than recomputed, because it moves: 65 while the catalog components are dormant,
+     * 100 once inventory and supplier data land. A reader comparing two snapshots taken either side
+     * of that change needs to know which denominator each was scored against — without it, a score
+     * that rose because more became knowable is indistinguishable from one that rose because the
+     * hazard got worse.
+     */
+    reachableMax: numeric("reachable_max", { precision: 6, scale: 2 }).notNull(),
     /** Which scorer produced it. A score without its version is not reproducible. */
     scorerVersion: text("scorer_version").notNull(),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),

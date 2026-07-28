@@ -23,6 +23,7 @@ import {
   listRoleRecipients,
   recordFeedRecords,
   recordScoreSnapshots,
+  type ScoreSnapshotInput,
   resetFeedMiss,
   upsertSignals,
   updateCaseStatus,
@@ -407,7 +408,7 @@ function scoreForPoll(
   evaluatedAt: string,
 ) {
   const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
-  const snapshots = [];
+  const snapshots: ScoreSnapshotInput[] = [];
   for (const signal of signals) {
     const signalId = idByKey.get(signal.dedupeKey);
     // A signal with no persisted row is one the upsert did not return; scoring it would attach a
@@ -429,6 +430,7 @@ function scoreForPoll(
       score: result.score,
       band: result.band,
       components: componentsToRecord(result),
+      reachableMax: result.reachableMax,
       scorerVersion: result.scorerVersion,
       computedAt: new Date(evaluatedAt),
     });
