@@ -18,6 +18,8 @@ export { planImport, type ImportPlan, type RowError } from "./import.js";
 export {
   MATCHABLE_IDENTIFIER_TYPES,
   matchSignalToItems,
+  normalizeCode,
+  normalizeName,
   type MatchCandidate,
   type MatchableIdentifierType,
   type SignalMatch,

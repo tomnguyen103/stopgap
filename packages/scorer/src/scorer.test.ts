@@ -157,7 +157,10 @@ describe("honest incompleteness", () => {
     expect(dormant.map((c) => c.name)).toEqual(["daysOnHand", "soleSource"]);
     for (const c of dormant) {
       expect(c.points).toBe(0);
-      expect(c.unavailableReason).toMatch(/catalog slice has not landed/);
+      // The reason names WHY it could not be computed for these items, not a programme milestone:
+      // once the catalog has landed, "no stock count" and "no supplier links" are still the two
+      // real answers, and the string a console prints has to stay true after ticket 16.
+      expect(c.unavailableReason).toMatch(/no (days-on-hand figure|supplier links)/);
     }
     // 65 of 100 is what can be earned today, and the result says so rather than implying 100.
     expect(result.reachableMax).toBe(COMPONENT_BUDGET.signalExposure);
@@ -236,7 +239,7 @@ describe("bands and the persisted shape", () => {
       points: 0,
       max: 20,
       available: false,
-      unavailableReason: expect.stringContaining("catalog slice"),
+      unavailableReason: expect.stringContaining("no days-on-hand figure"),
     });
   });
 

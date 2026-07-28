@@ -155,6 +155,10 @@ export type {
 export {
   BURN_WINDOW_DAYS,
   catalogExposure,
+  exposureFacts,
   matchSignalToCatalog,
+  matchSignalsToCatalog,
+  summarizeExposure,
   type CatalogExposureReading,
+  type ExposureFacts,
 } from "./matching.js";

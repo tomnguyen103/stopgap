@@ -293,6 +293,9 @@ importers:
       '@stopgap/agents':
         specifier: workspace:*
         version: link:../agents
+      '@stopgap/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@stopgap/comms':
         specifier: workspace:*
         version: link:../comms

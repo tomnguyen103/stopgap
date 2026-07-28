@@ -131,6 +131,14 @@ export interface CatalogExposure {
   daysOnHand?: number;
   /** Distinct supplier sites that can supply the item. 1 is sole-source. */
   supplierSiteCount?: number;
+  /**
+   * Which matched items have exactly one source of supply.
+   *
+   * Carried into the component's `detail`, which is what gets persisted on the snapshot: "this
+   * signal scored 12 of 15 for sole-source exposure" is not actionable, and "…because items X and
+   * Y have one supplier each" is. The scorer does not compute this — it reports it.
+   */
+  soleSourcedItemIds?: string[];
 }
 
 export interface ScoreInput {
@@ -308,7 +316,9 @@ function scoreDaysOnHand(catalog: CatalogExposure | undefined): ScoreComponent {
       points: 0,
       max: COMPONENT_BUDGET.daysOnHand,
       available: false,
-      unavailableReason: "no inventory data — the catalog slice has not landed for this facility",
+      unavailableReason:
+        "no days-on-hand figure — this facility has no stock count, or no purchasing history to " +
+        "read a burn rate from, for the matched items",
       detail: {},
     };
   }
@@ -332,7 +342,7 @@ function scoreSoleSource(catalog: CatalogExposure | undefined): ScoreComponent {
       points: 0,
       max: COMPONENT_BUDGET.soleSource,
       available: false,
-      unavailableReason: "no supplier data — the catalog slice has not landed for this facility",
+      unavailableReason: "no supplier links recorded for the matched items",
       detail: {},
     };
   }
@@ -344,7 +354,13 @@ function scoreSoleSource(catalog: CatalogExposure | undefined): ScoreComponent {
     points: round2(exposure * COMPONENT_BUDGET.soleSource),
     max: COMPONENT_BUDGET.soleSource,
     available: true,
-    detail: { supplierSiteCount: sites, exposure: round2(exposure) },
+    detail: {
+      supplierSiteCount: sites,
+      exposure: round2(exposure),
+      ...(catalog?.soleSourcedItemIds?.length
+        ? { soleSourcedItems: catalog.soleSourcedItemIds.join(", ") }
+        : {}),
+    },
   };
 }
 
