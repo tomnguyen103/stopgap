@@ -19,6 +19,9 @@ import { defineConfig } from "vitest/config";
  *  - `signals.e2e.test.ts` (tickets 06/09) needs `DATABASE_URL` to name the APPLICATION role: it
  *    asserts that the composite tenant keys refuse a cross-tenant reference, and under a role the
  *    policies do not apply to that assertion proves nothing.
+ *  - `catalog.e2e.test.ts` (ticket 15) needs `DATABASE_URL` to name the APPLICATION role, for the
+ *    same reason `rls.e2e.test.ts` does: it asserts that one tenant's catalog import is invisible
+ *    to another, and under the owner that assertion passes without proving anything.
  *
  * `fileParallelism` is off: the suites seed and tear down fixed row ids, so two files racing over
  * the same rows would produce failures that look like isolation bugs and are not.
@@ -29,6 +32,7 @@ export default defineConfig({
       "packages/db/src/rls.e2e.test.ts",
       "packages/db/src/migrations.e2e.test.ts",
       "packages/db/src/signals.e2e.test.ts",
+      "packages/db/src/catalog.e2e.test.ts",
     ],
     fileParallelism: false,
     testTimeout: 60_000,

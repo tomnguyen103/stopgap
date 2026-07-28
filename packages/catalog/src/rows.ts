@@ -19,8 +19,22 @@ export const CATALOG_KINDS = [
 ] as const;
 export type CatalogKind = (typeof CATALOG_KINDS)[number];
 
-/** Identifier systems a facility might record a product under. Several may hold at once. */
-export const IDENTIFIER_TYPES = ["ndc", "rxcui", "gtin", "hibc", "sku"] as const;
+/**
+ * Identifier systems a facility might record a product under. Several may hold at once.
+ *
+ * The set the spec's catalog story names (NDC, GTIN, UPC, SKU, MPN, FDA application number and
+ * RxCUI), plus HIBC, which device catalogs use where drug catalogs use NDC.
+ */
+export const IDENTIFIER_TYPES = [
+  "ndc",
+  "rxcui",
+  "gtin",
+  "upc",
+  "hibc",
+  "mpn",
+  "fda_app_no",
+  "sku",
+] as const;
 export type IdentifierType = (typeof IDENTIFIER_TYPES)[number];
 
 /** A blank optional cell means "not given", never the empty string. */
@@ -88,7 +102,10 @@ export const ItemRow = z.object({
   ndc: optional,
   rxcui: optional,
   gtin: optional,
+  upc: optional,
   hibc: optional,
+  mpn: optional,
+  fda_app_no: optional,
   notes: optional,
 });
 export type ItemRow = z.infer<typeof ItemRow>;
@@ -126,6 +143,19 @@ export const ProcurementRow = z.object({
   facility_code: required("facility_code"),
   sku: required("sku"),
   supplier_code: optional,
+  /**
+   * The purchase-order (or line) reference, when the file carries one.
+   *
+   * It is what makes one order distinguishable from another placed for the same item, at the same
+   * facility, on the same date — which is common once a file gives dates rather than datetimes.
+   * Without it two genuine orders are indistinguishable IN THE DATA, and the import treats them as
+   * one restatement rather than inventing a difference the file does not contain.
+   */
+  order_ref: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => v ?? ""),
   ordered_at: isoDate("ordered_at"),
   quantity: quantity("quantity"),
   unit_cost: optionalNumber("unit_cost"),
@@ -170,7 +200,10 @@ export function itemIdentifiers(row: ItemRow): { type: IdentifierType; value: st
     { type: "ndc", value: row.ndc },
     { type: "rxcui", value: row.rxcui },
     { type: "gtin", value: row.gtin },
+    { type: "upc", value: row.upc },
     { type: "hibc", value: row.hibc },
+    { type: "mpn", value: row.mpn },
+    { type: "fda_app_no", value: row.fda_app_no },
   ];
   return pairs.filter((p): p is { type: IdentifierType; value: string } => Boolean(p.value));
 }
