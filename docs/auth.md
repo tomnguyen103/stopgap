@@ -113,9 +113,23 @@ The realm's `realm-roles-in-id-token` mapper is what carries a user's role into 
 Auth.js reads, so it is worth checking directly when changing the realm — the browser tier (ticket
 04) proves the sign-in flow, this proves the claim shape:
 
+The command below asks Keycloak for a token and then decodes the `id_token` payload, so it prints
+the claim itself rather than an opaque string you would still have to paste somewhere to read:
+
 ```bash
-curl -s -X POST http://localhost:8080/realms/stopgap/protocol/openid-connect/token -d grant_type=password -d scope=openid -d client_id=stopgap-console -d client_secret=stopgap-console-dev-secret -d username=director -d password=director-dev
+curl -s -X POST http://localhost:8080/realms/stopgap/protocol/openid-connect/token -d grant_type=password -d scope=openid -d client_id=stopgap-console -d client_secret=stopgap-console-dev-secret -d username=director -d password=director-dev | jq -r .id_token | cut -d. -f2 | base64 -d 2>/dev/null | jq .realm_access.roles
 ```
+
+It should print:
+
+```json
+[
+  "pharmacy_director"
+]
+```
+
+(`cut -d. -f2` takes the JWT's payload segment; `base64 -d` reports trailing-garbage on the
+unpadded base64url JWTs use, which is why its stderr is discarded — the decode itself succeeds.)
 
 The `id_token` payload must carry `realm_access.roles: ["pharmacy_director"]`. Omitting
 `scope=openid` returns an access token only and no `id_token`, which looks like a broken realm and
