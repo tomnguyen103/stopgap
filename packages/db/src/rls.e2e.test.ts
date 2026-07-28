@@ -65,6 +65,11 @@ const ID = {
   ackB: "bbbb0007-0000-0000-0000-000000000007",
   keyA: "aaaa0008-0000-0000-0000-000000000008",
   keyB: "bbbb0008-0000-0000-0000-000000000008",
+  // Ticket 06 — normalized signals and their score snapshots.
+  signalA: "aaaa0009-0000-0000-0000-000000000009",
+  signalB: "bbbb0009-0000-0000-0000-000000000009",
+  scoreA: "aaaa0010-0000-0000-0000-000000000010",
+  scoreB: "bbbb0010-0000-0000-0000-000000000010",
 } as const;
 
 /**
@@ -81,7 +86,10 @@ const db = postgres(DATABASE_URL, { max: 2, onnotice: () => undefined });
 const maint = postgres(MAINTENANCE_URL, { max: 2, onnotice: () => undefined });
 
 /** Run `fn` in a transaction scoped to one tenant — the production `withOrgDb` shape. */
-async function asOrg<T>(orgId: string, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+async function asOrg<T>(
+  orgId: string,
+  fn: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
   return db.begin(async (tx) => {
     await tx`select set_config('app.current_org', ${orgId}, true)`;
     return fn(tx);
@@ -105,6 +113,8 @@ async function seedOrg(
     demoId: string;
     ackId: string;
     keyId: string;
+    signalId: string;
+    scoreId: string;
   },
   suffix: string,
 ) {
@@ -131,6 +141,22 @@ async function seedOrg(
     await tx`insert into audit_log (org_id, case_id, actor, action, prev_hash, hash, run_id, event_key)
              values (${orgId}, ${ids.caseId}, 'system', 'case.detected', ${"0".repeat(64)},
                      ${"h-" + suffix}, ${"run-" + suffix}, 'case.detected')`;
+
+    // Ticket 06 — one signal and one score snapshot, seeded from inside this org's own scope so
+    // the seed itself exercises WITH CHECK before any isolation assertion runs.
+    await tx`insert into risk_signals (id, org_id, source, source_id, risk_domain, entity_type,
+                                       entity_identifier, title, summary, severity, severity_score,
+                                       confidence, observed_at, published_at, last_fetched_at,
+                                       staleness, evidence_url, raw, dedupe_key, match_hints)
+             values (${ids.signalId}, ${orgId}, 'openfda_shortage', ${"src-" + suffix}, 'shortage',
+                     'drug', ${"entity-" + suffix}, ${"Signal " + suffix}, 'summary', 'high', 0.7,
+                     0.8, now(), now(), now(), 'fresh', 'https://example.test/evidence',
+                     '{}'::jsonb, ${orgId + ":openfda_shortage:src-" + suffix},
+                     '{"ndcs":[],"rxcuis":[],"names":[]}'::jsonb)`;
+    await tx`insert into risk_score_snapshots (id, org_id, signal_id, score, band, components,
+                                               scorer_version)
+             values (${ids.scoreId}, ${orgId}, ${ids.signalId}, 42.5, 'moderate', '{}'::jsonb,
+                     'test-1')`;
   });
 }
 
@@ -160,13 +186,49 @@ interface TenantTable {
 
 const TENANT_TABLES: TenantTable[] = [
   {
+    name: "risk_signals",
+    readOthers: (tx) => tx`select id from risk_signals where id = ${ID.signalB}`,
+    insertAs: (tx, org) =>
+      tx`insert into risk_signals (org_id, source, source_id, risk_domain, entity_type,
+                                   entity_identifier, title, summary, severity, severity_score,
+                                   confidence, observed_at, published_at, last_fetched_at,
+                                   staleness, evidence_url, raw, dedupe_key, match_hints)
+         values (${org}, 'openfda_shortage', ${"x-" + org.slice(0, 4)}, 'shortage', 'drug', 'x',
+                 'X', 'x', 'low', 0.1, 0.8, now(), now(), now(), 'fresh', 'https://example.test/x',
+                 '{}'::jsonb, ${org + ":openfda_shortage:x-" + org.slice(0, 4)},
+                 '{"ndcs":[],"rxcuis":[],"names":[]}'::jsonb)`,
+    readAll: (tx) => tx`select id from risk_signals`,
+    updateOthers: (tx) =>
+      tx`update risk_signals set title = 'hijacked' where id = ${ID.signalB} returning id`,
+    deleteOthers: (tx) => tx`delete from risk_signals where id = ${ID.signalB} returning id`,
+  },
+  {
+    name: "risk_score_snapshots",
+    readOthers: (tx) => tx`select id from risk_score_snapshots where id = ${ID.scoreB}`,
+    // The snapshot points at the org's OWN signal. `risk_score_snapshots` FKs `signal_id` alone,
+    // and referential integrity checks bypass RLS, so a fixture pairing one org's id with another
+    // org's signal would insert cleanly — writing a cross-tenant pairing into the suite that is
+    // supposed to prove tenants stay apart. What this row must isolate is the `org_id` column.
+    insertAs: (tx, org) =>
+      tx`insert into risk_score_snapshots (org_id, signal_id, score, band, components,
+                                           scorer_version)
+         values (${org}, ${org === ORG_A ? ID.signalA : ID.signalB}, 1, 'low', '{}'::jsonb,
+                 ${"v-" + org.slice(0, 4)})`,
+    readAll: (tx) => tx`select id from risk_score_snapshots`,
+    updateOthers: (tx) =>
+      tx`update risk_score_snapshots set band = 'hijacked' where id = ${ID.scoreB} returning id`,
+    deleteOthers: (tx) => tx`delete from risk_score_snapshots where id = ${ID.scoreB} returning id`,
+  },
+
+  {
     name: "cases",
     readOthers: (tx) => tx`select id from cases where id = ${ID.caseB}`,
     insertAs: (tx, org) =>
       tx`insert into cases (org_id, workflow_id, key, generic_name, source, source_id)
          values (${org}, ${"case-x-" + org.slice(0, 4)}, 'x', 'X', 'openfda', 'sx')`,
     readAll: (tx) => tx`select id from cases`,
-    updateOthers: (tx) => tx`update cases set last_note = 'hijacked' where id = ${ID.caseB} returning id`,
+    updateOthers: (tx) =>
+      tx`update cases set last_note = 'hijacked' where id = ${ID.caseB} returning id`,
     deleteOthers: (tx) => tx`delete from cases where id = ${ID.caseB} returning id`,
   },
   {
@@ -175,7 +237,8 @@ const TENANT_TABLES: TenantTable[] = [
     insertAs: (tx, org) =>
       tx`insert into protocols (org_id, key, title) values (${org}, ${"x-" + org.slice(0, 4)}, 'X')`,
     readAll: (tx) => tx`select id from protocols`,
-    updateOthers: (tx) => tx`update protocols set title = 'hijacked' where id = ${ID.protocolB} returning id`,
+    updateOthers: (tx) =>
+      tx`update protocols set title = 'hijacked' where id = ${ID.protocolB} returning id`,
     deleteOthers: (tx) => tx`delete from protocols where id = ${ID.protocolB} returning id`,
   },
   {
@@ -185,7 +248,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into protocol_versions (org_id, protocol_id, version, body, authored_by)
          values (${org}, ${ID.protocolA}, 99, 'x', 'agent')`,
     readAll: (tx) => tx`select id from protocol_versions`,
-    updateOthers: (tx) => tx`update protocol_versions set body = 'hijacked' where id = ${ID.versionB} returning id`,
+    updateOthers: (tx) =>
+      tx`update protocol_versions set body = 'hijacked' where id = ${ID.versionB} returning id`,
     deleteOthers: (tx) => tx`delete from protocol_versions where id = ${ID.versionB} returning id`,
   },
   {
@@ -196,7 +260,8 @@ const TENANT_TABLES: TenantTable[] = [
                                   agreement, severity_agreed, latency_ms, usd_cost, provider, model_id)
          values (${org}, 'cx', 'x', 'high', 'high', 1.0, true, 1, 0.001, 'test', 'm')`,
     readAll: (tx) => tx`select id from shadow_runs`,
-    updateOthers: (tx) => tx`update shadow_runs set model_id = 'hijacked' where id = ${ID.shadowB} returning id`,
+    updateOthers: (tx) =>
+      tx`update shadow_runs set model_id = 'hijacked' where id = ${ID.shadowB} returning id`,
     deleteOthers: (tx) => tx`delete from shadow_runs where id = ${ID.shadowB} returning id`,
   },
   {
@@ -206,7 +271,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into audit_log (org_id, actor, action, prev_hash, hash, run_id, event_key)
          values (${org}, 'system', 'x', ${"0".repeat(64)}, ${"hx-" + org.slice(0, 4)}, 'rx', 'x')`,
     readAll: (tx) => tx`select id from audit_log`,
-    updateOthers: (tx) => tx`update audit_log set hash = 'hijacked' where org_id = ${ORG_B} returning id`,
+    updateOthers: (tx) =>
+      tx`update audit_log set hash = 'hijacked' where org_id = ${ORG_B} returning id`,
     deleteOthers: (tx) => tx`delete from audit_log where org_id = ${ORG_B} returning id`,
   },
   {
@@ -215,7 +281,8 @@ const TENANT_TABLES: TenantTable[] = [
     insertAs: (tx, org) =>
       tx`insert into users (org_id, oidc_subject) values (${org}, ${"sub-x-" + org.slice(0, 4)})`,
     readAll: (tx) => tx`select id from users`,
-    updateOthers: (tx) => tx`update users set display_name = 'hijacked' where id = ${ID.userB} returning id`,
+    updateOthers: (tx) =>
+      tx`update users set display_name = 'hijacked' where id = ${ID.userB} returning id`,
     deleteOthers: (tx) => tx`delete from users where id = ${ID.userB} returning id`,
   },
   {
@@ -223,7 +290,8 @@ const TENANT_TABLES: TenantTable[] = [
     readOthers: (tx) => tx`select id from demo_runs where id = ${ID.demoB}`,
     insertAs: (tx, org) => tx`insert into demo_runs (org_id, key) values (${org}, 'x')`,
     readAll: (tx) => tx`select id from demo_runs`,
-    updateOthers: (tx) => tx`update demo_runs set key = 'hijacked' where id = ${ID.demoB} returning id`,
+    updateOthers: (tx) =>
+      tx`update demo_runs set key = 'hijacked' where id = ${ID.demoB} returning id`,
     deleteOthers: (tx) => tx`delete from demo_runs where id = ${ID.demoB} returning id`,
   },
   {
@@ -233,7 +301,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into acknowledgments (org_id, case_id, user_id, step)
          values (${org}, ${ID.caseA}, ${ID.userA}, 99)`,
     readAll: (tx) => tx`select id from acknowledgments`,
-    updateOthers: (tx) => tx`update acknowledgments set step = 42 where id = ${ID.ackB} returning id`,
+    updateOthers: (tx) =>
+      tx`update acknowledgments set step = 42 where id = ${ID.ackB} returning id`,
     deleteOthers: (tx) => tx`delete from acknowledgments where id = ${ID.ackB} returning id`,
   },
   {
@@ -243,7 +312,8 @@ const TENANT_TABLES: TenantTable[] = [
       tx`insert into api_keys (org_id, name, key_hash, key_prefix)
          values (${org}, 'x', ${"hash-x-" + org.slice(0, 4)}, 'sk_live_xxxxxx')`,
     readAll: (tx) => tx`select id from api_keys`,
-    updateOthers: (tx) => tx`update api_keys set revoked_at = now() where id = ${ID.keyB} returning id`,
+    updateOthers: (tx) =>
+      tx`update api_keys set revoked_at = now() where id = ${ID.keyB} returning id`,
     deleteOthers: (tx) => tx`delete from api_keys where id = ${ID.keyB} returning id`,
   },
 ];
@@ -278,6 +348,8 @@ beforeAll(async () => {
       demoId: ID.demoA,
       ackId: ID.ackA,
       keyId: ID.keyA,
+      signalId: ID.signalA,
+      scoreId: ID.scoreA,
     },
     "a",
   );
@@ -292,6 +364,8 @@ beforeAll(async () => {
       demoId: ID.demoB,
       ackId: ID.ackB,
       keyId: ID.keyB,
+      signalId: ID.signalB,
+      scoreId: ID.scoreB,
     },
     "b",
   );
@@ -310,6 +384,9 @@ afterAll(async () => {
       await tx`delete from api_keys where org_id = ${org}`;
       await tx`delete from cases where org_id = ${org}`;
       await tx`delete from users where org_id = ${org}`;
+      // Snapshots first: they FK the signal they scored.
+      await tx`delete from risk_score_snapshots where org_id = ${org}`;
+      await tx`delete from risk_signals where org_id = ${org}`;
     });
   }
   // `audit_anchors` takes no writes from a tenant connection at all (migration 0014), so its rows
@@ -422,8 +499,14 @@ describe("an unscoped session sees NOTHING (fail-closed)", () => {
  */
 describe("the audit chain is per-org", () => {
   it("each org sees only its own chain, so verification is a per-tenant question", async () => {
-    const a = await asOrg(ORG_A, (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`);
-    const b = await asOrg(ORG_B, (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`);
+    const a = await asOrg(
+      ORG_A,
+      (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`,
+    );
+    const b = await asOrg(
+      ORG_B,
+      (tx) => tx`select org_id, prev_hash, hash from audit_log order by id`,
+    );
     expect(a.length).toBeGreaterThan(0);
     expect(b.length).toBeGreaterThan(0);
     expect(a.every((r) => r.org_id === ORG_A)).toBe(true);
@@ -438,7 +521,10 @@ describe("the audit chain is per-org", () => {
     // Both fixtures were seeded with prev_hash = GENESIS. The point of asserting it here rather
     // than in a unit test is that org B's first row was written while org A already HAD rows: a
     // global chain would have linked it to org A's head, which is the bug per-org chaining fixes.
-    const [first] = await asOrg(ORG_B, (tx) => tx`select prev_hash from audit_log order by id limit 1`);
+    const [first] = await asOrg(
+      ORG_B,
+      (tx) => tx`select prev_hash from audit_log order by id limit 1`,
+    );
     expect(first?.prev_hash).toBe("0".repeat(64));
   });
 
@@ -475,8 +561,14 @@ describe("audit_anchors carry an org (migration 0014)", () => {
    * anchor rows, with `verifyAnchors`'s application-level org filter as the only thing in the way.
    */
   it("a tenant cannot read, rewrite or delete another tenant's anchors", async () => {
-    const headA = await asOrg(ORG_A, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
-    const headB = await asOrg(ORG_B, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
+    const headA = await asOrg(
+      ORG_A,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
+    const headB = await asOrg(
+      ORG_B,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
     // Written on the maintenance path (unscoped here) — which is how anchoring actually runs.
     // Each anchor test tags its rows with its own `sink` so the two can coexist until `afterAll`
     // tears them down; `audit_anchors.id` is a `bigserial`, so there is no deterministic id to key
@@ -509,8 +601,14 @@ describe("audit_anchors carry an org (migration 0014)", () => {
   });
 
   it("anchors from two orgs stay attributable to their own chains", async () => {
-    const headA = await asOrg(ORG_A, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
-    const headB = await asOrg(ORG_B, (tx) => tx`select id, hash from audit_log order by id desc limit 1`);
+    const headA = await asOrg(
+      ORG_A,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
+    const headB = await asOrg(
+      ORG_B,
+      (tx) => tx`select id, hash from audit_log order by id desc limit 1`,
+    );
     expect(headA[0]).toBeDefined();
     expect(headB[0]).toBeDefined();
     // `audit_anchors` takes only READS from a tenant (migration 0014); writes belong to the
