@@ -312,6 +312,15 @@ is never merged without its review.
 
 Recorded as they are made, so the reasoning survives the pull request that carried it.
 
+- **openFDA publishes no device-shortages endpoint, so ticket 05 delivers device RECALLS** (#14).
+  The spec named a device-shortage feed. `https://api.fda.gov/device/shortages.json` returns 404 —
+  verified live, not inferred from the documentation, which lists the resource without shipping it.
+  The connector therefore reads `/device/recall.json`, which does exist and answers a question the
+  platform actually asks: a recalled device is unavailable supply by another route. Recorded here
+  rather than silently substituted, because a reader comparing the spec to the code would otherwise
+  find a feed named one thing and doing another and have no way to tell whether that was a decision
+  or a mistake.
+
 - **Highest-role resolution belongs in the pure authorization module, not the middleware** (#11).
   The spec first described a single-role landing function with the rank arithmetic in middleware.
   In `authz.ts` instead, routing and permission cannot disagree about which role a multi-role user
