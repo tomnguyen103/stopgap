@@ -9,6 +9,10 @@ export default tseslint.config(
       "**/.next/**",
       "**/node_modules/**",
       "**/coverage/**",
+      // Agent scratch: `.claude/worktrees/*` holds transient checkouts of this same repository,
+      // so without this every file is linted twice and a worktree's generated `next-env.d.ts`
+      // fails the gate for code that is not in the diff.
+      ".claude/**",
       "**/*.config.js",
       "**/*.config.ts",
     ],
