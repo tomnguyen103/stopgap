@@ -101,10 +101,25 @@ CREATE POLICY cases_org_isolation ON cases
 - **`USING` vs `WITH CHECK`** — `USING` filters what a statement may *see* (and so what it may
   update or delete); `WITH CHECK` constrains what it may *write*, so an INSERT carrying a foreign
   `org_id` is refused outright (SQLSTATE `42501`) rather than accepted and hidden.
-- **`current_setting(..., true)` is fail-closed.** The two-argument form returns NULL instead of
-  raising when the variable is unset. `org_id = NULL` is NULL, NULL is not TRUE, so the row is
-  invisible. An unscoped connection therefore sees **nothing**, not everything — forgetting to
-  scope produces an empty page, never another hospital's data.
+- **`current_setting(..., true)` is fail-closed — in two different ways.** The two-argument form
+  returns NULL instead of raising when the variable was never set. `org_id = NULL` is NULL, NULL is
+  not TRUE, so the row is invisible: an unscoped connection sees **nothing**, not everything.
+
+  On a **recycled** connection the mechanism differs and the outcome is louder. `set_config(...,
+  true)` is transaction-local, so the value is reverted at commit — but reverted to the connection's
+  *session* value, and setting a custom GUC once materialises the placeholder with the **empty
+  string** as its reset value. So after any `withOrgDb`, that pooled connection reports
+  `current_setting('app.current_org', true) = ''` rather than NULL, and the policies' `''::uuid`
+  raises `22P02` mid-statement. `RESET app.current_org` does not undo it: it restores that same
+  empty string.
+
+  Both doors are closed — an error is not a leak, and no other tenant's row is returned either way —
+  and in a pooled application the second is the common one, since only the first request a
+  connection ever serves is in the never-set state. `rls.e2e.test.ts` asserts both separately rather
+  than as "errors *or* returns nothing", so a change that swapped one for the other is visible. The
+  policies are deliberately **not** wrapped in `nullif(current_setting(...), '')`: that would turn
+  the loud outcome into the quiet one, and on the path whose job is refusing to serve data it cannot
+  attribute, the crash is the better failure.
 
 ## Roles: who may bypass
 

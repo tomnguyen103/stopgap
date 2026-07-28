@@ -1,10 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { computeAuditHash, verifyAuditChain, GENESIS_HASH } from "./audit.js";
+import type { Db } from "./client.js";
 import * as schema from "./schema.js";
 import { SEED_ORG_ID } from "./orgs.js";
 
@@ -193,10 +195,17 @@ describe("migrations 0013/0014 against a database that already had rows", () => 
     // the backfill is safe and why `v1`–`v3` byte layouts must never be "tidied up" to include
     // later fields. If this ever goes red, every historical entry in every deployment has become
     // permanently unverifiable and the chain is reporting tampering that did not happen.
-    const result = await scratch.begin(async (tx) => {
-      await tx`select set_config('app.current_org', ${SEED_ORG_ID}, true)`;
-      // drizzle over the same transaction handle, so `verifyAuditChain` reads the scoped rows.
-      return verifyAuditChain(drizzle(tx as unknown as postgres.Sql, { schema }), SEED_ORG_ID);
+    // The scope is established through DRIZZLE'S transaction, not postgres.js's, and the two are
+    // not interchangeable here. `drizzle(client)` reads `client.options.parsers` when it builds a
+    // session; a postgres.js TRANSACTION handle is a tagged-template function with no `.options`
+    // on it, so wrapping one threw `Cannot read properties of undefined (reading 'parsers')` before
+    // a single row was read — the test was failing on its own scaffolding, not on the chain.
+    // Driving it from a drizzle instance over the POOL and opening the transaction with
+    // `.transaction()` also makes this the same shape production uses (`withOrgDb`).
+    const scratchDb = drizzle(scratch, { schema });
+    const result = await scratchDb.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.current_org', ${SEED_ORG_ID}, true)`);
+      return verifyAuditChain(tx as unknown as Db, SEED_ORG_ID);
     });
     expect(result.ok).toBe(true);
     expect(result.brokenAtId).toBeUndefined();

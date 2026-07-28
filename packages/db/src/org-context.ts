@@ -45,8 +45,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *
  * `fn` receives the transaction handle. Queries issued on it inherit the setting; queries issued
  * on a DIFFERENT handle (a stray `getDb()` call inside the callback) run on a DIFFERENT pooled
- * connection where `app.current_org` is unset — and, per the fail-closed note below, will see
- * nothing rather than everything. Pass the handle down.
+ * connection where `app.current_org` is unset — and, per the fail-closed note below, will not see
+ * another tenant's rows. It will do one of two things, depending on whether that connection has
+ * ever carried a scope: return NOTHING if it has not, or FAIL with `22P02` if it has. The second is
+ * the common case in a warm pool, and it is not a bug to paper over: LOCAL reverts the setting to
+ * the connection's session value, and a custom GUC set even once has the empty string there rather
+ * than nothing, so the policies cast `''::uuid` and raise. Both are closed. Pass the handle down.
  */
 export async function withOrgDb<T>(orgId: string, fn: (db: Db) => Promise<T>): Promise<T> {
   if (!UUID_RE.test(orgId)) {
