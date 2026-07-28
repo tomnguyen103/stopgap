@@ -88,6 +88,10 @@ function splitRows(text: string): CsvRow[] {
   let cell = "";
   let quoted = false;
   let line = 1;
+  // The line the CURRENT row began on. A row with an embedded newline in a quoted cell spans
+  // several lines, and the one worth reporting is where the administrator's row starts, not where
+  // it happens to end.
+  let rowStart = 1;
 
   for (let i = 0; i < input.length; i++) {
     const ch = input[i];
@@ -100,6 +104,11 @@ function splitRows(text: string): CsvRow[] {
           quoted = false;
         }
       } else {
+        // A newline INSIDE a quoted cell still advances the file's line count. Without this the
+        // line number reported for every later row is short by however many embedded newlines
+        // came before it — and a wrong line number in an error report is worse than none, because
+        // the administrator edits the row it names.
+        if (ch === "\n") line++;
         cell += ch;
       }
       continue;
@@ -112,17 +121,18 @@ function splitRows(text: string): CsvRow[] {
     } else if (ch === "\n" || ch === "\r") {
       if (ch === "\r" && input[i + 1] === "\n") i++;
       cells.push(cell);
-      rows.push({ line, cells });
+      rows.push({ line: rowStart, cells });
       cells = [];
       cell = "";
       line++;
+      rowStart = line;
     } else {
       cell += ch;
     }
   }
   if (cell !== "" || cells.length > 0) {
     cells.push(cell);
-    rows.push({ line, cells });
+    rows.push({ line: rowStart, cells });
   }
   return rows;
 }

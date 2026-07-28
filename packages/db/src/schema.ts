@@ -1109,7 +1109,11 @@ export const procurementEvents = pgTable(
      * The purchase-order reference, `''` when the file carried none.
      *
      * Part of the natural key, and NOT NULL with an empty-string default rather than nullable,
+<<<<<<< HEAD
      * because NULL is not equal to itself in a unique index â€” a nullable column here would let the
+=======
+     * because NULL is not equal to itself in a unique index — a nullable column here would let the
+>>>>>>> ce1cb09 (fix(catalog): local-review findings — a blocking import bug, and re-upload keyed on identifiers)
      * same order be imported twice and would defeat the whole point of the key.
      */
     orderRef: text("order_ref").notNull().default(""),
@@ -1119,8 +1123,13 @@ export const procurementEvents = pgTable(
   },
   (t) => [
     // An event's identity is NOT just its timestamp. Two genuine orders of the same item at the
+<<<<<<< HEAD
     // same facility on the same date are ordinary â€” and common once a file gives dates rather than
     // datetimes â€” so the purchase-order reference is part of the key. Where a file carries no
+=======
+    // same facility on the same date are ordinary — and common once a file gives dates rather than
+    // datetimes — so the purchase-order reference is part of the key. Where a file carries no
+>>>>>>> ce1cb09 (fix(catalog): local-review findings — a blocking import bug, and re-upload keyed on identifiers)
     // reference the two orders are indistinguishable in the data, and the import restates one row
     // rather than inventing a difference the file does not contain.
     uniqueIndex("procurement_events_point_uq").on(
