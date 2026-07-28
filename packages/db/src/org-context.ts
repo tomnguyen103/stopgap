@@ -73,11 +73,14 @@ export async function withOrgDb<T>(orgId: string, fn: (db: Db) => Promise<T>): P
  * that any forgotten `withOrgDb` silently produces.
  *
  * TWO THINGS ARE REQUIRED to actually read across tenants, and only one of them is the absence of
- * a scope. `app.current_org` is never set here, so `current_setting('app.current_org', true)`
- * returns NULL, every policy predicate evaluates to NULL, and NULL is not TRUE — on an ordinary
- * role the rows are INVISIBLE, not universally visible. That is the correct fail-closed direction
- * (a forgotten scope shows an empty page, not another hospital's patients), but it also means an
- * unscoped connection alone cannot do this function's job. The other half is the CONNECTION: RLS
+ * a scope. `app.current_org` is never set here, so on an ordinary role the rows are UNREACHABLE
+ * rather than universally visible: on a connection that has never carried a scope
+ * `current_setting('app.current_org', true)` returns NULL, every policy predicate evaluates to NULL,
+ * NULL is not TRUE, and the read returns nothing; on one that has, the placeholder has been
+ * materialised as the empty string and the policies' `''::uuid` raises `22P02` instead (see
+ * `withOrgDb` above, and `docs/multi-tenancy.md`). Both are the correct fail-closed direction, and
+ * both mean an unscoped connection alone cannot do this function's job. The other half is the
+ * CONNECTION: RLS
  * applies to a role, not to a statement, so the query has to arrive on a connection whose role
  * holds `BYPASSRLS` (or is a superuser). That connection is `getMaintenanceDb()`, configured by
  * `DATABASE_URL_MAINTENANCE`.

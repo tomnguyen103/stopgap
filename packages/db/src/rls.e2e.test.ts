@@ -94,26 +94,26 @@ const maint = postgres(MAINTENANCE_URL, { max: 2, onnotice: () => undefined });
 
 /**
  * A pool NO scoped transaction is ever run on, so `app.current_org` has never been set on any
- * connection in it — the state a process is in before it has served its first request.
- *
- * IT HAS TO BE A SEPARATE POOL, and the reason is the one thing about `set_config(..., true)` that
- * is easy to get wrong. LOCAL means the setting is reverted at the end of the transaction — but
- * "reverted" means restored to the value the SESSION held, and for a custom GUC that value is not
- * "undefined". The first `set_config` on a connection MATERIALISES the placeholder, and once
- * materialised its reset value is the EMPTY STRING. So after one `asOrg` commits, the very same
- * pooled connection reports `current_setting('app.current_org', true) = ''` rather than NULL, and
- * `''::uuid` inside a policy raises `22P02` instead of evaluating to NULL. `reset` does not undo
- * this either: it resets to that same empty string.
- *
- * Both outcomes are fail-closed, and both are asserted below — but they are DIFFERENT outcomes, and
- * running them over one shared pool made which one you got depend on connection-checkout order.
+ * connection in it. It is separate from `db` rather than sharing it because the two unscoped states
+ * are genuinely different (see `recycled`), and over one pool which one a test got would depend on
+ * connection-checkout order. `max: 1` because nothing here runs concurrently.
  */
-const virgin = postgres(DATABASE_URL, { max: 1, onnotice: () => undefined });
+const neverScoped = postgres(DATABASE_URL, { max: 1, onnotice: () => undefined });
 
 /**
- * A pool of exactly ONE connection, used to prove the reused-connection half of fail-closed above.
- * `max: 1` is what makes "the same connection that just ran a scoped transaction" a fact rather
- * than a hope.
+ * A pool of exactly ONE connection, deliberately dirtied by a scoped transaction before each
+ * unscoped read — because "unset" has two meanings on a pooled connection and only one of them is
+ * NULL.
+ *
+ * `set_config(..., true)` is LOCAL, so the value is reverted at the end of the transaction — but
+ * "reverted" means restored to the value the SESSION held, and for a custom GUC that is not
+ * "undefined". The first `set_config` MATERIALISES the placeholder, and once materialised its reset
+ * value is the EMPTY STRING (rollback does not undo that either, nor does `reset`). So a connection
+ * that has served one tenant reports `current_setting('app.current_org', true) = ''` rather than
+ * NULL, and the policies' `''::uuid` raises `22P02` instead of evaluating to NULL.
+ *
+ * Both are fail-closed, and `docs/multi-tenancy.md` is where that is argued at length. `max: 1` is
+ * what makes "the same connection that just ran a scoped transaction" a fact rather than a hope.
  */
 const recycled = postgres(DATABASE_URL, { max: 1, onnotice: () => undefined });
 
@@ -133,7 +133,7 @@ async function asOrg<T>(
  * `withOrgDb` produces in a freshly started process.
  */
 async function unscoped<T>(fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
-  return virgin.begin((tx) => fn(tx)) as Promise<T>;
+  return neverScoped.begin((tx) => fn(tx)) as Promise<T>;
 }
 
 /**
@@ -472,10 +472,10 @@ afterAll(async () => {
   // where it expects two and fails somewhere unrelated. Before the organizations delete: the FK.
   await maint`delete from audit_anchors where org_id in (${ORG_A}, ${ORG_B})`;
   await db`delete from organizations where id in (${ORG_A}, ${ORG_B})`;
-  await db.end({ timeout: 5 });
-  await virgin.end({ timeout: 5 });
-  await recycled.end({ timeout: 5 });
-  await maint.end({ timeout: 5 });
+  // `allSettled`, not four sequential awaits: a pool that refuses to drain within the timeout must
+  // not stop the other three from closing, or vitest hangs on the open handles rather than
+  // reporting whatever actually went wrong.
+  await Promise.allSettled([db, neverScoped, recycled, maint].map((pool) => pool.end({ timeout: 5 })));
 });
 
 describe("cross-tenant SELECT returns zero rows", () => {
@@ -559,6 +559,12 @@ describe("an unscoped session sees NOTHING (fail-closed)", () => {
       // never another hospital's data.
       const rows = await unscoped((tx) => table.readAll(tx));
       expect(rows).toHaveLength(0);
+      // And zero is the POLICY filtering, not an empty table. Without this the assertion above
+      // would stay green if the fixtures had failed to seed — the one way a test whose expected
+      // value is "nothing" can pass for the wrong reason. `maint` holds BYPASSRLS, so it sees the
+      // rows the unscoped tenant connection just could not.
+      const visibleToBypass = await maint.begin((tx) => table.readAll(tx));
+      expect(visibleToBypass.length).toBeGreaterThan(0);
     });
   }
 });
@@ -569,10 +575,9 @@ describe("an unscoped session sees NOTHING (fail-closed)", () => {
  * `withOrgDb` overwhelmingly takes in production.
  *
  * The observable outcome is NOT the one above, and pretending otherwise is what this block exists
- * to stop. `set_config(..., true)` is transaction-LOCAL, so the setting is reverted at commit —
- * but reverted to the connection's session value, and a custom GUC that has been set once no
- * longer has "unset" as its session value: it has the EMPTY STRING. `current_setting(name, true)`
- * therefore returns `''`, not NULL, and the policies' `''::uuid` raises `22P02` mid-statement.
+ * to stop: the GUC reverts to the empty string rather than to nothing, so the policies' `''::uuid`
+ * raises `22P02` mid-statement (the mechanism is on `recycled`, the argument in
+ * `docs/multi-tenancy.md`).
  *
  * That is still fail-closed — an error is not a leak, and no row of any other tenant is returned —
  * but it is a different failure, so it gets its own assertion rather than being folded into "zero
