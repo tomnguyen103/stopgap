@@ -8,6 +8,7 @@ import { mapOpenFdaResult, pollOpenFda, type OpenFdaResponse } from "./openfda.j
 import { mapAshpFeed, pollAshp, type AshpFeed } from "./ashp.js";
 import { getRxcuiByName, getTherapeuticClasses } from "./rxnorm.js";
 import { mergeRecords } from "./dedupe.js";
+import { uniqueNonBlank } from "./normalize.js";
 import { normalizeKey, normalizeStatus } from "./normalize.js";
 
 /** Build a stub fetch that returns a fixed JSON body with a given status. */
@@ -25,6 +26,12 @@ afterEach(() => {
 });
 
 describe("normalize", () => {
+  it("trims before de-duplicating, so one padded identifier is not two", () => {
+    // Feeds pad values inconsistently. Two spellings of one NDC means a catalog match that hits on
+    // one poll and misses on the next.
+    expect(uniqueNonBlank([" ABC ", "ABC", "", "   ", undefined, "DEF"])).toEqual(["ABC", "DEF"]);
+  });
+
   it("collapses dosage-form noise into a stable cross-feed key", () => {
     expect(normalizeKey("Heparin Sodium Injection")).toBe("heparin sodium");
     expect(normalizeKey("Ketorolac Tromethamine Injection")).toBe("ketorolac tromethamine");
@@ -100,7 +107,9 @@ describe("RxNorm", () => {
 describe("cross-feed dedupe", () => {
   it("merges openFDA + ASHP records for the same key into one shortage", () => {
     const openfda = mapOpenFdaResult((openfdaHeparin as OpenFdaResponse).results![0]!);
-    const [ashpHeparin] = mapAshpFeed(ashpFixture as AshpFeed).filter((r) => r.key === "heparin sodium");
+    const [ashpHeparin] = mapAshpFeed(ashpFixture as AshpFeed).filter(
+      (r) => r.key === "heparin sodium",
+    );
     const merged = mergeRecords([openfda, ashpHeparin!]);
     const heparin = merged.find((m) => m.key === "heparin sodium");
     expect(heparin?.sources.sort()).toEqual(["ashp", "openfda"]);
@@ -111,7 +120,12 @@ describe("cross-feed dedupe", () => {
 
   it("keeps a case current if any feed still lists it, even when another says resolved", () => {
     const current = mapOpenFdaResult((openfdaHeparin as OpenFdaResponse).results![0]!);
-    const resolved = { ...current, source: "ashp" as const, sourceId: "x", status: "resolved" as const };
+    const resolved = {
+      ...current,
+      source: "ashp" as const,
+      sourceId: "x",
+      status: "resolved" as const,
+    };
     const [merged] = mergeRecords([resolved, current]);
     expect(merged!.status).toBe("current");
   });
