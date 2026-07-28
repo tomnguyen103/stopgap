@@ -1,4 +1,20 @@
+/*
+  Ticket 02 — the console's design system, in three layers.
+
+  PRIMITIVE (below) is the palette this console has always had. It is NOT re-picked here: a second
+  palette beside the first is how a codebase ends up with two blues that are almost the same, and
+  every page rendered before this ticket still reads these exact variables. Nothing is renamed,
+  nothing is removed.
+
+  SEMANTIC names the JOB a colour does — "the edge of a surface", "text that recedes" — so a
+  primitive can be retuned in one place without a search for every literal that meant it.
+
+  COMPONENT is what the primitives in `app/components/ui/` actually consume. A component reads
+  `--badge-border`, never `--crit`, so a change to how badges are outlined is one line rather than
+  a sweep. Every layer aliases the layer above it; no layer introduces a colour of its own.
+*/
 :root {
+  /* ---- Primitive: the existing palette, unchanged ---------------------------------------- */
   --bg: #0b0e14;
   --panel: #141a24;
   --line: #232c3a;
@@ -10,6 +26,90 @@
   --mod: #ffd43b;
   --low: #74c0fc;
   --ok: #51cf66;
+  /* Already in use below as literals before this ticket; named here so they stop being literals. */
+  --sunken: #0d1219;
+  --row-hover: #10151d;
+  --on-accent: #06121f;
+  --tint-info: #12202c;
+  --tint-warn: #2a1e12;
+  --tint-warn-hover: #35260f;
+
+  /* ---- Semantic: what a colour is FOR ------------------------------------------------------ */
+  --surface-page: var(--bg);
+  --surface-raised: var(--panel);
+  --surface-sunken: var(--sunken);
+  --surface-hover: var(--row-hover);
+  --border-default: var(--line);
+  --text-default: var(--text);
+  --text-subtle: var(--muted);
+  --text-on-accent: var(--on-accent);
+  --interactive: var(--accent);
+  --severity-critical: var(--crit);
+  --severity-high: var(--high);
+  --severity-moderate: var(--mod);
+  --severity-low: var(--low);
+  --severity-none: var(--muted);
+  --status-ok: var(--ok);
+  --status-bad: var(--crit);
+  --surface-info: var(--tint-info);
+  --surface-warn: var(--tint-warn);
+  --surface-warn-hover: var(--tint-warn-hover);
+
+  /* ---- Scale: the spacing, radius and type steps the stylesheet was already using ---------- */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 16px;
+  --space-8: 20px;
+  --space-9: 24px;
+  --radius-pill: 999px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 15px;
+  --text-xl: 20px;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, monospace;
+  --dur-fast: 120ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- Component: what the primitives in app/components/ui/ read --------------------------- */
+  --badge-border: var(--border-default);
+  --badge-fg: inherit;
+  --badge-radius: var(--radius-pill);
+  --badge-pad-y: var(--space-1);
+  --badge-pad-x: 9px;
+
+  --button-bg: var(--interactive);
+  --button-fg: var(--text-on-accent);
+  --button-radius: var(--radius-md);
+  --button-pad-y: 9px;
+  --button-pad-x: var(--space-7);
+  --button-disabled-opacity: 0.45;
+
+  --card-bg: var(--surface-raised);
+  --card-border: var(--border-default);
+  --card-radius: var(--radius-lg);
+  --card-pad-y: 18px;
+  --card-pad-x: var(--space-8);
+
+  --input-bg: var(--surface-sunken);
+  --input-fg: var(--text-default);
+  --input-border: var(--border-default);
+  --input-radius: var(--radius-md);
+  --input-invalid-border: var(--status-bad);
+
+  --table-header-fg: var(--text-subtle);
+  --table-cell-border: var(--border-default);
+  --table-row-hover: var(--surface-hover);
+
+  --focus-ring: var(--interactive);
 }
 * { box-sizing: border-box; }
 body {
@@ -31,7 +131,7 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px; }
-tr:hover td { background: #10151d; }
+tr:hover td { background: var(--surface-hover); }
 .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
 .sev-critical { color: var(--crit); border-color: var(--crit); }
 .sev-high { color: var(--high); border-color: var(--high); }
@@ -53,20 +153,20 @@ tr:hover td { background: #10151d; }
 .nav a:hover { color: var(--text); }
 h2 { font-size: 15px; margin: 24px 0 8px; }
 .draft {
-  margin: 14px 0 0; padding: 12px 14px; background: #0d1219; border: 1px solid var(--line);
+  margin: 14px 0 0; padding: 12px 14px; background: var(--surface-sunken); border: 1px solid var(--line);
   border-radius: 8px; white-space: pre-wrap; font: 13px/1.6 ui-monospace, monospace; color: var(--text);
 }
 .sev-none { color: var(--muted); }
 
 /* Phase 4: HITL review panel. */
 .draft-input, .reason-input {
-  width: 100%; background: #0d1219; color: var(--text); border: 1px solid var(--line);
+  width: 100%; background: var(--surface-sunken); color: var(--text); border: 1px solid var(--line);
   border-radius: 8px; padding: 10px 12px; font: 13px/1.6 ui-monospace, monospace;
 }
 .reason-input { width: auto; flex: 1 1 200px; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
 button {
-  background: var(--accent); color: #06121f; border: 0; border-radius: 8px; padding: 9px 16px;
+  background: var(--accent); color: var(--text-on-accent); border: 0; border-radius: 8px; padding: 9px 16px;
   font: 600 13px/1 ui-sans-serif, system-ui, sans-serif; cursor: pointer;
 }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -87,9 +187,9 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
 /* Phase 5: demo mode. */
 .demo-banner {
   padding: 8px 24px; font-size: 13px; color: var(--text);
-  background: #12202c; border-bottom: 1px solid var(--line);
+  background: var(--surface-info); border-bottom: 1px solid var(--line);
 }
-.demo-banner.capped { background: #2a1e12; }
+.demo-banner.capped { background: var(--surface-warn); }
 .card-title { margin: 0 0 6px; }
 .sub-tight { margin: 0; }
 .sub-note { margin: 10px 0 0; }
@@ -104,10 +204,131 @@ button.danger { background: transparent; color: var(--crit); border: 1px solid v
 .active-org-badge {
   margin-left: 16px; display: inline-flex; align-items: baseline; gap: 8px;
   padding: 4px 12px; border-radius: 999px;
-  border: 1px solid var(--high); background: #2a1e12; color: var(--high);
+  border: 1px solid var(--high); background: var(--surface-warn); color: var(--high);
   font-size: 12px; white-space: nowrap;
 }
-.active-org-badge:hover { background: #35260f; }
+.active-org-badge:hover { background: var(--surface-warn-hover); }
 .active-org-badge__label { text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; }
 .active-org-badge__name { color: var(--text); font-weight: 600; }
 .active-org-badge__slug { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+
+/*
+  ---------------------------------------------------------------------------------------------
+  Ticket 02 — the shared primitives, as classes over the component-token layer.
+
+  These live BESIDE the page classes above, not instead of them. Every page written before this
+  ticket keeps rendering against the rules it was written for; a page rebuilt on the primitives
+  produces the same pixels because both ends read the same tokens. That is the whole claim of this
+  ticket, and it is why the severity classes below alias `.sev-*`'s tokens rather than restating
+  their hex values — a critical case cannot look one way through `.pill.sev-critical` and another
+  through `<Badge severity="critical">`.
+  ---------------------------------------------------------------------------------------------
+*/
+
+/* Badge — the pill, with the severity ramp as a variant rather than a second class to remember. */
+.ds-badge {
+  display: inline-block;
+  padding: var(--badge-pad-y) var(--badge-pad-x);
+  border-radius: var(--badge-radius);
+  font-size: var(--text-sm);
+  border: 1px solid var(--badge-border);
+  color: var(--badge-fg);
+}
+.ds-badge--critical { --badge-border: var(--severity-critical); --badge-fg: var(--severity-critical); }
+.ds-badge--high { --badge-border: var(--severity-high); --badge-fg: var(--severity-high); }
+.ds-badge--moderate { --badge-border: var(--severity-moderate); --badge-fg: var(--severity-moderate); }
+.ds-badge--low { --badge-border: var(--severity-low); --badge-fg: var(--severity-low); }
+.ds-badge--none { --badge-fg: var(--severity-none); }
+.ds-badge--status { --badge-fg: var(--interactive); }
+
+/*
+  Button — all eight states, because a primitive that only styles `default` is a primitive every
+  consumer has to finish themselves. `.is-*` classes duplicate each pseudo-class so the preview
+  route can show every state at once without scripting a hover.
+*/
+.ds-button {
+  background: var(--button-bg);
+  color: var(--button-fg);
+  border: 0;
+  border-radius: var(--button-radius);
+  padding: var(--button-pad-y) var(--button-pad-x);
+  font: 600 var(--text-md) / 1 var(--font-body);
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+.ds-button:hover:not(:disabled),
+.ds-button.is-hover { filter: brightness(1.08); }
+.ds-button:active:not(:disabled),
+.ds-button.is-active { filter: brightness(0.92); }
+/* Never transition the ring: a focus indicator that fades in is a focus indicator you can miss. */
+.ds-button:focus-visible,
+.ds-button.is-focus { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ds-button:disabled,
+.ds-button.is-disabled { opacity: var(--button-disabled-opacity); cursor: not-allowed; }
+.ds-button[data-state="loading"] { opacity: var(--button-disabled-opacity); cursor: progress; }
+.ds-button[data-state="error"] { background: transparent; color: var(--status-bad); box-shadow: inset 0 0 0 1px var(--status-bad); }
+.ds-button[data-state="success"] { background: transparent; color: var(--status-ok); box-shadow: inset 0 0 0 1px var(--status-ok); }
+.ds-button--danger { background: transparent; color: var(--severity-critical); box-shadow: inset 0 0 0 1px var(--severity-critical); }
+.ds-button--quiet { background: transparent; color: var(--text-subtle); box-shadow: inset 0 0 0 1px var(--border-default); }
+
+/* Card — the same panel the console has always drawn, expressed once. */
+.ds-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad-y) var(--card-pad-x);
+  margin-bottom: var(--space-7);
+}
+/* Matches the global `h2` rule exactly — a card rebuilt on the primitive must not shift. */
+.ds-card__title { margin: var(--space-9) 0 var(--space-4); font-size: var(--text-lg); }
+.ds-card__sub { color: var(--text-subtle); margin: 0 0 var(--space-8); font-size: var(--text-md); }
+
+/* Input — same eight states, same reason. */
+.ds-input {
+  width: 100%;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  padding: var(--space-5) var(--space-6);
+  font: var(--text-md) / 1.6 var(--font-mono);
+}
+.ds-input:hover:not(:disabled),
+.ds-input.is-hover { border-color: var(--text-subtle); }
+.ds-input:focus-visible,
+.ds-input.is-focus { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ds-input:disabled,
+.ds-input.is-disabled { opacity: var(--button-disabled-opacity); cursor: not-allowed; }
+.ds-input[aria-invalid="true"],
+.ds-input.is-error { border-color: var(--input-invalid-border); }
+.ds-input[data-state="success"] { border-color: var(--status-ok); }
+.ds-input--inline { width: auto; flex: 1 1 200px; }
+
+/*
+  Table — the existing element rules, scoped so a rebuilt page can opt in explicitly.
+
+  The wrapper is the one place a primitive does MORE than the class it replaces: a five-column
+  table cannot fit 375px, and left alone it pushes the whole page sideways. Scrolling the table
+  inside its own container keeps the overflow where it belongs. Desktop is unaffected — the
+  content fits, so the container never scrolls and nothing moves.
+*/
+.ds-table-scroll { overflow-x: auto; }
+.ds-table { width: 100%; border-collapse: collapse; }
+.ds-table th,
+.ds-table td { text-align: left; padding: var(--space-5) var(--space-6); border-bottom: 1px solid var(--table-cell-border); }
+.ds-table th {
+  color: var(--table-header-fg);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.ds-table tr:hover td { background: var(--table-row-hover); }
+/* Same pair `.sub` applies when it lands on a cell: recede, and drop one type step. */
+.ds-table td.is-subtle { color: var(--text-subtle); font-size: var(--text-md); }
+/* The accent-coloured lifecycle state, as `.status` has always rendered it. */
+.ds-table td.is-status { color: var(--interactive); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-button { transition-duration: 1ms; }
+}
