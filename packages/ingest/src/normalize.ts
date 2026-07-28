@@ -38,6 +38,28 @@ export function parseUsDate(value: string | undefined): string | undefined {
   return date.toISOString();
 }
 
+/**
+ * Parse openFDA's enforcement-endpoint `YYYYMMDD` date to an ISO 8601 string.
+ *
+ * A DIFFERENT format from `parseUsDate` above, from the same provider: the shortage endpoint emits
+ * `MM/DD/YYYY` and the enforcement endpoint emits `YYYYMMDD`. Kept as two explicit parsers rather
+ * than one permissive one, so a feed that changes format fails visibly instead of guessing.
+ */
+export function parseCompactDate(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(value.trim());
+  if (!m) return undefined;
+  const [, yyyy, mm, dd] = m;
+  const year = Number(yyyy);
+  const month = Number(mm);
+  const day = Number(dd);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return undefined;
+  }
+  return date.toISOString();
+}
+
 /** Stable content hash of a normalized payload, for skip-if-unchanged dedup. */
 export function contentHash(payload: unknown): string {
   return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
