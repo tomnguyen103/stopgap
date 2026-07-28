@@ -55,15 +55,18 @@ export async function generateDailyBriefs(now = new Date()): Promise<{
               title: s.title,
             })),
             currentKeys: signals.map((s) => s.dedupeKey),
-            awaitingReview: openCases.map((c) => ({ key: c.key, status: c.status })),
+            awaitingReview: openCases.map((c) => ({ key: c.key, source: c.source })),
           },
         };
       });
 
       let draft;
+      let model: string | null = null;
       let degradedReason: string | null = null;
       try {
-        draft = await draftDailyBrief({ ...input, previousKeys, since });
+        const drafted = await draftDailyBrief({ ...input, previousKeys, since });
+        draft = drafted.brief;
+        model = drafted.model;
       } catch (err) {
         // A provider outage DEGRADES the brief rather than failing it: the row still lands, saying
         // what could not be done. A director who sees nothing cannot tell "nothing happened" from
@@ -88,7 +91,7 @@ export async function generateDailyBriefs(now = new Date()): Promise<{
         const report = screenContent(
           [draft.headline, ...draft.changes, ...draft.newlyAtRisk, ...draft.needsReview].join("\n"),
         );
-        if (report.blocked) {
+        if (!report.ok) {
           degradedReason = "compliance_blocked";
           console.error(
             `[brief] compliance guard refused the brief for org ${org.id}: ` +
@@ -112,7 +115,7 @@ export async function generateDailyBriefs(now = new Date()): Promise<{
           needsReview: draft.needsReview,
           signalKeys: input.currentKeys,
           degradedReason,
-          model: null,
+          model,
           generatedAt: now,
         }),
       );
