@@ -1,4 +1,4 @@
-import { getShadowDashboard, getShadowRuns } from "../lib/data";
+import { getShadowDashboard, getShadowRuns } from "../../lib/data";
 
 export const dynamic = "force-dynamic";
 

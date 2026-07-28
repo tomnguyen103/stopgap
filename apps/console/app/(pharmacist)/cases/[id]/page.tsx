@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isDemoMode } from "@stopgap/demo";
-import { isActionAllowed } from "../../lib/authz";
-import { getCaseDetail, getWorkflowState } from "../../lib/data";
-import { resolvePrincipal } from "../../lib/principal";
+import { isActionAllowed } from "../../../lib/authz";
+import { getCaseDetail, getWorkflowState } from "../../../lib/data";
+import { resolvePrincipal } from "../../../lib/principal";
 import { EscalationPanel } from "./escalation-panel";
 import { ReviewPanel } from "./review-panel";
 

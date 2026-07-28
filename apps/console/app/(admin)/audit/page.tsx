@@ -1,5 +1,5 @@
-import { getAuditIntegrity } from "../lib/data";
-import { formatUtc } from "../lib/format";
+import { getAuditIntegrity } from "../../lib/data";
+import { formatUtc } from "../../lib/format";
 
 export const dynamic = "force-dynamic";
 

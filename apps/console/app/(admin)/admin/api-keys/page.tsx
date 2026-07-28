@@ -1,7 +1,7 @@
 import { API_SCOPES } from "@stopgap/db";
-import { getApiKeys } from "../../lib/data";
-import { isActionAllowed } from "../../lib/authz";
-import { resolvePrincipal } from "../../lib/principal";
+import { getApiKeys } from "../../../lib/data";
+import { isActionAllowed } from "../../../lib/authz";
+import { resolvePrincipal } from "../../../lib/principal";
 import { ApiKeysAdmin } from "./api-keys-admin";
 
 export const dynamic = "force-dynamic";

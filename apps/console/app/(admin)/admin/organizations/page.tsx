@@ -1,6 +1,6 @@
-import { getOrganizations } from "../../lib/data";
-import { isActionAllowed } from "../../lib/authz";
-import { resolvePrincipal } from "../../lib/principal";
+import { getOrganizations } from "../../../lib/data";
+import { isActionAllowed } from "../../../lib/authz";
+import { resolvePrincipal } from "../../../lib/principal";
 import { OrgSwitcher } from "./org-switcher";
 
 export const dynamic = "force-dynamic";

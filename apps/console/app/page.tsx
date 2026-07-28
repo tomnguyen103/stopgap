@@ -1,73 +1,25 @@
-import Link from "next/link";
-import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
-import { DemoPanel } from "./demo-panel";
-import { getCases, getFeedFreshness } from "./lib/data";
+import { redirect } from "next/navigation";
+import { roleLandingRoute } from "./lib/authz";
+import { resolvePrincipal } from "./lib/principal";
 
 export const dynamic = "force-dynamic";
 
-function sevClass(sev: string | null): string {
-  return sev ? `pill sev-${sev}` : "pill";
-}
-
-export default async function CasesPage() {
-  const [cases, feeds] = await Promise.all([getCases(), getFeedFreshness()]);
-  return (
-    <>
-      {isDemoMode() ? (
-        <DemoPanel drugs={DEMO_DRUGS.map((d) => ({ key: d.key, genericName: d.genericName }))} />
-      ) : null}
-      <div className="card">
-        <h2 className="card-title">Feeds</h2>
-        {feeds.length === 0 ? (
-          // Absence is the honest reading: no stored record means no feed has returned data
-          // to this deployment yet (ASHP without a key never does).
-          <p className="sub sub-tight">No feed data stored yet — run the poll schedule.</p>
-        ) : (
-          <p className="sub sub-tight">
-            {feeds.map((f) => (
-              <span key={f.source} className="feed-line">
-                <b>{f.source}</b> · latest stored record {new Date(f.lastFetchedAt).toLocaleString()} ·{" "}
-                {f.records} record{f.records === 1 ? "" : "s"}
-              </span>
-            ))}
-          </p>
-        )}
-      </div>
-      <h1>Shortage cases</h1>
-      <p className="sub">
-        {cases.length} case{cases.length === 1 ? "" : "s"} · durable Temporal workflows mirrored from Postgres
-      </p>
-      {cases.length === 0 ? (
-        <div className="empty">
-          No cases yet. Open one:{" "}
-          <code>pnpm --filter @stopgap/workflows start-case &quot;heparin&quot;</code>
-        </div>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Drug</th>
-              <th>Status</th>
-              <th>Severity</th>
-              <th>Source</th>
-              <th>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cases.map((c) => (
-              <tr key={c.id}>
-                <td>
-                  <Link href={`/cases/${encodeURIComponent(c.workflowId)}`}>{c.genericName}</Link>
-                </td>
-                <td className="status">{c.status}</td>
-                <td>{c.severity ? <span className={sevClass(c.severity)}>{c.severity}</span> : "—"}</td>
-                <td>{c.source}</td>
-                <td>{new Date(c.updatedAt).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </>
-  );
+/**
+ * The root sends every caller to their own dashboard (ticket 03).
+ *
+ * There is no landing page of its own, deliberately: a shared front door that everyone sees before
+ * their real surface is a page nobody owns, and it is where "which dashboard am I supposed to be
+ * on" stops being answerable.
+ *
+ * The resolution is `roleLandingRoute`, the pure function ticket 11's foundation already landed and
+ * unit-tested — the HIGHEST role wins, mirroring `rolesAllow`'s "any role may satisfy" rule so
+ * routing and permission cannot disagree about which role a multi-role user effectively holds.
+ *
+ * TOTAL, so this cannot loop: a caller with no roles at all — the anonymous demo visitor — resolves
+ * to `viewer`, whose landing route is `/overview`, and the viewer group admits every role. So the
+ * one redirect lands somewhere the guard will not bounce them out of again.
+ */
+export default async function RootPage() {
+  const principal = await resolvePrincipal();
+  redirect(roleLandingRoute(principal.roles));
 }

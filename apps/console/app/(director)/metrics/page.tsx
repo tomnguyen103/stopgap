@@ -1,6 +1,6 @@
 import { getKpis, withOrgDb } from "@stopgap/db";
-import { getShadowDashboard } from "../lib/data";
-import { resolvePrincipal } from "../lib/principal";
+import { getShadowDashboard } from "../../lib/data";
+import { resolvePrincipal } from "../../lib/principal";
 
 export const dynamic = "force-dynamic";
 
