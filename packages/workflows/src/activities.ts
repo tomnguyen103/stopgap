@@ -25,6 +25,8 @@ import {
   recordEvidence,
   recordScoreSnapshots,
   type EvidenceInput,
+  dedupeByKey,
+  recordScoreSnapshots,
   type ScoreSnapshotInput,
   resetFeedMiss,
   upsertSignals,
@@ -411,7 +413,11 @@ function scoreForPoll(
 ) {
   const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
   const snapshots: ScoreSnapshotInput[] = [];
-  for (const signal of signals) {
+  // Collapsed on the dedupe key first, exactly as `upsertSignals` collapses its own batch. Two feed
+  // records deriving the same key resolve to ONE persisted row, so scoring both would emit two
+  // snapshots sharing (org, signal, scorer version, moment) — and `ON CONFLICT DO UPDATE` refuses
+  // to touch a row twice in one statement, aborting the whole tenant's write, signals included.
+  for (const signal of dedupeByKey(signals)) {
     const signalId = idByKey.get(signal.dedupeKey);
     // A signal with no persisted row is one the upsert did not return; scoring it would attach a
     // snapshot to nothing. Skipped rather than guessed.
@@ -469,7 +475,6 @@ function evidenceForPoll(
   }
   return entries;
 }
-
 export async function pollAndOpenCases(): Promise<{
   polled: number;
   opened: number;

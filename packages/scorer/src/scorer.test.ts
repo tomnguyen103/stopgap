@@ -8,6 +8,7 @@ import {
   SOURCE_RESOLVED_FACTOR,
   bandFor,
   componentsToRecord,
+  domainRankWeight,
   freshnessFactor,
   scoreSignals,
   type ScorableSignal,
@@ -45,8 +46,23 @@ describe("determinism", () => {
     const b = signal({ dedupeKey: "b", riskDomain: "recall", severityScore: 0.95 });
     const forwards = scoreSignals({ signals: [a, b], evaluatedAt: AT });
     const backwards = scoreSignals({ signals: [b, a], evaluatedAt: AT });
-    expect(forwards.score).toBe(backwards.score);
-    expect(forwards.audit.domainRanking).toEqual(backwards.audit.domainRanking);
+    // The WHOLE result, not only the score: the audit record is what a reader compares two
+    // evaluations with, and arrival order leaking into it makes two identical exposures look
+    // different.
+    expect(forwards).toEqual(backwards);
+  });
+
+  it("emits the audited signal keys in a stable order whatever order they arrived in", () => {
+    const a = signal({ dedupeKey: "org:z-last" });
+    const b = signal({ dedupeKey: "org:a-first" });
+    expect(scoreSignals({ signals: [a, b], evaluatedAt: AT }).audit.signalKeys).toEqual([
+      "org:a-first",
+      "org:z-last",
+    ]);
+    expect(scoreSignals({ signals: [b, a], evaluatedAt: AT }).audit.signalKeys).toEqual([
+      "org:a-first",
+      "org:z-last",
+    ]);
   });
 
   it("never reads the clock — a later evaluation of an old signal scores lower, not differently", () => {
@@ -262,5 +278,42 @@ describe("bands and the persisted shape", () => {
     const empty = scoreSignals({ signals: [], evaluatedAt: AT });
     expect(empty.score).toBe(0);
     expect(empty.band).toBe("low");
+  });
+});
+
+describe("a domain the weight table does not list", () => {
+  it("still contributes, strictly less than the rank above it and strictly more than nothing", () => {
+    // The contract has two risk domains today, but `riskDomain` is a string on the way in. A third
+    // one weighted at zero would break the property the ranking is built on — each further matched
+    // domain is worth less, and worth something.
+    const two = scoreSignals({
+      signals: [
+        signal({ dedupeKey: "a", riskDomain: "shortage" }),
+        signal({ dedupeKey: "b", riskDomain: "recall" }),
+      ],
+      evaluatedAt: AT,
+    });
+    const three = scoreSignals({
+      signals: [
+        signal({ dedupeKey: "a", riskDomain: "shortage" }),
+        signal({ dedupeKey: "b", riskDomain: "recall" }),
+        signal({ dedupeKey: "c", riskDomain: "contamination" }),
+      ],
+      evaluatedAt: AT,
+    });
+    const exposure = (result: typeof two) =>
+      result.components.find((component) => component.name === "signalExposure")?.points ?? 0;
+    expect(three.audit.domainRanking).toHaveLength(3);
+    // Every domain is represented, the third one counts, and the component stays inside its budget.
+    expect(exposure(three)).toBeLessThanOrEqual(COMPONENT_BUDGET.signalExposure);
+    expect(exposure(three)).toBeGreaterThan(0);
+    expect(exposure(two)).toBeGreaterThan(0);
+  });
+
+  it("weights each further rank at half the one before it, never at zero", () => {
+    expect(domainRankWeight(0)).toBe(1);
+    expect(domainRankWeight(1)).toBe(0.5);
+    expect(domainRankWeight(2)).toBe(0.25);
+    expect(domainRankWeight(5)).toBeGreaterThan(0);
   });
 });

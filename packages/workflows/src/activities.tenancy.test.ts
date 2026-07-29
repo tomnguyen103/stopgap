@@ -55,6 +55,13 @@ vi.mock("@stopgap/db", () => ({
     return fn({});
   },
   withBypassDb: (fn: (db: unknown) => Promise<unknown>) => fn({}),
+  // The real collapse, not a stub: the poll relies on it to keep two feed records that derive one
+  // dedupe key from becoming two snapshot rows with the same conflict target.
+  dedupeByKey: <T extends { dedupeKey: string }>(signals: T[]): T[] => {
+    const byKey = new Map<string, T>();
+    for (const signal of signals) byKey.set(signal.dedupeKey, signal);
+    return [...byKey.values()];
+  },
   listOrganizations: async () => [
     { id: ORG_A, slug: "a", name: "A", createdAt: new Date() },
     { id: ORG_B, slug: "b", name: "B", createdAt: new Date() },
@@ -376,7 +383,6 @@ describe("the scheduled feed poll (no session, no case)", () => {
     expect(entry.type).toBe("provider_record");
     expect(JSON.stringify(entry)).not.toMatch(/payload|"raw"|body/i);
   });
-
   it("sweeps misses only for feeds that returned something, never for a silent one", async () => {
     await pollAndOpenCases();
     for (const sweep of missSweeps) {
