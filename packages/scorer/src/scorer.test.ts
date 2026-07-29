@@ -318,6 +318,9 @@ describe("a domain the weight table does not list", () => {
     expect(domainRankWeight(1)).toBe(0.5);
     expect(domainRankWeight(2)).toBe(0.25);
     expect(domainRankWeight(5)).toBeGreaterThan(0);
+  });
+});
+
 describe("catalog completion (ticket 16)", () => {
   const CASES: { name: string; daysOnHand?: number; supplierSiteCount?: number }[] = [
     { name: "well stocked, many suppliers", daysOnHand: 120, supplierSiteCount: 6 },
