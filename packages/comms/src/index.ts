@@ -27,7 +27,7 @@ export interface CommsMessage {
 }
 
 export interface CommsResult {
-  channel: "email" | "ehr";
+  channel: "email" | "ehr" | "chat";
   delivered: boolean;
   /** Why a send did not happen (missing credentials, transport error). */
   reason?: string;
@@ -155,6 +155,78 @@ export async function sendEhrFlag(
     // environment; an unreachable endpoint is a recorded non-delivery, not a case failure.
     return { channel: "ehr", delivered: false, reason: errorMessage(err) };
   }
+}
+
+/**
+ * Post an alert to the team's chat channel via an incoming webhook (ticket 12).
+ *
+ * Notifications have to reach people where they already are; an email nobody opens during a shift
+ * is the same as no notification. This is the second channel, and it degrades exactly like the
+ * first: a missing webhook is a RECORDED non-delivery with a reason, never a silent success. A
+ * stub that reported delivery would make "the pharmacy was told" unfalsifiable, which is the one
+ * property a notification system cannot afford to lose.
+ *
+ * The idempotency key travels in the payload rather than a header, because an incoming webhook has
+ * no dedup semantics of its own — so it is the RECEIVER's and the caller's shared reference for
+ * "this is the same notification", and the alert-event row is what actually prevents a resend.
+ */
+export async function sendChat(
+  message: Pick<CommsMessage, "idempotencyKey" | "subject" | "body"> & {
+    /**
+     * The TENANT's own webhook. Required, and deliberately not defaulted to a deployment-wide one.
+     *
+     * A single process-wide channel would put every organization's drug names, titles and scores
+     * into one room — rules, events and cooldowns are all tenant-scoped, and delivery that is not
+     * makes the isolation everywhere else beside the point. A caller with no webhook for this
+     * tenant gets a recorded non-delivery, which is the honest answer.
+     */
+    webhookUrl: string | undefined;
+  },
+): Promise<CommsResult> {
+  if (!message.webhookUrl) {
+    return {
+      channel: "chat",
+      delivered: false,
+      reason: "no chat webhook configured for this rule",
+    };
+  }
+  try {
+    const response = await fetch(message.webhookUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // A hung webhook must not hold the poll open; the send becomes a recorded non-delivery.
+      signal: AbortSignal.timeout(10_000),
+      body: JSON.stringify({
+        text: `*${escapeChatText(message.subject)}*
+${escapeChatText(message.body)}`,
+        // Not a dedup mechanism — see the doc block. It is here so a human reading the channel can
+        // tie a message back to the alert event that produced it.
+        metadata: { event_type: "stopgap_alert", event_payload: { key: message.idempotencyKey } },
+      }),
+    });
+    if (!response.ok) {
+      return {
+        channel: "chat",
+        delivered: false,
+        reason: `chat webhook responded ${String(response.status)}`,
+      };
+    }
+    return { channel: "chat", delivered: true };
+  } catch (err) {
+    return { channel: "chat", delivered: false, reason: errorMessage(err) };
+  }
+}
+
+/**
+ * Escape the three characters Slack's mrkdwn treats as markup.
+ *
+ * `JSON.stringify` already prevents breaking out of the payload, but the TEXT is feed-controlled —
+ * a product description or recall title comes from a provider — and `<http://evil|Acknowledge>`
+ * renders as a live link in the channel. Escaping is what stops a notification about a recall from
+ * being a place to put a link.
+ */
+function escapeChatText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function compact(values: (string | undefined)[]): string[] {

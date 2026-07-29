@@ -73,6 +73,11 @@ const ID = {
   // Ticket 09 — the evidence trail behind a signal.
   evidenceA: "aaaa0011-0000-0000-0000-000000000011",
   evidenceB: "bbbb0011-0000-0000-0000-000000000011",
+  // Ticket 12 — alert rules and the events they produce.
+  ruleA: "aaaa0012-0000-0000-0000-000000000012",
+  ruleB: "bbbb0012-0000-0000-0000-000000000012",
+  alertA: "aaaa0013-0000-0000-0000-000000000013",
+  alertB: "bbbb0013-0000-0000-0000-000000000013",
 } as const;
 
 /**
@@ -119,6 +124,8 @@ async function seedOrg(
     signalId: string;
     scoreId: string;
     evidenceId: string;
+    ruleId: string;
+    alertId: string;
   },
   suffix: string,
 ) {
@@ -166,6 +173,13 @@ async function seedOrg(
              values (${ids.evidenceId}, ${orgId}, ${ids.signalId}, 'provider_record',
                      'openfda_shortage', ${"src-" + suffix}, 'https://example.test/evidence',
                      ${"hash-" + suffix}, now())`;
+    await tx`insert into alert_rules (id, org_id, name, min_severity, cooldown_minutes, channels)
+             values (${ids.ruleId}, ${orgId}, ${"rule-" + suffix}, 'high', 60,
+                     '["email"]'::jsonb)`;
+    await tx`insert into alert_events (id, org_id, rule_id, outcome, matched_count, matched_keys,
+                                       deliveries, idempotency_key, fired_at)
+             values (${ids.alertId}, ${orgId}, ${ids.ruleId}, 'fired', 1, '[]'::jsonb, '[]'::jsonb,
+                     ${"idem-" + suffix}, now())`;
   });
 }
 
@@ -207,6 +221,33 @@ const TENANT_TABLES: TenantTable[] = [
     updateOthers: (tx) =>
       tx`update signal_evidence set origin_url = 'hijacked' where id = ${ID.evidenceB} returning id`,
     deleteOthers: (tx) => tx`delete from signal_evidence where id = ${ID.evidenceB} returning id`,
+  },
+  {
+    name: "alert_rules",
+    readOthers: (tx) => tx`select id from alert_rules where id = ${ID.ruleB}`,
+    insertAs: (tx, org) =>
+      tx`insert into alert_rules (org_id, name, min_severity, cooldown_minutes, channels)
+         values (${org}, ${"x-" + org.slice(0, 4)}, 'high', 60, '["email"]'::jsonb)`,
+    readAll: (tx) => tx`select id from alert_rules`,
+    updateOthers: (tx) =>
+      tx`update alert_rules set enabled = false where id = ${ID.ruleB} returning id`,
+    deleteOthers: (tx) => tx`delete from alert_rules where id = ${ID.ruleB} returning id`,
+  },
+  {
+    name: "alert_events",
+    readOthers: (tx) => tx`select id from alert_events where id = ${ID.alertB}`,
+    insertAs: (tx, org) =>
+      // The org's OWN rule, so a refusal is the POLICY refusing and not the composite foreign key
+      // complaining that org B has no rule `ruleA`. Testing the wrong constraint passes for the
+      // wrong reason.
+      tx`insert into alert_events (org_id, rule_id, outcome, matched_count, matched_keys,
+                                   deliveries, idempotency_key, fired_at)
+         values (${org}, ${org === ORG_A ? ID.ruleA : ID.ruleB}, 'fired', 1, '[]'::jsonb,
+                 '[]'::jsonb, ${"x-" + org.slice(0, 4)}, now())`,
+    readAll: (tx) => tx`select id from alert_events`,
+    updateOthers: (tx) =>
+      tx`update alert_events set outcome = 'hijacked' where id = ${ID.alertB} returning id`,
+    deleteOthers: (tx) => tx`delete from alert_events where id = ${ID.alertB} returning id`,
   },
 
   {
@@ -375,6 +416,8 @@ beforeAll(async () => {
       signalId: ID.signalA,
       scoreId: ID.scoreA,
       evidenceId: ID.evidenceA,
+      ruleId: ID.ruleA,
+      alertId: ID.alertA,
     },
     "a",
   );
@@ -392,6 +435,8 @@ beforeAll(async () => {
       signalId: ID.signalB,
       scoreId: ID.scoreB,
       evidenceId: ID.evidenceB,
+      ruleId: ID.ruleB,
+      alertId: ID.alertB,
     },
     "b",
   );
@@ -412,6 +457,9 @@ afterAll(async () => {
       await tx`delete from users where org_id = ${org}`;
       // Snapshots first: they FK the signal they scored.
       await tx`delete from signal_evidence where org_id = ${org}`;
+      // Events first: they FK the rule that produced them.
+      await tx`delete from alert_events where org_id = ${org}`;
+      await tx`delete from alert_rules where org_id = ${org}`;
       await tx`delete from risk_score_snapshots where org_id = ${org}`;
       await tx`delete from risk_signals where org_id = ${org}`;
     });

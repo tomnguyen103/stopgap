@@ -97,6 +97,10 @@ vi.mock("@stopgap/db", () => ({
     missSweeps.push({ orgId, sources });
     return 0;
   },
+  listAlertRules: async () => [],
+  lastFiredByRule: async () => ({}),
+  recordAlertEvents: async () => [],
+  recordAlertDeliveries: async () => undefined,
   isUserInOrg: async () => true,
   assertMaintenanceRoleBypassesRls: async () => undefined,
   appendAudit: async (_db: unknown, entry: Record<string, unknown>) => {
