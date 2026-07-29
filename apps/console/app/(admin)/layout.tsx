@@ -14,6 +14,7 @@ import { requireGroup } from "../lib/group-guard";
 
 const NAV: NavLink[] = [
   { href: "/admin", label: "Setup" },
+  { href: "/admin/catalog", label: "Catalog" },
   { href: "/admin/users", label: "Users" },
   { href: "/admin/api-keys", label: "API keys" },
   { href: "/admin/organizations", label: "Organizations" },

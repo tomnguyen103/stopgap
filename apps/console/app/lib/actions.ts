@@ -4,8 +4,10 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { isRole } from "@stopgap/core";
+import { CATALOG_KINDS, planImport } from "@stopgap/catalog";
 import {
   appendAudit,
+  importCatalog,
   createAlertRule,
   updateAlertRule,
   approveProtocolVersion,
@@ -266,6 +268,52 @@ export async function updateAlertRuleAction(ruleId: unknown, input: unknown): Pr
     `alert_rule.updated.${id}.${String(row.updatedAt.getTime())}`,
   );
   revalidatePath("/alerts");
+}
+
+/**
+ * Import a catalog file (ticket 17).
+ *
+ * Admin-gated through `manage_users` — the same rank that already governs who may change what this
+ * deployment knows about itself. A catalog upload rewrites the facts every score is computed from,
+ * so it is not a pharmacist's button.
+ *
+ * The plan is built and REFUSED as a whole when any row fails: a partially-applied catalog is a
+ * facility that believes it stocks things it does not. Every failing row comes back with its line
+ * so the file can be corrected, rather than one error at a time.
+ */
+export async function importCatalogAction(
+  kind: unknown,
+  csv: unknown,
+): Promise<{ ok: true; kind: string; rowsApplied: number } | { ok: false; errors: string[] }> {
+  assertMutationAllowed("Importing a catalog file");
+  const principal = await requireRole("manage_users");
+  const parsedKind = z.enum(CATALOG_KINDS).parse(kind);
+  // Bounded before it is parsed: an unbounded upload is memory the request did not ask permission
+  // for, and a catalog file that large is a mistake rather than a facility.
+  const text = z.string().max(8_000_000).parse(csv);
+  const plan = planImport(parsedKind, text);
+  if (!plan.ok) {
+    return {
+      ok: false,
+      errors: plan.errors.map((error) =>
+        error.column === undefined
+          ? `Line ${String(error.line)}: ${error.reason}`
+          : `Line ${String(error.line)}, column "${error.column}": ${error.reason}`,
+      ),
+    };
+  }
+  const result = await importCatalog(principal.orgId, plan);
+  await recordPrivilegedAudit(
+    principal,
+    "catalog.imported",
+    // The SHAPE of the import, never its contents: the audit chain records that a catalog was
+    // replaced and how much of it, not the facility's product list.
+    { kind: result.kind, rowsApplied: result.rowsApplied },
+    `catalog.imported.${result.kind}.${String(Date.now())}`,
+  );
+  revalidatePath("/admin/catalog");
+  revalidatePath("/admin");
+  return { ok: true, kind: result.kind, rowsApplied: result.rowsApplied };
 }
 
 const roleSchema = z.string().refine(isRole, "unknown role");
