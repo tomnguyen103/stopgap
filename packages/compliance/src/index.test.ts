@@ -14,7 +14,10 @@ describe("screenContent — protected information", () => {
     ["a national identifier", "SSN 123-45-6789 on file."],
     ["an unpunctuated labelled national identifier", "SSN 123456789 on file."],
     ["a space-separated labelled national identifier", "SSN 123 45 6789 on file."],
-    ["a spelled-out national identifier", "Social Security Number: 123-45-6789 on file."],
+    // Spelled out AND unpunctuated, so the label branch is what carries the match — the
+    // hyphenated core would be caught with no label at all.
+    ["a spelled-out national identifier", "Social Security Number: 123456789 on file."],
+    ["an abbreviated spelled-out national identifier", "Social Security No. 123456789 on file."],
     ["a phone number", "Call the family at 415-555-0134."],
     ["an email address", "Forward to j.doe@example-hospital.org."],
   ])("detects %s", (_label, text) => {
@@ -47,6 +50,20 @@ describe("screenContent — clinical boundary", () => {
       "The patient's prognosis improved once the alternative arrived.",
       "diagnosis_or_treatment",
     ],
+    // The person and the clinical term are one statement about one person however they are
+    // ordered, so each direction is pinned: an anchor that only reads left-to-right lets the
+    // commonest clinical phrasing of all — the passive — straight through.
+    [
+      "a passive diagnosis",
+      "The patient was diagnosed with sepsis before the substitution.",
+      "diagnosis_or_treatment",
+    ],
+    [
+      "a clinician-subject diagnosis",
+      "The clinician diagnosed the patient with sepsis.",
+      "diagnosis_or_treatment",
+    ],
+    ["a prognosis about a person", "Prognosis is poor for the patient.", "diagnosis_or_treatment"],
     [
       "treatment language",
       "Prescribed for the patient at 2 g every eight hours.",

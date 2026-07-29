@@ -20,7 +20,7 @@ export interface BriefInput {
   current: BriefSignal[];
   /** Dedupe keys present in the previous brief's window, for the "what changed" half. */
   previousKeys: string[];
-  /** Cases sitting in a state that needs a human. */
+  /** Cases sitting in a state that needs a human, LONGEST-WAITING FIRST — see `LISTED_REVIEW_CASES`. */
   awaitingReview: { key: string; status: string }[];
   /** The date of the previous brief, or undefined for the first one. */
   since?: string;
@@ -38,6 +38,10 @@ const LISTED_SIGNALS = 25;
  * The same bound for cases awaiting a human. Without it one tenant's backlog decides the prompt
  * size: a few hundred parked cases push the request past the provider's context limit, and a day
  * that had more to say than usual is exactly the day the brief comes back degraded.
+ *
+ * The cap keeps the LONGEST-WAITING cases, which is why `awaitingReview` arrives in that order.
+ * Cutting from that end instead would hide precisely the cases the section exists to surface —
+ * a case parked for three weeks needs a human more than one opened this morning.
  */
 const LISTED_REVIEW_CASES = 25;
 
@@ -46,9 +50,14 @@ const LISTED_REVIEW_CASES = 25;
  * the XML-special characters escaped so no value can close the boundary early. A signal's `entity`
  * and `title` are feed content nobody here wrote, and a case key is derived from one — interpolating
  * them bare puts attacker-chosen text where the model reads it as instructions (CWE-74/1427).
+ *
+ * The escaping happens HERE rather than at each call site, matching `formatRecordPrompt`: a boundary
+ * that depends on every caller remembering to escape is a boundary that holds until someone adds a
+ * field. The separators the callers interleave (`·`, `—`, a score) contain no XML-special character,
+ * so escaping the assembled line is the same thing as escaping each value in it.
  */
 function record(fields: string): string {
-  return `<record>${fields}</record>`;
+  return `<record>${escapeRecordValue(fields)}</record>`;
 }
 
 /**
@@ -73,13 +82,10 @@ export async function draftDailyBrief(input: BriefInput): Promise<DraftedBrief> 
   const goneCount = input.previousKeys.filter((k) => !currentKeys.has(k)).length;
   const line = (s: BriefSignal) =>
     `- ${record(
-      `${escapeRecordValue(s.entity)} · ${escapeRecordValue(s.domain)} · ` +
-        `${escapeRecordValue(s.severity)} · ` +
-        `${s.score === undefined ? "not scored yet" : `score ${String(s.score)}`} — ` +
-        `${escapeRecordValue(s.title)}`,
+      `${s.entity} · ${s.domain} · ${s.severity} · ` +
+        `${s.score === undefined ? "not scored yet" : `score ${String(s.score)}`} — ${s.title}`,
     )}`;
-  const caseLine = (c: { key: string; status: string }) =>
-    `- ${record(`${escapeRecordValue(c.key)} · ${escapeRecordValue(c.status)}`)}`;
+  const caseLine = (c: { key: string; status: string }) => `- ${record(`${c.key} · ${c.status}`)}`;
 
   const { object, meta } = await generateStructured({
     schema: DailyBrief,

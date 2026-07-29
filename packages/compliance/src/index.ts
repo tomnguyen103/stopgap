@@ -68,6 +68,18 @@ interface Rule {
 }
 
 /**
+ * The `diagnosis_language` rule keys on two things at once — a clinical term AND a person — in
+ * either order, so its fragments are named rather than spelled twice inside one literal.
+ */
+const CLINICAL_TERM = String.raw`diagnos(?:is|es|ed|e|ing)|prognosis|comorbidit(?:y|ies)`;
+/**
+ * ONE person: a demonstrative or a possessive. Deliberately not a bare "patients" — label prose
+ * says "in patients with renal impairment", and pairing that with a clinical term would fire the
+ * rule on the monograph vocabulary the whole category exists to let through.
+ */
+const ONE_PERSON = String.raw`(?:this|the)\s+patient(?:'s|’s)?|their|his|her`;
+
+/**
  * The rule table.
  *
  * Every pattern is `g`-flagged so all occurrences are reported. (`String.prototype.matchAll`
@@ -104,8 +116,11 @@ const RULES: readonly Rule[] = [
   {
     category: "phi_identifier",
     rule: "national_identifier",
+    // The word boundary sits INSIDE each label alternative, never after it: `no.` and `#` end in a
+    // non-word character, so a boundary demanded after them can never hold and `Social Security
+    // No. 123456789` would slip through the very rule that names it.
     pattern:
-      /\b(?:\d{3}-\d{2}-\d{4}|(?:SSN|social security (?:number|no\.?|#))\b[\s:#-]*\d{3}[\s-]?\d{2}[\s-]?\d{4})\b/gi,
+      /\b\d{3}-\d{2}-\d{4}\b|\b(?:SSN\b|social security (?:number\b|no\.?|#))[\s:#-]*\d{3}[\s-]?\d{2}[\s-]?\d{4}\b/gi,
   },
   // Punctuated forms only. A space-separated `415 555 0134` is indistinguishable from a lot number
   // or a pack quantity in product prose, and this rule is not worth a false positive on either.
@@ -152,11 +167,22 @@ const RULES: readonly Rule[] = [
   // `diagnosis`/`comorbidity` is monograph vocabulary — "comorbidities associated with reduced
   // renal function", "differential diagnosis codes" — so an unanchored pattern fires on the
   // permitted surface rather than on clinical advice about someone.
+  //
+  // The anchor and the term appear in either order and need not be adjacent — "the patient was
+  // diagnosed", "the clinician diagnosed the patient", "prognosis is poor for the patient" are all
+  // one clinical statement about one person. The window is same-sentence and short so the pairing
+  // stays a pairing rather than "a person is mentioned somewhere in this paragraph".
   {
     category: "diagnosis_or_treatment",
     rule: "diagnosis_language",
-    pattern:
-      /\b(?:patients?\s+(?:who\s+(?:are|were)\s+|(?:are|were|been)\s+)?diagnosed|diagnos(?:e|ing)\s+(?:this|the|a)\s+patient|(?:this|the)\s+patient(?:'s|’s)?\s+(?:diagnosis|prognosis|comorbidit(?:y|ies))|(?:their|his|her)\s+(?:diagnosis|prognosis|comorbidit(?:y|ies)))\b/gi,
+    pattern: new RegExp(
+      // The bare plural is allowed ONLY tight against the verb: "patients diagnosed with sepsis"
+      // is clinical, while "in patients with ..." near a stray "diagnosis" is label text.
+      String.raw`\bpatients?\s+(?:who\s+)?(?:(?:is|are|was|were|has|have|had)\s+)?(?:been\s+)?(?:recently\s+)?diagnosed\b` +
+        String.raw`|\b(?:${ONE_PERSON})\b[^.\n]{0,40}?\b(?:${CLINICAL_TERM})\b` +
+        String.raw`|\b(?:${CLINICAL_TERM})\b[^.\n]{0,40}?\b(?:this|the|a)\s+patients?\b`,
+      "gi",
+    ),
   },
   {
     category: "diagnosis_or_treatment",

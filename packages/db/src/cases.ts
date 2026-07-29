@@ -1,5 +1,5 @@
 import type { CaseStatus, Severity, ShortageRecord } from "@stopgap/core";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { cases, type CaseRow } from "./schema.js";
 
@@ -244,7 +244,11 @@ export async function resetFeedMiss(db: Db, orgId: string, caseId: string): Prom
   await db.update(cases).set({ feedMissCount: 0 }).where(and(eq(cases.orgId, orgId), eq(cases.id, caseId)));
 }
 
-/** Cases in this tenant that are waiting on a person, newest first. */
+/**
+ * Cases in this tenant that are waiting on a person, LONGEST-WAITING FIRST. Its one consumer — the
+ * daily brief — bounds the list, and the case parked for three weeks is the one that needs a human
+ * more than the one opened this morning.
+ */
 export async function listCasesAwaitingHuman(
   db: Db,
   orgId: string,
@@ -253,5 +257,5 @@ export async function listCasesAwaitingHuman(
     .select({ key: cases.key, status: cases.status })
     .from(cases)
     .where(and(eq(cases.orgId, orgId), inArray(cases.status, [...AWAITING_HUMAN_STATUSES])))
-    .orderBy(desc(cases.openedAt));
+    .orderBy(asc(cases.openedAt));
 }
