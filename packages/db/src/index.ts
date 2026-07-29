@@ -116,7 +116,6 @@ export {
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export {
-  dedupeByKey,
   listAlertRules,
   createAlertRule,
   updateAlertRule,
@@ -129,6 +128,7 @@ export {
   type AlertEventInput,
 } from "./alerts.js";
 export {
+  dedupeByKey,
   upsertSignals,
   bumpSignalFeedMiss,
   listSignals,
