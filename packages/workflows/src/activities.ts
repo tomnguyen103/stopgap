@@ -7,6 +7,7 @@ import {
   approveProtocolVersion,
   assertMaintenanceRoleBypassesRls,
   bumpFeedMiss,
+  bumpSignalFeedMiss,
   draftProtocolVersion,
   getApprovedProtocol,
   getCaseByKey,
@@ -21,7 +22,10 @@ import {
   listOpenMonitoringCases,
   listRoleRecipients,
   recordFeedRecords,
+  recordScoreSnapshots,
+  type ScoreSnapshotInput,
   resetFeedMiss,
+  upsertSignals,
   updateCaseStatus,
   upsertCaseForRecord,
   withBypassDb,
@@ -31,7 +35,20 @@ import {
 } from "@stopgap/db";
 import { sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { incrementCounter } from "@stopgap/observability";
-import { contentHash, mergeRecords, pollAshp, pollOpenFda } from "@stopgap/ingest";
+import { componentsToRecord, scoreSignals, type ScorableSignal } from "@stopgap/scorer";
+import {
+  ashpShortageConnector,
+  contentHash,
+  mapAshpShortage,
+  mapOpenFdaResult,
+  mergeRecords,
+  openFdaDeviceRecallConnector,
+  openFdaDrugRecallConnector,
+  openFdaShortageConnector,
+  type AshpEntry,
+  type NormalizedSignal,
+  type OpenFdaResult,
+} from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, markResolved, startCase } from "./client.js";
 import { diffResolutions } from "./feed-resolution.js";
@@ -79,7 +96,6 @@ function currentRunId(): string | undefined {
   return Context.current().info.workflowExecution?.runId;
 }
 
-
 /** Persist a newly detected case and open the audit chain. Idempotent (upsert). */
 export async function recordDetected(input: CaseInput): Promise<void> {
   await withOrgDb(input.orgId, async (db) => {
@@ -122,7 +138,8 @@ export async function persistStatus(
       orgId,
       caseId: row?.id,
       actor: statusActor,
-      actorUserId: (detail.actorUserId as string | undefined) ?? syntheticUserIdForLabel(statusActor),
+      actorUserId:
+        (detail.actorUserId as string | undefined) ?? syntheticUserIdForLabel(statusActor),
       action: `case.${status}`,
       detail,
       runId: currentRunId(),
@@ -295,9 +312,152 @@ export async function recordDecision(
  * must resolve its own org before `app.current_org` can be set), and this is precisely the
  * deployment-wide job it exists for.
  */
-export async function pollAndOpenCases(): Promise<{ polled: number; opened: number; resolved: number }> {
-  const [openFda, ashp] = await Promise.all([pollOpenFda(), pollAshp()]);
-  const fetched = [...openFda, ...ashp];
+/**
+ * One adopted feed, with its raw type erased.
+ *
+ * A registry rather than four named constants threaded through four places: adding a fifth feed
+ * was otherwise an edit to the fetch block, the raw-payload type, the normalizer and the
+ * polled-source list — four chances to add a feed that fetches but never persists. Methods rather
+ * than function properties, so a `Connector<OpenFdaResult>` satisfies it without a cast.
+ */
+interface PollableFeed {
+  readonly source: string;
+  fetch(): Promise<unknown[]>;
+  normalize(raw: never, context: { orgId: string; fetchedAt: string }): NormalizedSignal;
+}
+
+/**
+ * Every feed the poll reads, and whether its failure may stop the poll.
+ *
+ * The shortage feeds are `required`: a poll that silently opened no cases would be worse than a
+ * failed one, and that is the behaviour this activity has always had. Recalls are additive to a
+ * poll that already worked, so a recall endpoint being down must not stop this deployment
+ * noticing shortages.
+ */
+const POLLED_FEEDS: { feed: PollableFeed; required: boolean }[] = [
+  { feed: openFdaShortageConnector, required: true },
+  { feed: ashpShortageConnector, required: true },
+  { feed: openFdaDrugRecallConnector, required: false },
+  { feed: openFdaDeviceRecallConnector, required: false },
+];
+
+interface FeedResult {
+  source: string;
+  rows: unknown[];
+  normalize: PollableFeed["normalize"];
+  /**
+   * Whether this poll can tell this feed apart from a broken one.
+   *
+   * TRUE only when the fetch resolved AND returned at least one row. A feed that returned nothing
+   * is indistinguishable IN THE DATA from a feed that failed quietly — ASHP answers `[]` with no
+   * auth key, and openFDA answers 404 for an empty result set exactly as it does for a bad path —
+   * so its existing signals are left out of the miss sweep. The cost is that a genuinely emptied
+   * feed never retires its signals by absence; the alternative is retiring live recalls because a
+   * key expired, and between those two the conservative reading is the one that keeps the case
+   * open.
+   */
+  attested: boolean;
+}
+
+/** Fetch every feed once for the deployment. Required feeds still throw; additive ones do not. */
+async function fetchFeeds(): Promise<FeedResult[]> {
+  return Promise.all(
+    POLLED_FEEDS.map(async ({ feed, required }) => {
+      try {
+        const rows = await feed.fetch();
+        return { source: feed.source, rows, normalize: feed.normalize, attested: rows.length > 0 };
+      } catch (err) {
+        if (required) throw err;
+        incrementCounter("stopgap_feed_fetch_failures_total");
+        console.error(
+          `[poll] ${feed.source} fetch failed: ${err instanceof Error ? err.message : String(err)}. ` +
+            "The poll continues without that feed. Its existing signals are left alone - they are " +
+            "NOT counted as missing, because an outage is not the feed saying the hazard ended.",
+        );
+        return { source: feed.source, rows: [], normalize: feed.normalize, attested: false };
+      }
+    }),
+  );
+}
+
+/**
+ * Turn one deployment-wide fetch into ONE tenant's signals.
+ *
+ * Pure: no network, no database, no clock — the fetch time comes from the caller, so every org in
+ * one poll shares a `lastFetchedAt` and the whole poll stays reproducible.
+ */
+function normalizeForOrg(
+  feeds: FeedResult[],
+  context: { orgId: string; fetchedAt: string },
+): NormalizedSignal[] {
+  return feeds.flatMap((f) => f.rows.map((row) => f.normalize(row as never, context)));
+}
+
+/**
+ * Score each signal this poll wrote, one snapshot apiece.
+ *
+ * PER SIGNAL rather than per facility, deliberately and temporarily: until ticket 16 matches
+ * signals to catalog items there is no item to aggregate onto, and inventing one would mean
+ * guessing which signals belong together — the exact judgement the matching layer exists to make.
+ * The catalog components therefore go unsupplied here, which is why every snapshot this poll
+ * writes reports them as UNAVAILABLE rather than as zero.
+ */
+function scoreForPoll(
+  signals: NormalizedSignal[],
+  persisted: { id: string; dedupeKey: string }[],
+  evaluatedAt: string,
+) {
+  const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
+  const snapshots: ScoreSnapshotInput[] = [];
+  for (const signal of signals) {
+    const signalId = idByKey.get(signal.dedupeKey);
+    // A signal with no persisted row is one the upsert did not return; scoring it would attach a
+    // snapshot to nothing. Skipped rather than guessed.
+    if (!signalId) continue;
+    const scorable: ScorableSignal = {
+      dedupeKey: signal.dedupeKey,
+      source: signal.source,
+      riskDomain: signal.riskDomain,
+      severity: signal.severity,
+      severityScore: signal.severityScore,
+      confidence: signal.confidence,
+      publishedAt: signal.publishedAt,
+      sourceResolved: signal.sourceResolved,
+    };
+    const result = scoreSignals({ signals: [scorable], evaluatedAt });
+    snapshots.push({
+      signalId,
+      score: result.score,
+      band: result.band,
+      components: componentsToRecord(result),
+      reachableMax: result.reachableMax,
+      scorerVersion: result.scorerVersion,
+      computedAt: new Date(evaluatedAt),
+    });
+  }
+  return snapshots;
+}
+
+export async function pollAndOpenCases(): Promise<{
+  polled: number;
+  opened: number;
+  resolved: number;
+}> {
+  // ONE fetch per feed for the whole deployment, then N normalizations — the same division the
+  // rest of this activity already makes. The raw payloads serve BOTH consumers: the legacy
+  // `ShortageRecord` path that opens cases, and the normalized-signal path (ticket 06) that
+  // persists per tenant. Fetching twice for the two shapes would double every provider call to
+  // store the same bytes.
+  const feeds = await fetchFeeds();
+  const rowsOf = (source: string) => feeds.find((f) => f.source === source)?.rows ?? [];
+  const openFdaRaw = rowsOf(openFdaShortageConnector.source) as OpenFdaResult[];
+  const ashpRaw = rowsOf(ashpShortageConnector.source) as AshpEntry[];
+  // Only the feeds this poll can vouch for. See `FeedResult.attested`.
+  const attestedSources = feeds.filter((f) => f.attested).map((f) => f.source);
+  const fetched = [
+    ...openFdaRaw.map(mapOpenFdaResult),
+    ...ashpRaw.map((entry) => mapAshpShortage(entry.key, entry.shortage)),
+  ];
   // Persist what the feeds returned before deciding what to do with it: `feed_records` is the
   // provenance trail behind every case, and the only thing that can answer "when did this
   // deployment last hear from openFDA" (the console's freshness panel). Resolved records are
@@ -336,6 +496,43 @@ export async function pollAndOpenCases(): Promise<{ polled: number; opened: numb
       // across a `startCase` RPC would pin a pooled connection for the duration of a network round
       // trip per record, which is the same starvation problem in a different shape — a transaction
       // is for the database work, not for the whole iteration.
+      // Ticket 06 — this tenant's INTERPRETATION of what the feeds returned. Normalized per org
+      // (the dedupe key is org-scoped), written inside this org's own transaction, and never
+      // shared: two hospitals reading the same recall hold genuinely different signals.
+      const signals = normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp });
+      // ONE TENANT'S SIGNAL WRITE MUST NOT STOP THE POLL — the containment the resolution loop
+      // below already applies per case, and the reason `fetchFeeds` contains an additive feed's
+      // failure. Unguarded, one org's write error means every LATER org gets no case opened this
+      // cycle, which reads in the runbook as "the poller stopped".
+      try {
+        await withOrgDb(org.id, async (db) => {
+          const persisted = await upsertSignals(db, org.id, signals);
+          // The FEED-ABSENT half, kept distinct from `sourceResolved`: a signal the poll did not
+          // return has said nothing about whether the hazard is over.
+          await bumpSignalFeedMiss(
+            db,
+            org.id,
+            signals.map((s) => s.dedupeKey),
+            pollRun,
+            attestedSources,
+          );
+          // Ticket 07 — scoring happens HERE, on the durable poll workflow, and nowhere else. No
+          // second orchestrator: the score is a consequence of the signals this poll just wrote,
+          // in the same transaction, so a snapshot can never describe a signal row that failed to
+          // land. `pollTimestamp` is the evaluation time for EVERY org in this poll, which is what
+          // makes two tenants' scores comparable and the whole poll reproducible.
+          await recordScoreSnapshots(db, org.id, scoreForPoll(signals, persisted, pollTimestamp));
+        });
+      } catch (err) {
+        incrementCounter("stopgap_signal_persist_failures_total");
+        console.error(
+          `[poll] signal persistence failed for org ${org.id}: ` +
+            `${err instanceof Error ? err.message : String(err)}. ` +
+            "That tenant keeps its previous signals and its miss counters are unchanged, so the " +
+            "next poll retries it; case opening for this org and every later one continues.",
+        );
+      }
+
       const { existingWorkflowIds, openCases } = await withOrgDb(org.id, async (db) => {
         const rows = await getCasesByKeys(db, org.id, currentKeyList);
         return {
@@ -500,7 +697,11 @@ export async function sendEscalationNotification(input: {
             `Acknowledge in the console to stop the ladder.`,
           to: recipients,
         })
-      : { channel: "email" as const, delivered: false, reason: `no user holds role ${input.notify}` };
+      : {
+          channel: "email" as const,
+          delivered: false,
+          reason: `no user holds role ${input.notify}`,
+        };
   incrementCounter(
     result.delivered ? "stopgap_comms_delivered_total" : "stopgap_comms_nondelivered_total",
     { channel: "escalation" },
@@ -588,7 +789,12 @@ export async function anchorAuditChain(): Promise<
 > {
   await assertMaintenanceRoleBypassesRls("anchorAuditChain");
   const orgs = await withBypassDb(() => listOrganizations());
-  const rows = await withBypassDb((db) => runAuditAnchor(db, orgs.map((o) => o.id)));
+  const rows = await withBypassDb((db) =>
+    runAuditAnchor(
+      db,
+      orgs.map((o) => o.id),
+    ),
+  );
   return rows.map((row) => ({
     orgId: row.orgId,
     maxAuditId: row.maxAuditId,
@@ -652,7 +858,9 @@ export async function recordProtocolVersion(input: RecordProtocolInput): Promise
           key: input.key,
           version: current.version.version,
           authoredBy: input.authoredBy,
-          identitySource: input.approvedByUserId ? "authenticated-session" : "workflow-signal-claim",
+          identitySource: input.approvedByUserId
+            ? "authenticated-session"
+            : "workflow-signal-claim",
         },
         runId: currentRunId(),
         eventKey: `protocol.version_approved.v${String(current.version.version)}`,

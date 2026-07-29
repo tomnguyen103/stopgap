@@ -28,7 +28,13 @@ tenant. See "The feed poll" below.
 
 | Tenant tables (RLS enforced) | Global tables (no `org_id`) |
 | --- | --- |
-| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
+| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
+
+`risk_signals` and `risk_score_snapshots` (ticket 06) are the sharpest illustration of the test.
+`feed_records` beside them is GLOBAL: one openFDA snapshot is a single physical fact about the drug
+supply, byte-identical for every hospital. A risk signal is that fact interpreted for one facility —
+its own org-scoped dedupe key, its own resolution state, its own weighting — so two hospitals
+reading the same recall genuinely disagree about the row, and it is tenant data.
 
 `audit_anchors` sits between the two: migration 0014 gives it an `org_id` (so an anchor says WHOSE
 chain it pins) and RLS with a deliberately **asymmetric** policy — SELECT scoped to the tenant, and
