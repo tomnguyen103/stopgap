@@ -496,6 +496,9 @@ export async function anchorAuditWorkflow(): Promise<
  */
 export async function dailyBriefWorkflow(): Promise<{ generated: number; degraded: number }> {
   return briefActs.generateDailyBriefs();
+}
+
+/**
  * The retention workflow (ticket 18). One run = one sweep of every organization's expired records.
  * A daily Temporal Schedule fires it (`scripts/start-schedule.ts`) — the same orchestrator
  * everything else already runs on, so "did the cleanup run" is answerable in the place an operator

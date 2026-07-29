@@ -1,15 +1,16 @@
 import { getEnv } from "@stopgap/core/env";
 import { Client, ScheduleAlreadyRunning } from "@temporalio/client";
 import { makeClient } from "../client.js";
-import { ANCHOR_AUDIT_WORKFLOW, DAILY_BRIEF_WORKFLOW, POLL_FEEDS_WORKFLOW } from "../shared.js";
+import {
+  ANCHOR_AUDIT_WORKFLOW,
+  DAILY_BRIEF_WORKFLOW,
+  POLL_FEEDS_WORKFLOW,
+  RETENTION_SWEEP_WORKFLOW,
+} from "../shared.js";
 
 const POLL_SCHEDULE_ID = "poll-feeds";
 const ANCHOR_SCHEDULE_ID = "anchor-audit";
 const BRIEF_SCHEDULE_ID = "daily-brief";
-import { ANCHOR_AUDIT_WORKFLOW, POLL_FEEDS_WORKFLOW, RETENTION_SWEEP_WORKFLOW } from "../shared.js";
-
-const POLL_SCHEDULE_ID = "poll-feeds";
-const ANCHOR_SCHEDULE_ID = "anchor-audit";
 const RETENTION_SCHEDULE_ID = "retention-sweep";
 
 /** Create one schedule, treating "already exists" as success (idempotent re-run). */
@@ -75,6 +76,9 @@ async function main() {
       every: "24h",
       workflowType: DAILY_BRIEF_WORKFLOW,
       workflowId: "daily-brief-run",
+      taskQueue: env.TEMPORAL_TASK_QUEUE,
+    });
+    await ensureSchedule(client, {
       scheduleId: RETENTION_SCHEDULE_ID,
       every: "24h",
       workflowType: RETENTION_SWEEP_WORKFLOW,
