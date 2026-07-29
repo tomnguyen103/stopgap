@@ -154,3 +154,34 @@ remember each refusal pushes the window further out.
 Batch A state at park: head `5d5463a`, 19 commits over main, one migration (0020), gate
 exit 0, both local review axes clean, PR retitled, #32/#26/#27/#13 closed as superseded.
 Every finding from both review agents is fixed except the ones recorded as DEFERRED above.
+
+## Batch B assembly — DO NOT cherry-pick ticket by ticket
+
+Reading the five branches shows they are STACKED, not independent, so the batch A recipe
+does not transfer. Each branch already contains its predecessors as ancestors:
+
+- `feat/design-tokens-and-primitives` own commits: `c3d2cab` `748e758` (ticket 02).
+- `feat/route-groups-and-role-landing` own: `bcae634` `f339731` `2e21e54` (ticket 03) —
+  and it ALREADY CONTAINS ticket 02, but as DIFFERENT SHAs (`2a07483` `b205daf`) plus
+  `f99de84` and `a42388e`. Two divergent copies of the same ticket.
+- `feat/browser-smoke-tier` own: `b2b48cc` `63e1c31` (ticket 04) — already contains 03+02.
+- `feat/viewer-dashboard` own: `c4f7cdf` `3a273fd` (ticket 08) — already contains 03+02
+  and the scorer (tickets 07/09, now on main).
+- `feat/pharmacist-dashboard` own: `fe01c2b` `273777b` `77f0720` (ticket 11) — already
+  contains 08, 03, 02, evidence and scorer.
+
+So `feat/pharmacist-dashboard` is very nearly batch B already: tokens + routes + viewer +
+pharmacist. The likely-cheapest assembly is therefore:
+
+1. Branch `feat/batch-b` from `feat/pharmacist-dashboard`.
+2. Rebase it onto main. Expect the scorer/evidence ancestors (tickets 07, 09) to drop as
+   already-merged, and expect conflicts where main has moved (schema.ts, the route tree).
+3. Cherry-pick ONLY `63e1c31` and `b2b48cc` on top for ticket 04's browser smoke tier.
+4. Verify ticket 02 landed once, not twice — the two divergent copies are the trap here.
+5. Then the usual: regenerate any migration, `pnpm gate`, one local review, one ready flip.
+
+Do NOT run the batch A recipe of picking each ticket's own commits onto a fresh base: with
+these branches that replays ticket 02 twice and ticket 03's scaffolding out of order.
+
+After a branch switch that changes the route tree, remember:
+`rm -rf apps/console/.next && rm -f apps/console/tsconfig.tsbuildinfo`.
