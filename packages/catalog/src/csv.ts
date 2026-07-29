@@ -3,7 +3,7 @@
  *
  * Hand-rolled rather than taken from a dependency because the surface actually needed is small
  * (quotes, escaped quotes, embedded newlines, CRLF, a BOM) and every one of those cases is
- * asserted below in `csv.test.ts`. A parser is also the one place an import can silently go wrong
+ * asserted below in `catalog.test.ts`. A parser is also the one place an import can silently go wrong
  * without erroring — a mis-split row lands as data, not as a failure — so it is worth owning.
  *
  * NOTHING here validates meaning. This layer answers "what cells did the file contain"; the

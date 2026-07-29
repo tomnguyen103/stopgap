@@ -1189,7 +1189,7 @@ export type DailyBriefRow = typeof dailyBriefs.$inferSelect;
  * Every table here carries `orgId` and an `<table>_org_isolation` policy (migration 0020). None of
  * it is a shared external fact: two hospitals stocking the same drug hold genuinely different
  * items, different suppliers, different contract prices and different shelves. Applying the
- * Â§6.5 test — "would two orgs disagree about this row" — every one of them is tenant data, and
+ * §6.5 test — "would two orgs disagree about this row" — every one of them is tenant data, and
  * the answer is not close.
  *
  * Every unique index is org-leading, so it doubles as the org-filter index and so that uniqueness
