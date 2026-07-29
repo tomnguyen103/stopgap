@@ -1,5 +1,5 @@
 import type { CaseStatus, Severity, ShortageRecord } from "@stopgap/core";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import { cases, type CaseRow } from "./schema.js";
 
@@ -9,6 +9,14 @@ import { cases, type CaseRow } from "./schema.js";
  * not yet monitoring, and a terminal case is done; signalling either would be wrong.
  */
 export const MONITORING_STATUSES: readonly CaseStatus[] = ["monitoring"];
+
+/**
+ * Statuses in which a case is WAITING ON A HUMAN — a drafted protocol nobody has approved, and a
+ * case the machine refused to decide. Distinct from `MONITORING_STATUSES`, which is post-approval
+ * feed-watching: a monitoring case needs nothing from anybody, so reporting it as "needs review"
+ * would bury the two that do.
+ */
+export const AWAITING_HUMAN_STATUSES: readonly CaseStatus[] = ["awaiting_review", "exception"];
 
 /**
  * ORG SCOPING (PHASE6 §6.5) — the rationale for every `orgId` parameter in this file and in
@@ -234,4 +242,26 @@ export async function bumpFeedMiss(db: Db, orgId: string, caseId: string, runId:
 /** Reset a case's miss counter to zero (key reappeared, or resolution fired). */
 export async function resetFeedMiss(db: Db, orgId: string, caseId: string): Promise<void> {
   await db.update(cases).set({ feedMissCount: 0 }).where(and(eq(cases.orgId, orgId), eq(cases.id, caseId)));
+}
+
+/**
+ * Cases in this tenant that are waiting on a person, LONGEST-WAITING FIRST.
+ *
+ * `limit` is required rather than defaulted: the caller — the daily brief — renders this list into
+ * a model prompt, so the bound is a product decision that belongs with the prompt, and a tenant
+ * with a thousand parked cases must not be able to decide how much this query reads. Oldest-first
+ * ordering is what makes the cap keep the right end: a case parked for three weeks needs a human
+ * more than one opened this morning.
+ */
+export async function listCasesAwaitingHuman(
+  db: Db,
+  orgId: string,
+  limit: number,
+): Promise<{ key: string; status: string }[]> {
+  return db
+    .select({ key: cases.key, status: cases.status })
+    .from(cases)
+    .where(and(eq(cases.orgId, orgId), inArray(cases.status, [...AWAITING_HUMAN_STATUSES])))
+    .orderBy(asc(cases.openedAt))
+    .limit(limit);
 }

@@ -8,6 +8,7 @@ import type { CaseInput, RecordProtocolInput } from "./shared.js";
 import {
   acknowledgeSignal,
   anchorAuditWorkflow,
+  dailyBriefWorkflow,
   exceptionResolvedSignal,
   pollFeedsWorkflow,
   resolvedSignal,
@@ -60,6 +61,7 @@ const recordedAcks: { key: string; userId: string; label: string; step: number }
 /** Deterministic in-memory activity stubs — mirror the real signatures, no side effects. */
 const mockActivities: typeof activities = {
   recordDetected: async () => {},
+  generateDailyBriefs: async () => ({ generated: 0, degraded: 0 }),
   persistStatus: async () => {},
   assessImpact: async (input: CaseInput) => {
     // Simulates the provider being down long enough to exhaust the activity's retries.
@@ -380,6 +382,19 @@ describe("anchorAuditWorkflow (time-skipped)", () => {
       expect(await handle.result()).toEqual([
         { orgId: TEST_ORG_ID, maxAuditId: 7, headHash: "deadbeef", sink: "file" },
       ]);
+    });
+  }, 60_000);
+});
+
+describe("dailyBriefWorkflow (time-skipped)", () => {
+  it("delegates to the generateDailyBriefs activity and returns its result", async () => {
+    await withWorker(async () => {
+      const handle = await env.client.workflow.start(dailyBriefWorkflow, {
+        args: [],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-brief-${Date.now()}`,
+      });
+      expect(await handle.result()).toEqual({ generated: 0, degraded: 0 });
     });
   }, 60_000);
 });

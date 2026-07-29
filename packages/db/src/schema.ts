@@ -1131,3 +1131,51 @@ export type NewSignalEvidenceRow = typeof signalEvidence.$inferInsert;
 export type AlertRuleRow = typeof alertRules.$inferSelect;
 export type NewAlertRuleRow = typeof alertRules.$inferInsert;
 export type AlertEventRow = typeof alertEvents.$inferSelect;
+
+/**
+ * The daily brief (ticket 13). A TENANT table.
+ *
+ * One hospital's account of what moved in its own supply picture — nothing about it is a shared
+ * fact, so §6.5 puts it here without argument.
+ *
+ * `degradedReason` is the honest-failure column. A brief that the compliance guard refused is
+ * RECORDED as refused rather than dropped: a director who sees no brief cannot tell "nothing
+ * happened" from "the system produced something it would not show you", and those need different
+ * responses. Same for a provider outage — the row says the brief degraded, and to what.
+ */
+export const dailyBriefs = pgTable(
+  "daily_briefs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** The day this brief covers, as a UTC date. One brief per tenant per day. */
+    briefDate: text("brief_date").notNull(),
+    /** Two or three sentences — what a director reads if they read nothing else. */
+    headline: text("headline").notNull(),
+    changes: jsonb("changes").$type<string[]>().notNull(),
+    newlyAtRisk: jsonb("newly_at_risk").$type<string[]>().notNull(),
+    needsReview: jsonb("needs_review").$type<string[]>().notNull(),
+    /** The dedupe keys this brief was written from — the input to the NEXT brief's diff. */
+    signalKeys: jsonb("signal_keys").$type<string[]>().notNull(),
+    /**
+     * Why this brief is not a normal one, when it is not.
+     *
+     * `compliance_blocked` when the guard refused the generated text, `provider_unavailable` when
+     * no model could be reached. NULL for an ordinary brief. Never a silent absence.
+     */
+    degradedReason: text("degraded_reason"),
+    /** Which model wrote it, for the same reason a score carries its scorer version. */
+    model: text("model"),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One per tenant per day: a retried schedule restates the day's brief rather than appending a
+    // second one a director has to work out the ordering of.
+    uniqueIndex("daily_briefs_date_uq").on(t.orgId, t.briefDate),
+    index("daily_briefs_recent_idx").on(t.orgId, t.generatedAt),
+  ],
+);
+
+export type DailyBriefRow = typeof dailyBriefs.$inferSelect;

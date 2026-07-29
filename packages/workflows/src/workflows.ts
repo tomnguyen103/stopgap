@@ -36,6 +36,24 @@ const acts = proxyActivities<typeof activities>({
 });
 
 /**
+ * The brief's own proxy (ticket 13). One activity call does ONE MODEL CALL PER TENANT in sequence,
+ * so its runtime scales with the registry while every other activity here is a single bounded
+ * operation. Under the shared one-minute timeout the brief would start timing out as soon as the
+ * deployment had more than a handful of organizations, and each retry would re-spend the model
+ * budget for every tenant already written. Retries are capped at two for the same reason: a
+ * provider outage is already absorbed inside the activity as a degraded brief, so an exhausted
+ * retry here means something structural, and repeating it costs money without changing the answer.
+ */
+const briefActs = proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 minutes",
+  // The activity heartbeats per tenant and on both sides of each model call, so a worker that dies
+  // mid-run is detected in minutes instead of at the 30-minute start-to-close bound. The window is
+  // wide enough for one provider call to run long without being mistaken for a dead worker.
+  heartbeatTimeout: "5 minutes",
+  retry: { maximumAttempts: 2, initialInterval: "10s", backoffCoefficient: 2 },
+});
+
+/**
  * Run an agent activity and turn an exhausted-retry failure into a value instead of an
  * exception. The agent layer is the one dependency that can be down for minutes (provider
  * outage, model not pulled yet) rather than milliseconds, and an escaping activity failure
@@ -471,4 +489,12 @@ export async function anchorAuditWorkflow(): Promise<
   { orgId: string; maxAuditId: number; headHash: string; sink: string }[]
 > {
   return acts.anchorAuditChain();
+}
+
+/**
+ * The daily-brief workflow (ticket 13). One run = one brief per tenant, on the SAME Temporal spine
+ * the feed poll and the audit anchor already run on. No second orchestrator is introduced.
+ */
+export async function dailyBriefWorkflow(): Promise<{ generated: number; degraded: number }> {
+  return briefActs.generateDailyBriefs();
 }

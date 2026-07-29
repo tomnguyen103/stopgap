@@ -39,6 +39,8 @@ export {
   updateCaseStatus,
   listCases,
   listOpenMonitoringCases,
+  listCasesAwaitingHuman,
+  AWAITING_HUMAN_STATUSES,
   bumpFeedMiss,
   resetFeedMiss,
   workflowIdForKey,
@@ -128,6 +130,14 @@ export {
   type AlertEventInput,
 } from "./alerts.js";
 export {
+  recordDailyBrief,
+  previousDailyBrief,
+  listDailyBriefs,
+  DEGRADED_REASONS,
+  type DegradedReason,
+  type DailyBriefInput,
+} from "./briefs.js";
+export {
   dedupeByKey,
   upsertSignals,
   bumpSignalFeedMiss,
@@ -166,4 +176,5 @@ export type {
   NewProtocolVersionRow,
   ShadowRunRow,
   NewShadowRunRow,
+  DailyBriefRow,
 } from "./schema.js";

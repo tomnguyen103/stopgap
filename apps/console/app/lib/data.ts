@@ -6,6 +6,7 @@ import {
   listAcknowledgments,
   listApiKeys,
   listCases,
+  listDailyBriefs,
   listOrganizations,
   listShadowRuns,
   listUsers,
@@ -21,6 +22,7 @@ import type {
   AnchorVerification,
   AuditRow,
   ChainVerification,
+  DailyBriefRow,
   FeedFreshness,
   CaseRow,
   ProtocolRow,
@@ -186,6 +188,17 @@ export async function getOrganizations(): Promise<OrganizationRow[]> {
 export async function getApiKeys(): Promise<ApiKeyRow[]> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, (db) => listApiKeys(orgId, db));
+}
+
+/**
+ * This tenant's recent daily briefs, newest first (ticket 13).
+ *
+ * Tenant-scoped like every other read here: the org comes from the session, never from the caller,
+ * so a brief written for one hospital cannot be read by another.
+ */
+export async function getDailyBriefs(limit = 30): Promise<DailyBriefRow[]> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => listDailyBriefs(db, orgId, limit));
 }
 
 /** Shadow-mode aggregates per drug class, with the promotion stage each has earned. */

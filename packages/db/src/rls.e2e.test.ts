@@ -82,6 +82,9 @@ const ID = {
   ruleB: "bbbb0012-0000-0000-0000-000000000012",
   alertA: "aaaa0013-0000-0000-0000-000000000013",
   alertB: "bbbb0013-0000-0000-0000-000000000013",
+  // Ticket 13 — the daily brief.
+  briefA: "aaaa0011-0000-0000-0000-000000000011",
+  briefB: "bbbb0011-0000-0000-0000-000000000011",
 } as const;
 
 /**
@@ -174,6 +177,7 @@ async function seedOrg(
     evidenceId: string;
     ruleId: string;
     alertId: string;
+    briefId: string;
   },
   suffix: string,
 ) {
@@ -228,6 +232,12 @@ async function seedOrg(
                                        deliveries, idempotency_key, fired_at)
              values (${ids.alertId}, ${orgId}, ${ids.ruleId}, 'fired', 1, '[]'::jsonb, '[]'::jsonb,
                      ${"idem-" + suffix}, now())`;
+
+    // Ticket 13 — one daily brief, seeded from inside this org's own scope for the same reason.
+    await tx`insert into daily_briefs (id, org_id, brief_date, headline, changes, newly_at_risk,
+                                       needs_review, signal_keys)
+             values (${ids.briefId}, ${orgId}, '2026-01-01', ${"Brief " + suffix}, '[]'::jsonb,
+                     '[]'::jsonb, '[]'::jsonb, '[]'::jsonb)`;
   });
 }
 
@@ -331,6 +341,18 @@ const TENANT_TABLES: TenantTable[] = [
     updateOthers: (tx) =>
       tx`update risk_score_snapshots set band = 'hijacked' where id = ${ID.scoreB} returning id`,
     deleteOthers: (tx) => tx`delete from risk_score_snapshots where id = ${ID.scoreB} returning id`,
+  },
+  {
+    name: "daily_briefs",
+    readOthers: (tx) => tx`select id from daily_briefs where id = ${ID.briefB}`,
+    insertAs: (tx, org) =>
+      tx`insert into daily_briefs (org_id, brief_date, headline, changes, newly_at_risk,
+                                   needs_review, signal_keys)
+         values (${org}, '2026-01-02', 'X', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb)`,
+    readAll: (tx) => tx`select id from daily_briefs`,
+    updateOthers: (tx) =>
+      tx`update daily_briefs set headline = 'hijacked' where id = ${ID.briefB} returning id`,
+    deleteOthers: (tx) => tx`delete from daily_briefs where id = ${ID.briefB} returning id`,
   },
 
   {
@@ -466,6 +488,7 @@ beforeAll(async () => {
       evidenceId: ID.evidenceA,
       ruleId: ID.ruleA,
       alertId: ID.alertA,
+      briefId: ID.briefA,
     },
     "a",
   );
@@ -485,6 +508,7 @@ beforeAll(async () => {
       evidenceId: ID.evidenceB,
       ruleId: ID.ruleB,
       alertId: ID.alertB,
+      briefId: ID.briefB,
     },
     "b",
   );
@@ -508,6 +532,7 @@ afterAll(async () => {
       // Events first: they FK the rule that produced them.
       await tx`delete from alert_events where org_id = ${org}`;
       await tx`delete from alert_rules where org_id = ${org}`;
+      await tx`delete from daily_briefs where org_id = ${org}`;
       await tx`delete from risk_score_snapshots where org_id = ${org}`;
       await tx`delete from risk_signals where org_id = ${org}`;
     });

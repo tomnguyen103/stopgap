@@ -22,7 +22,7 @@ export const UNTRUSTED_RECORD_NOTICE =
  * where the model reads it as trusted instructions. Escaping the XML-special characters keeps
  * every feed byte inside the delimiter.
  */
-function escapeRecordValue(value: string): string {
+export function escapeRecordValue(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
