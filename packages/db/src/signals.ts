@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 
 import {
+  cases,
   riskScoreSnapshots,
   riskSignals,
   signalEvidence,
@@ -226,6 +227,155 @@ export async function listSignals(
     .where(and(...predicates))
     .orderBy(desc(riskSignals.publishedAt))
     .limit(options.limit ?? 200);
+}
+
+/** What a console list asks for. Every field is already parsed and bounded by `list-params`. */
+export interface SignalPageOptions {
+  /** Free text over the signal's title and the entity it names. Already length-bounded. */
+  q?: string | null;
+  riskDomain?: string;
+  severity?: string;
+  /** `fresh` | `recent` | `stale`, as the contract's own staleness label. */
+  freshness?: string;
+  sort: string;
+  dir: "asc" | "desc";
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * Sort keys a caller may name, mapped to the column each one means.
+ *
+ * Resolved with `Object.hasOwn`, never `SIGNAL_SORT_COLUMNS[key]`: a bare index read answers
+ * `?sort=constructor` with a function, which is truthy, so the `??` fallback beside it never fires
+ * and the value reaches the ORDER BY.
+ */
+const SIGNAL_SORT_COLUMNS = {
+  published: riskSignals.publishedAt,
+  fetched: riskSignals.lastFetchedAt,
+  severity: riskSignals.severityScore,
+  entity: riskSignals.entityIdentifier,
+} as const;
+
+export const SIGNAL_SORT_KEYS = Object.keys(SIGNAL_SORT_COLUMNS);
+
+/**
+ * One page of this tenant's signals, plus the total the page was taken from.
+ *
+ * The count runs as its own statement rather than a window function beside the rows: the window
+ * form computes the total for every row it returns and is the shape that makes a paged list slow
+ * exactly when the list is long enough to need paging.
+ */
+export async function listSignalsPage(
+  db: Db,
+  orgId: string,
+  options: SignalPageOptions,
+): Promise<{ rows: RiskSignalRow[]; total: number }> {
+  const predicates = [eq(riskSignals.orgId, orgId)];
+  if (options.riskDomain) predicates.push(eq(riskSignals.riskDomain, options.riskDomain));
+  if (options.severity) predicates.push(eq(riskSignals.severity, options.severity));
+  if (options.freshness) predicates.push(eq(riskSignals.staleness, options.freshness));
+  const term = options.q?.trim();
+  if (term) {
+    // `%` and `_` are LIKE metacharacters: a search for "50%" must find the literal string, not
+    // every row. Escaped here rather than stripped, because a drug presentation legitimately
+    // contains both.
+    const escaped = term.replace(/([\\%_])/g, "\\$1");
+    predicates.push(
+      sql`(${riskSignals.title} ilike ${"%" + escaped + "%"} escape '\\'
+           or ${riskSignals.entityIdentifier} ilike ${"%" + escaped + "%"} escape '\\')`,
+    );
+  }
+  const where = and(...predicates);
+  const column = Object.hasOwn(SIGNAL_SORT_COLUMNS, options.sort)
+    ? SIGNAL_SORT_COLUMNS[options.sort as keyof typeof SIGNAL_SORT_COLUMNS]
+    : riskSignals.publishedAt;
+  const rows = await db
+    .select()
+    .from(riskSignals)
+    .where(where)
+    // `id` last, so two signals published in the same instant hold a stable order between pages —
+    // without it a row can appear on page 1 and again on page 2.
+    .orderBy(options.dir === "asc" ? column : desc(column), desc(riskSignals.id))
+    .limit(options.pageSize)
+    .offset((options.page - 1) * options.pageSize);
+  const [counted] = await db
+    .select({ total: sql<string>`count(*)` })
+    .from(riskSignals)
+    .where(where);
+  return { rows, total: Number(counted?.total ?? 0) };
+}
+
+/** An open case, with the score of the strongest signal naming the same product. */
+export interface RankedCase {
+  id: string;
+  key: string;
+  genericName: string;
+  status: string;
+  /** Absent when no signal names this product — shown as unscored, never as zero. */
+  score: number | null;
+  band: string | null;
+  reachableMax: number | null;
+  components: Record<string, number> | null;
+}
+
+/**
+ * This tenant's open cases, ranked by risk score.
+ *
+ * The linkage is `cases.generic_name` = `risk_signals.entity_identifier`, which is an identity both
+ * sides already derive from the same feed record — not the catalog matching ticket 16 builds. It
+ * therefore misses a case whose product is named differently by a second feed, and that is the
+ * honest limit of what can be joined before catalog identifiers land.
+ *
+ * A case with no matching signal keeps a NULL score and sorts last. Scoring it zero would rank it
+ * beside a product the scorer has genuinely cleared, which is the one reading that is worse than
+ * saying "not scored".
+ */
+export async function rankedOpenCases(db: Db, orgId: string, limit = 10): Promise<RankedCase[]> {
+  const rows = await db.execute<{
+    id: string;
+    key: string;
+    generic_name: string;
+    status: string;
+    score: string | null;
+    band: string | null;
+    reachable_max: string | null;
+    components: Record<string, number> | null;
+  }>(sql`
+    with latest as (
+      select distinct on (s.id) s.entity_identifier, snap.score, snap.band,
+             snap.reachable_max, snap.components
+        from ${riskSignals} s
+        join ${riskScoreSnapshots} snap
+          on snap.signal_id = s.id and snap.org_id = ${orgId}
+       where s.org_id = ${orgId}
+       order by s.id, snap.computed_at desc, snap.id desc
+    ),
+    best as (
+      select lower(entity_identifier) as entity, score, band, reachable_max, components,
+             row_number() over (partition by lower(entity_identifier) order by score desc) as rank
+        from latest
+    )
+    select c.id, c.key, c.generic_name, c.status,
+           best.score, best.band, best.reachable_max, best.components
+      from ${cases} c
+      left join best on best.entity = lower(c.generic_name) and best.rank = 1
+     where c.org_id = ${orgId}
+       and c.closed_at is null
+       and c.status not in ('closed', 'rejected')
+     order by best.score desc nulls last, c.updated_at desc
+     limit ${limit}
+  `);
+  return rows.map((row) => ({
+    id: row.id,
+    key: row.key,
+    genericName: row.generic_name,
+    status: row.status,
+    score: row.score === null ? null : Number(row.score),
+    band: row.band,
+    reachableMax: row.reachable_max === null ? null : Number(row.reachable_max),
+    components: row.components,
+  }));
 }
 
 /** One signal by its dedupe key, within this tenant. */

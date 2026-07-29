@@ -147,10 +147,15 @@ export {
   recordEvidence,
   listEvidenceForSignal,
   latestScoresForSignals,
+  listSignalsPage,
+  rankedOpenCases,
+  SIGNAL_SORT_KEYS,
   FEED_ABSENT_THRESHOLD,
   type ListSignalsOptions,
+  type RankedCase,
   type ScoreSnapshotInput,
   type EvidenceInput,
+  type SignalPageOptions,
 } from "./signals.js";
 export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
 export {
@@ -177,6 +182,8 @@ export {
   type RetentionSweepResult,
 } from "./retention.js";
 export type {
+  RiskSignalRow,
+  RiskScoreSnapshotRow,
   OrganizationRow,
   NewOrganizationRow,
   ApiKeyRow,
