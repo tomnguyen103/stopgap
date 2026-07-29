@@ -38,6 +38,9 @@ importers:
 
   apps/console:
     dependencies:
+      '@stopgap/catalog':
+        specifier: workspace:*
+        version: link:../../packages/catalog
       '@stopgap/compliance':
         specifier: workspace:*
         version: link:../../packages/compliance

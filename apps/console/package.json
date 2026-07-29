@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@stopgap/core": "workspace:*",
+    "@stopgap/catalog": "workspace:*",
     "@stopgap/compliance": "workspace:*",
     "@stopgap/db": "workspace:*",
     "@stopgap/ingest": "workspace:*",
