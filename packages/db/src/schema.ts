@@ -915,13 +915,13 @@ export type ApiKeyRequestRow = typeof apiKeyRequests.$inferSelect;
 
 /**
  * ---------------------------------------------------------------------------------------------
- * The facility catalog (ticket 15). Eight TENANT tables â€” what this hospital actually stocks.
+ * The facility catalog (ticket 15). Eight TENANT tables — what this hospital actually stocks.
  * ---------------------------------------------------------------------------------------------
  *
  * Every table here carries `orgId` and an `<table>_org_isolation` policy (migration 0015). None of
  * it is a shared external fact: two hospitals stocking the same drug hold genuinely different
  * items, different suppliers, different contract prices and different shelves. Applying the
- * Â§6.5 test â€” "would two orgs disagree about this row" â€” every one of them is tenant data, and
+ * Â§6.5 test — "would two orgs disagree about this row" — every one of them is tenant data, and
  * the answer is not close.
  *
  * Every unique index is org-leading, so it doubles as the org-filter index and so that uniqueness
@@ -939,7 +939,7 @@ export const items = pgTable(
       .references(() => organizations.id),
     sku: text("sku").notNull(),
     name: text("name").notNull(),
-    /** Normalized generic name where the file gave one â€” the join to shortage signals. */
+    /** Normalized generic name where the file gave one — the join to shortage signals. */
     genericName: text("generic_name"),
     unit: text("unit"),
     notes: text("notes"),
@@ -956,7 +956,7 @@ export const items = pgTable(
  * The several identifiers one item carries at once.
  *
  * A separate table rather than columns on `items`, because facilities record products differently
- * across systems and the set is open â€” a purchasing system knows a GTIN, a pharmacy system an NDC,
+ * across systems and the set is open — a purchasing system knows a GTIN, a pharmacy system an NDC,
  * an EHR an RxCUI, and the same physical product carries all three. Columns would force a schema
  * change for each new system; rows do not.
  */
@@ -970,7 +970,7 @@ export const itemIdentifiers = pgTable(
     itemId: uuid("item_id")
       .notNull()
       .references(() => items.id, { onDelete: "cascade" }),
-    /** `ndc` | `rxcui` | `gtin` | `hibc` | `sku` â€” the vocabulary in `@stopgap/catalog`. */
+    /** `ndc` | `rxcui` | `gtin` | `hibc` | `sku` — the vocabulary in `@stopgap/catalog`. */
     type: text("type").notNull(),
     value: text("value").notNull(),
   },
@@ -1036,7 +1036,7 @@ export const itemSuppliers = pgTable(
     preferred: boolean("preferred").notNull().default(false),
   },
   (t) => [
-    // One link per (item, supplier) pair â€” the site is an attribute of the link, not part of its
+    // One link per (item, supplier) pair — the site is an attribute of the link, not part of its
     // identity. Including a NULLABLE site in the key would let the same pair appear twice, once
     // with a site and once without, because NULL is never equal to itself in a unique index.
     uniqueIndex("item_suppliers_pair_uq").on(t.orgId, t.itemId, t.supplierId),
@@ -1044,7 +1044,7 @@ export const itemSuppliers = pgTable(
   ],
 );
 
-/** A place that holds stock â€” a hospital site, a ward store, a central pharmacy. */
+/** A place that holds stock — a hospital site, a ward store, a central pharmacy. */
 export const facilities = pgTable(
   "facilities",
   {
@@ -1062,7 +1062,7 @@ export const facilities = pgTable(
  * On-hand stock at a point in time.
  *
  * A SNAPSHOT rather than a mutable level: "how much do we hold" is a question with a date on it,
- * and overwriting yesterday's count would destroy the only evidence of how fast a drug is moving â€”
+ * and overwriting yesterday's count would destroy the only evidence of how fast a drug is moving —
  * which is the input a burn-rate reading needs.
  */
 export const inventorySnapshots = pgTable(
@@ -1084,7 +1084,7 @@ export const inventorySnapshots = pgTable(
   },
   (t) => [
     // Re-uploading a corrected file must UPDATE the count for that facility, item and moment
-    // rather than add a second one â€” the natural key of a snapshot is when it was taken.
+    // rather than add a second one — the natural key of a snapshot is when it was taken.
     uniqueIndex("inventory_snapshots_point_uq").on(t.orgId, t.facilityId, t.itemId, t.capturedAt),
     index("inventory_snapshots_item_idx").on(t.orgId, t.itemId, t.capturedAt),
   ],
@@ -1109,11 +1109,7 @@ export const procurementEvents = pgTable(
      * The purchase-order reference, `''` when the file carried none.
      *
      * Part of the natural key, and NOT NULL with an empty-string default rather than nullable,
-<<<<<<< HEAD
-     * because NULL is not equal to itself in a unique index â€” a nullable column here would let the
-=======
      * because NULL is not equal to itself in a unique index — a nullable column here would let the
->>>>>>> ce1cb09 (fix(catalog): local-review findings — a blocking import bug, and re-upload keyed on identifiers)
      * same order be imported twice and would defeat the whole point of the key.
      */
     orderRef: text("order_ref").notNull().default(""),
@@ -1123,13 +1119,8 @@ export const procurementEvents = pgTable(
   },
   (t) => [
     // An event's identity is NOT just its timestamp. Two genuine orders of the same item at the
-<<<<<<< HEAD
-    // same facility on the same date are ordinary â€” and common once a file gives dates rather than
-    // datetimes â€” so the purchase-order reference is part of the key. Where a file carries no
-=======
     // same facility on the same date are ordinary — and common once a file gives dates rather than
     // datetimes — so the purchase-order reference is part of the key. Where a file carries no
->>>>>>> ce1cb09 (fix(catalog): local-review findings — a blocking import bug, and re-upload keyed on identifiers)
     // reference the two orders are indistinguishable in the data, and the import restates one row
     // rather than inventing a difference the file does not contain.
     uniqueIndex("procurement_events_point_uq").on(
@@ -1143,7 +1134,6 @@ export const procurementEvents = pgTable(
   ],
 );
 
-export type OrganizationRow = typeof organizations.$inferSelect;
 export type CatalogItemRow = typeof items.$inferSelect;
 export type NewCatalogItemRow = typeof items.$inferInsert;
 export type ItemIdentifierRow = typeof itemIdentifiers.$inferSelect;
