@@ -109,9 +109,18 @@ importers:
 
   packages/comms:
     dependencies:
+      '@stopgap/compliance':
+        specifier: workspace:*
+        version: link:../compliance
       '@stopgap/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(terser@5.49.0)(tsx@4.23.1)
+
+  packages/compliance:
     devDependencies:
       vitest:
         specifier: ^3.0.0
