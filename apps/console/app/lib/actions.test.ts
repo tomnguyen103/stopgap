@@ -57,6 +57,8 @@ const revokeRole = vi.fn(async (_db: unknown, orgId: string, userId: string, _ro
   }
   return true;
 });
+const createAlertRule = vi.fn();
+const updateAlertRule = vi.fn();
 vi.mock("@stopgap/db", () => ({
   appendAudit: (...a: unknown[]) => appendAudit(...a),
   approveProtocolVersion: (...a: unknown[]) => approveProtocolVersion(...a),
@@ -80,6 +82,9 @@ vi.mock("@stopgap/db", () => ({
     ["cases:read", "protocols:read", "protocols:write", "shadow:read"].includes(v as string),
   issueApiKey: vi.fn(),
   revokeApiKey: vi.fn(),
+  // Ticket 14 — the alert-rule surface `actions.ts` now imports.
+  createAlertRule: (...a: unknown[]) => createAlertRule(...a),
+  updateAlertRule: (...a: unknown[]) => updateAlertRule(...a),
 }));
 
 vi.mock("next/headers", () => ({
@@ -104,7 +109,7 @@ vi.mock("@stopgap/demo", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const { approveProtocolVersionAction, assignRoleAction, revokeRoleAction } =
+const { approveProtocolVersionAction, assignRoleAction, revokeRoleAction, createAlertRuleAction, updateAlertRuleAction } =
   await import("./actions");
 const { AuthorizationError } = await import("./authz");
 
@@ -229,5 +234,56 @@ describe("approveProtocolVersionAction (server-enforced authorization)", () => {
     await approveProtocolVersionAction(VERSION_ID);
     expect(approveProtocolVersion).toHaveBeenCalledTimes(1);
     expect(appendAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe("alert-rule actions (server-enforced authorization)", () => {
+  beforeEach(() => {
+    // This suite's outer `beforeEach` clears the shared spies; these two are local to it.
+    createAlertRule.mockReset();
+    updateAlertRule.mockReset();
+  });
+
+  const RULE = {
+    name: "Critical shortages",
+    minSeverity: "critical" as const,
+    cooldownMinutes: 60,
+    channels: ["email" as const],
+  };
+
+  it("REFUSES a pharmacist, who works cases but does not decide who gets paged", async () => {
+    resolvePrincipal.mockResolvedValue(principal(["pharmacist"]));
+    await expect(createAlertRuleAction(RULE)).rejects.toBeInstanceOf(AuthorizationError);
+    await expect(updateAlertRuleAction(VERSION_ID, RULE)).rejects.toBeInstanceOf(AuthorizationError);
+    // The gate fires before the write and before the audit append, not after.
+    expect(createAlertRule).not.toHaveBeenCalled();
+    expect(updateAlertRule).not.toHaveBeenCalled();
+    expect(appendAudit).not.toHaveBeenCalled();
+  });
+
+  it("lets a director create a rule, scoped to their own org, and audits the shape", async () => {
+    resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
+    createAlertRule.mockResolvedValueOnce({
+      id: "11111111-1111-1111-1111-111111111111",
+      name: RULE.name,
+      minSeverity: RULE.minSeverity,
+      cooldownMinutes: RULE.cooldownMinutes,
+    });
+    await createAlertRuleAction(RULE);
+    expect(createAlertRule).toHaveBeenCalledTimes(1);
+    expect(scopedOrgIds).toContain(PRINCIPAL_ORG_ID);
+    expect(appendAudit).toHaveBeenCalled();
+  });
+
+  it("refuses a cooldown of zero rather than clamping it", async () => {
+    resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
+    await expect(createAlertRuleAction({ ...RULE, cooldownMinutes: 0 })).rejects.toThrow();
+    expect(createAlertRule).not.toHaveBeenCalled();
+  });
+
+  it("refuses a rule with no channel — an alert nobody receives is not an alert", async () => {
+    resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
+    await expect(createAlertRuleAction({ ...RULE, channels: [] })).rejects.toThrow();
+    expect(createAlertRule).not.toHaveBeenCalled();
   });
 });
