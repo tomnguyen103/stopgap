@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isDemoMode } from "@stopgap/demo";
+import { screenContent } from "@stopgap/compliance";
 import { isActionAllowed } from "../../../lib/authz";
-import { getCaseDetail, getWorkflowState } from "../../../lib/data";
+import { confidenceLabel, unavailableReason } from "../../../lib/case-queue";
+import { getCaseDetail, getCaseEvidence, getWorkflowState } from "../../../lib/data";
+import { EvidenceDrawer } from "./evidence-drawer";
 import { resolvePrincipal } from "../../../lib/principal";
 import { EscalationPanel } from "./escalation-panel";
 import { ReviewPanel } from "./review-panel";
@@ -27,6 +30,17 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   // The id the ROW carries, not one recomputed from the key (PHASE6 §6.5): a case opened before
   // workflow ids became org-qualified still answers only to `case-<key>`.
   const live = await getWorkflowState(c.workflowId);
+  // The trail beside the draft, fetched with the page so the drawer opens on data rather than on
+  // a spinner.
+  const { signal, evidence } = await getCaseEvidence(c.genericName);
+  // EVERY piece of generated text is screened before it renders, not only before it is sent.
+  // A pharmacist reading a draft that names a patient has already been shown it, and a guard that
+  // only runs at the outbound boundary is a guard the console walks around.
+  const draftScreen = live?.draft ? screenContent(live.draft) : undefined;
+  const alternativesScreen = live?.alternatives.length
+    ? screenContent(live.alternatives.join("\n"))
+    : undefined;
+  const confidence = confidenceLabel(live?.researchConfidence);
   // Server component, so the caller's roles are available here. `isActionAllowed` is the pure,
   // non-throwing half of the same matrix `requireRole` enforces in the action.
   const principal = await resolvePrincipal();
@@ -66,6 +80,31 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         </dl>
       </div>
 
+      {/* The evidence trail is a property of the CASE, not of the running workflow: a worker that
+          is down must not take the reason for a decision off the page with it. */}
+      <div className="card">
+        <h2>Evidence</h2>
+        <p className="sub sub-tight">
+          {signal
+            ? `Matched signal: ${signal.title}`
+            : "No signal names this product yet, so there is no captured trail."}
+        </p>
+        <div className="actions">
+          <EvidenceDrawer
+            signalTitle={signal?.title ?? null}
+            entries={evidence.map((entry) => ({
+              id: entry.id,
+              type: entry.type,
+              source: entry.source,
+              sourceId: entry.sourceId,
+              originUrl: entry.originUrl,
+              contentHash: entry.contentHash,
+              capturedAt: entry.capturedAt.toISOString(),
+            }))}
+          />
+        </div>
+      </div>
+
       {live && isDemoMode() ? (
         // The server action refuses these decisions in demo mode regardless; showing buttons
         // that always fail would be a worse lie than saying so up front. The draft below is
@@ -79,6 +118,22 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           </p>
         </div>
       ) : live ? (
+        <>
+        {draftScreen && !draftScreen.ok ? (
+          <div className="card">
+            <h2>Draft withheld</h2>
+            <p className="sub">
+              The compliance guard objected to this draft, so it is not rendered. The categories are{" "}
+              {draftScreen.violations
+                .map((v) => v.category)
+                .filter((category, i, all) => all.indexOf(category) === i)
+                .join(", ")}
+              . The excerpt stays in the audit payload rather than on the page: a false positive is
+              only fixable if somebody can see the line that tripped it, and this page is a wider
+              audience than that.
+            </p>
+          </div>
+        ) : null}
         <ReviewPanel
           // Keyed on case + view + draft: two cases sharing a draft (including two empty ones
           // in the exception view) would otherwise reuse one panel instance and carry a
@@ -86,9 +141,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           key={`${c.workflowId}:${live.status}:${live.draft ?? ""}`}
           workflowId={c.workflowId}
           status={live.status}
-          draft={live.draft ?? ""}
-          alternatives={live.alternatives}
+          draft={draftScreen && !draftScreen.ok ? "" : (live.draft ?? "")}
+          alternatives={alternativesScreen && !alternativesScreen.ok ? [] : live.alternatives}
+          confidence={confidence}
         />
+        </>
       ) : c.status === "awaiting_review" || c.status === "exception" ? (
         // Without live state there is no draft to read, and approving text you cannot see is
         // worse than waiting. Say why the gate is missing instead of rendering an empty one.
@@ -132,6 +189,14 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         // would fail server-side — so neither is offered the button. The action still enforces
         // this itself; hiding it is a courtesy, never the control.
         canAck={!isDemoMode() && isActionAllowed(principal.roles, "review_case")}
+        // Named rather than merely absent: a control above the caller's role renders disabled and
+        // says which role it needs, so a viewer learns what to ask for instead of meeting a dead
+        // page. The action still enforces this itself; the label is a courtesy, never the control.
+        unavailableReason={unavailableReason(
+          isActionAllowed(principal.roles, "review_case"),
+          "pharmacist",
+          isDemoMode(),
+        )}
       />
 
       <div className="card">

@@ -35,6 +35,9 @@ importers:
 
   apps/console:
     dependencies:
+      '@stopgap/compliance':
+        specifier: workspace:*
+        version: link:../../packages/compliance
       '@stopgap/core':
         specifier: workspace:*
         version: link:../../packages/core

@@ -405,6 +405,148 @@ export async function rankedOpenCases(
   }));
 }
 
+/** A page of the pharmacist's review queue, ranked by risk score (ticket 11). */
+export interface CaseQueueOptions {
+  q?: string | null;
+  status?: string;
+  severity?: string;
+  riskDomain?: string;
+  sort: string;
+  dir: "asc" | "desc";
+  page: number;
+  pageSize: number;
+}
+
+export interface QueuedCase extends RankedCase {
+  /** What the case detail route is keyed on — the id the ROW carries, never one recomputed. */
+  workflowId: string;
+  severity: string | null;
+  riskDomain: string | null;
+  updatedAt: Date;
+}
+
+/**
+ * One page of this tenant's open cases, ranked by risk score, with the filters the queue offers.
+ *
+ * Shares the scoring join with `rankedOpenCases` — same linkage, same stated limit — but pages,
+ * searches and filters rather than returning a fixed top slice. Kept as its own statement instead
+ * of a `limit`/`offset` bolted onto the other one: the overview wants the strongest few open cases
+ * and nothing else, and a shared function taking eight optional arguments to serve two callers is
+ * how a query grows a shape neither of them wants.
+ *
+ * The RISK DOMAIN filter is a property of the matched signal, not of the case: a case with no
+ * signal has no domain, and filtering on one therefore excludes it rather than showing it
+ * domain-less. That is the honest reading — "show me recalls" cannot include a case nothing has
+ * classified.
+ */
+export async function listCaseQueue(
+  db: Db,
+  orgId: string,
+  options: CaseQueueOptions,
+): Promise<{ rows: QueuedCase[]; total: number; page: number }> {
+  const term = options.q?.trim();
+  // `%` and `_` are LIKE metacharacters; a product name legitimately contains both.
+  const escaped = term ? term.replace(/([\\%_])/g, "\\$1") : null;
+  const like = escaped === null ? null : "%" + escaped + "%";
+  // Sort keys are an allow-list resolved by equality, never interpolated: this value comes from a
+  // query string and reaches an ORDER BY.
+  const sort = ["score", "updated", "severity", "entity"].includes(options.sort)
+    ? options.sort
+    : "score";
+  const ascending = options.dir === "asc";
+
+  const scored = sql`
+    with latest as (
+      select distinct on (s.id) s.entity_identifier, s.dedupe_key, s.risk_domain, s.severity,
+             snap.score, snap.band, snap.reachable_max, snap.components
+        from ${riskSignals} s
+        join ${riskScoreSnapshots} snap
+          on snap.signal_id = s.id and snap.org_id = ${orgId}
+       where s.org_id = ${orgId}
+       order by s.id, snap.computed_at desc, snap.id desc
+    ),
+    best as (
+      select lower(entity_identifier) as entity, dedupe_key, risk_domain, severity, score, band,
+             reachable_max, components,
+             row_number() over (
+               partition by lower(entity_identifier)
+               order by score / nullif(reachable_max, 0) desc, dedupe_key
+             ) as rank
+        from latest
+    ),
+    queue as (
+      select c.id, c.key, c.workflow_id, c.generic_name, c.status, c.updated_at,
+             best.dedupe_key, best.risk_domain, best.severity, best.score, best.band,
+             best.reachable_max, best.components
+        from ${cases} c
+        left join best on best.entity = lower(c.generic_name) and best.rank = 1
+       where c.org_id = ${orgId}
+         and c.closed_at is null
+         and c.status not in ('closed', 'rejected')
+         and (${options.status ?? null}::text is null or c.status = ${options.status ?? null})
+         and (${options.severity ?? null}::text is null or best.severity = ${options.severity ?? null})
+         and (${options.riskDomain ?? null}::text is null or best.risk_domain = ${options.riskDomain ?? null})
+         and (${like}::text is null or c.generic_name ilike ${like} escape '\\')
+    )`;
+
+  const [counted] = await db.execute<{ total: string }>(
+    sql`${scored} select count(*)::text as total from queue`,
+  );
+  const total = Number(counted?.total ?? 0);
+  const page = Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize)));
+
+  // ORDER BY assembled from the allow-listed key, never from the raw parameter. `id` last, so two
+  // cases with equal scores hold their order between pages instead of swapping.
+  const order =
+    sort === "updated"
+      ? sql`updated_at`
+      : sort === "severity"
+        ? sql`severity`
+        : sort === "entity"
+          ? sql`lower(generic_name)`
+          : sql`score / nullif(reachable_max, 0)`;
+  const rows = await db.execute<{
+    id: string;
+    key: string;
+    workflow_id: string;
+    generic_name: string;
+    status: string;
+    updated_at: string;
+    dedupe_key: string | null;
+    risk_domain: string | null;
+    severity: string | null;
+    score: string | null;
+    band: string | null;
+    reachable_max: string | null;
+    components: Record<string, number> | null;
+  }>(sql`
+    ${scored}
+    select * from queue
+     order by ${order} ${ascending ? sql`asc nulls last` : sql`desc nulls last`}, id
+     limit ${options.pageSize} offset ${(page - 1) * options.pageSize}
+  `);
+
+  return {
+    total,
+    page,
+    rows: rows.map((row) => ({
+      id: row.id,
+      key: row.key,
+      workflowId: row.workflow_id,
+      genericName: row.generic_name,
+      status: row.status,
+      updatedAt: new Date(row.updated_at),
+      signalKey: row.dedupe_key,
+      riskDomain: row.risk_domain,
+      severity: row.severity,
+      score: row.score === null ? null : Number(row.score),
+      band: row.band,
+      reachableMax: row.reachable_max === null ? null : Number(row.reachable_max),
+      components: row.components,
+    })),
+  };
+}
+
 /** One signal by its dedupe key, within this tenant. */
 export async function getSignalByKey(
   db: Db,

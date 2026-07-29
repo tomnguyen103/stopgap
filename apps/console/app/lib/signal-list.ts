@@ -2,11 +2,13 @@ import { RISK_DOMAINS, SEVERITIES, STALENESS } from "@stopgap/ingest";
 import { COMPONENT_BUDGET, type ComponentName } from "@stopgap/scorer";
 
 import {
-  parseListParams,
-  serializeListParams,
-  type ListParams,
-  type ListParamsSchema,
-} from "./list-params.js";
+  listHref,
+  sortHref as sortHrefFor,
+  toggleFilterHref as toggleFilterHrefFor,
+} from "./list-href.js";
+import { parseListParams, type ListParams, type ListParamsSchema } from "./list-params.js";
+
+export { filterValue, pageCount } from "./list-href.js";
 
 /**
  * The viewer's signals list, as data rather than as markup (ticket 08).
@@ -50,60 +52,33 @@ export function parseSignalListParams(
 }
 
 /**
- * The address for this list with one thing changed — what every sort header, filter chip and pager
- * link points at.
+ * The three address helpers, bound to the signals list's own schema.
  *
- * Any change other than the page itself resets to page 1: holding page 7 while switching to a
- * filter that matches four rows lands the reader on an empty page they did not ask for.
+ * The arithmetic lives in `list-href.ts`, shared with the case queue; what stays here is which
+ * vocabulary these links speak.
  */
 export function signalListHref(
   params: ListParams,
   change: Partial<Pick<ListParams, "q" | "sort" | "dir" | "page" | "pageSize" | "filters">>,
 ): string {
-  const next: ListParams = {
-    ...params,
-    ...change,
-    page: change.page ?? (Object.keys(change).some((k) => k !== "page") ? 1 : params.page),
-  };
-  const query = serializeListParams(next, SIGNAL_LIST_SCHEMA);
-  return query === "" ? "?" : `?${query}`;
+  return listHref(params, change, SIGNAL_LIST_SCHEMA);
 }
 
-/** Clicking the column already sorted on reverses it; clicking another starts at its default. */
 export function sortHref(params: ListParams, key: string): string {
-  if (params.sort !== key) return signalListHref(params, { sort: key, dir: "desc" });
-  return signalListHref(params, { dir: params.dir === "desc" ? "asc" : "desc" });
+  return sortHrefFor(params, key, SIGNAL_LIST_SCHEMA);
 }
 
-/**
- * Toggle one filter value — the chip behaviour, expressed as an address.
- *
- * ONE value per key: picking a second domain REPLACES the first rather than adding to it. The
- * alternative was a chip strip that renders two domains as chosen while the query reads one of
- * them, which is a page that lies about what it is showing.
- */
 export function toggleFilterHref(params: ListParams, key: string, value: string): string {
-  const active = (params.filters[key] ?? []).includes(value);
-  return signalListHref(params, {
-    filters: { ...params.filters, [key]: active ? [] : [value] },
-  });
-}
-
-/** The one value applied for a filter key, or undefined — what the query layer takes. */
-export function filterValue(params: ListParams, key: string): string | undefined {
-  return params.filters[key]?.[0];
+  return toggleFilterHrefFor(params, key, value, SIGNAL_LIST_SCHEMA);
 }
 
 /** The scorer's bands and the console's severity ramp share names; anything else stays neutral. */
-export function bandSeverity(band: string | null): "critical" | "high" | "moderate" | "low" | "none" {
+export function bandSeverity(
+  band: string | null,
+): "critical" | "high" | "moderate" | "low" | "none" {
   return band === "critical" || band === "high" || band === "moderate" || band === "low"
     ? band
     : "none";
-}
-
-/** Total pages for a row count, never below 1 — an empty list is still page 1 of 1. */
-export function pageCount(total: number, pageSize: number): number {
-  return Math.max(1, Math.ceil(total / pageSize));
 }
 
 /**
