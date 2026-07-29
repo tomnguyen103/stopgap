@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  bandSeverity,
   componentLabel,
+  filterValue,
   dormantComponents,
   dormantPoints,
   pageCount,
@@ -46,8 +48,28 @@ describe("signal list state", () => {
   });
 
   it("removes a filter value that is already applied", () => {
-    const params = parseSignalListParams("domain=recall&domain=shortage");
-    expect(toggleFilterHref(params, "domain", "recall")).toBe("?domain=shortage");
+    const params = parseSignalListParams("domain=recall");
+    expect(toggleFilterHref(params, "domain", "recall")).toBe("?");
+  });
+
+  it("replaces rather than accumulates, because only one value reaches the query", () => {
+    const params = parseSignalListParams("domain=recall");
+    expect(toggleFilterHref(params, "domain", "shortage")).toBe("?domain=shortage");
+    expect(filterValue(parseSignalListParams("domain=shortage"), "domain")).toBe("shortage");
+    expect(filterValue(parseSignalListParams(""), "domain")).toBeUndefined();
+  });
+
+  it("allows exactly the freshness labels the contract stores", () => {
+    // `recent` is not one of them — a value the schema allows and the column never holds is a
+    // filter that returns nothing forever.
+    expect(SIGNAL_LIST_SCHEMA.filters.freshness).toEqual(["fresh", "aging", "stale"]);
+    expect(parseSignalListParams("freshness=recent").filters.freshness ?? []).toEqual([]);
+    expect(parseSignalListParams("freshness=aging").filters.freshness).toEqual(["aging"]);
+  });
+
+  it("offers only sort keys the table renders a header for", () => {
+    expect(SIGNAL_LIST_SCHEMA.sortKeys).toEqual(["published", "severity", "entity"]);
+    expect(parseSignalListParams("sort=fetched").sort).toBe("published");
   });
 
   it("counts an empty list as one page", () => {
@@ -78,5 +100,11 @@ describe("partial scores", () => {
 
   it("labels every component the budget declares", () => {
     expect(componentLabel("daysOnHand")).toBe("Days on hand");
+  });
+
+  it("maps a scorer band onto the console's severity ramp, and nothing else", () => {
+    expect(bandSeverity("critical")).toBe("critical");
+    expect(bandSeverity(null)).toBe("none");
+    expect(bandSeverity("unheard-of")).toBe("none");
   });
 });

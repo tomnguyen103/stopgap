@@ -12,6 +12,7 @@
   "dependencies": {
     "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
+    "@stopgap/ingest": "workspace:*",
     "@stopgap/scorer": "workspace:*",
     "@stopgap/demo": "workspace:*",
     "@stopgap/ingest": "workspace:*",

@@ -1,4 +1,4 @@
-import { SIGNAL_SORT_KEYS } from "@stopgap/db";
+import { RISK_DOMAINS, SEVERITIES, STALENESS } from "@stopgap/ingest";
 import { COMPONENT_BUDGET, type ComponentName } from "@stopgap/scorer";
 
 import {
@@ -20,18 +20,24 @@ import {
 /**
  * What the signals list accepts.
  *
- * The filter values are the contract's own vocabulary (`packages/ingest/src/signal.ts`), not a
- * second list transcribed by hand: a value this schema allows and the database never stores is a
- * filter that silently returns nothing.
+ * The filter values ARE the contract's constants, imported rather than transcribed: a hand-copied
+ * list drifts the first time the contract gains a value, and a value this schema allows but the
+ * database never stores is a filter that silently returns nothing for good.
+ *
+ * `sortKeys` names only the columns the table actually renders a header for. The query layer knows
+ * more keys than these; offering one the page cannot show is a sort no reader can undo.
+ *
+ * `pageSizes` is reachable only by editing the address. It is an allow-list rather than a control:
+ * what it bounds is how many rows one request can pull.
  */
 export const SIGNAL_LIST_SCHEMA: ListParamsSchema = {
-  sortKeys: SIGNAL_SORT_KEYS,
+  sortKeys: ["published", "severity", "entity"],
   defaultSort: "published",
   defaultDir: "desc",
   filters: {
-    domain: ["shortage", "recall"],
-    severity: ["low", "moderate", "high", "critical"],
-    freshness: ["fresh", "recent", "stale"],
+    domain: RISK_DOMAINS,
+    severity: SEVERITIES,
+    freshness: STALENESS,
   },
   pageSizes: [25, 50, 100],
   defaultPageSize: 25,
@@ -69,13 +75,30 @@ export function sortHref(params: ListParams, key: string): string {
   return signalListHref(params, { dir: params.dir === "desc" ? "asc" : "desc" });
 }
 
-/** Toggle one value of one filter — the chip behaviour, expressed as an address. */
+/**
+ * Toggle one filter value — the chip behaviour, expressed as an address.
+ *
+ * ONE value per key: picking a second domain REPLACES the first rather than adding to it. The
+ * alternative was a chip strip that renders two domains as chosen while the query reads one of
+ * them, which is a page that lies about what it is showing.
+ */
 export function toggleFilterHref(params: ListParams, key: string, value: string): string {
-  const current = params.filters[key] ?? [];
-  const next = current.includes(value)
-    ? current.filter((v) => v !== value)
-    : [...current, value];
-  return signalListHref(params, { filters: { ...params.filters, [key]: next } });
+  const active = (params.filters[key] ?? []).includes(value);
+  return signalListHref(params, {
+    filters: { ...params.filters, [key]: active ? [] : [value] },
+  });
+}
+
+/** The one value applied for a filter key, or undefined — what the query layer takes. */
+export function filterValue(params: ListParams, key: string): string | undefined {
+  return params.filters[key]?.[0];
+}
+
+/** The scorer's bands and the console's severity ramp share names; anything else stays neutral. */
+export function bandSeverity(band: string | null): "critical" | "high" | "moderate" | "low" | "none" {
+  return band === "critical" || band === "high" || band === "moderate" || band === "low"
+    ? band
+    : "none";
 }
 
 /** Total pages for a row count, never below 1 — an empty list is still page 1 of 1. */
