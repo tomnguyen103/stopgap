@@ -17,7 +17,9 @@ export function ReviewPanel({
   status,
   draft,
   alternatives,
+  alternativesWithheld,
   confidence,
+  unavailableReason,
 }: {
   workflowId: string;
   status: string;
@@ -29,7 +31,18 @@ export function ReviewPanel({
    * rendering that as 0% would attribute a human decision to the model at its least certain.
    */
   confidence: string | null;
+  /** True when the compliance guard objected to the alternatives, so the list is empty by force. */
+  alternativesWithheld?: boolean;
+  /**
+   * Why a decision cannot be taken by this caller, naming the role it needs, or null when it can.
+   *
+   * The controls still RENDER when this is set — disabled, with the reason attached. A control
+   * that disappears teaches nobody what to ask for, and the server action refuses the decision
+   * either way, so the label is a courtesy rather than the enforcement.
+   */
+  unavailableReason?: string | null;
 }) {
+  const blocked = Boolean(unavailableReason);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
   const [editedDraft, setEditedDraft] = useState(draft);
@@ -56,9 +69,18 @@ export function ReviewPanel({
         <h2>Pharmacist review</h2>
         <p className="sub">
           This case is blocked on your decision. Alternatives proposed:{" "}
-          {alternatives.length > 0 ? alternatives.join(", ") : "none"}
+          {alternativesWithheld
+            ? "withheld by the compliance guard"
+            : alternatives.length > 0
+              ? alternatives.join(", ")
+              : "none"}
           {confidence ? ` · model confidence ${confidence}` : ""}
         </p>
+        {unavailableReason ? (
+          <p className="sub sub-tight" role="note">
+            {unavailableReason}
+          </p>
+        ) : null}
         <textarea
           className="draft-input"
           rows={10}
@@ -71,8 +93,14 @@ export function ReviewPanel({
         <div className="actions">
           <button
             type="button"
+            // `aria-disabled` rather than `disabled` when the caller lacks the role: a disabled
+            // control leaves the tab order, taking the explanation of WHY with it. The handler
+            // no-ops, and the server action refuses it regardless.
+            aria-disabled={blocked || undefined}
+            title={unavailableReason ?? undefined}
             disabled={pending}
             onClick={() => {
+              if (blocked) return;
               run(() =>
                 reviewCase(
                   workflowId,
@@ -95,8 +123,11 @@ export function ReviewPanel({
           <button
             type="button"
             className="danger"
+            aria-disabled={blocked || undefined}
+            title={unavailableReason ?? undefined}
             disabled={pending || rejectReason.trim().length === 0}
             onClick={() => {
+              if (blocked) return;
               run(() => reviewCase(workflowId, { kind: "reject", reason: rejectReason.trim() }));
             }}
           >
@@ -115,7 +146,13 @@ export function ReviewPanel({
         <p className="sub">
           The agent escalated this case. What you write here becomes an approved protocol version
           for this drug and releases the case — future shortages of it reuse your text.
+          {confidence ? ` The agent's own confidence in its draft was ${confidence}.` : ""}
         </p>
+        {unavailableReason ? (
+          <p className="sub sub-tight" role="note">
+            {unavailableReason}
+          </p>
+        ) : null}
         <textarea
           className="draft-input"
           rows={8}
@@ -147,10 +184,13 @@ export function ReviewPanel({
           />
           <button
             type="button"
+            aria-disabled={blocked || undefined}
+            title={unavailableReason ?? undefined}
             disabled={
               pending || resolutionBody.trim().length === 0 || rationale.trim().length === 0
             }
             onClick={() => {
+              if (blocked) return;
               run(() =>
                 resolveExceptionCase(workflowId, {
                   protocolBody: resolutionBody.trim(),

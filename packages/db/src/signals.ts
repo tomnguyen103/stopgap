@@ -493,7 +493,12 @@ export async function listCaseQueue(
     sql`${scored} select count(*)::text as total from queue`,
   );
   const total = Number(counted?.total ?? 0);
-  const page = Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize)));
+  // Floor AND ceiling. The console's parser already guarantees `page >= 1`, but this function is
+  // exported and a zero or negative page would reach OFFSET as a negative number and throw.
+  const page = Math.max(
+    1,
+    Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize))),
+  );
 
   // ORDER BY assembled from the allow-listed key, never from the raw parameter. `id` last, so two
   // cases with equal scores hold their order between pages instead of swapping.
@@ -501,7 +506,16 @@ export async function listCaseQueue(
     sort === "updated"
       ? sql`updated_at`
       : sort === "severity"
-        ? sql`severity`
+        ? // The RANK, not the text. `severity` holds low | moderate | high | critical, so ordering
+          // the column alphabetically puts moderate above high and critical last — a severity sort
+          // that buries the worst case is worse than no severity sort.
+          sql`case severity
+                when 'critical' then 4
+                when 'high' then 3
+                when 'moderate' then 2
+                when 'low' then 1
+                else 0
+              end`
         : sort === "entity"
           ? sql`lower(generic_name)`
           : sql`score / nullif(reachable_max, 0)`;
