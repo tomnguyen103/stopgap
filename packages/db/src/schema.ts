@@ -1186,7 +1186,7 @@ export type DailyBriefRow = typeof dailyBriefs.$inferSelect;
  * The facility catalog (ticket 15). Eight TENANT tables — what this hospital actually stocks.
  * ---------------------------------------------------------------------------------------------
  *
- * Every table here carries `orgId` and an `<table>_org_isolation` policy (migration 0015). None of
+ * Every table here carries `orgId` and an `<table>_org_isolation` policy (migration 0020). None of
  * it is a shared external fact: two hospitals stocking the same drug hold genuinely different
  * items, different suppliers, different contract prices and different shelves. Applying the
  * Â§6.5 test — "would two orgs disagree about this row" — every one of them is tenant data, and

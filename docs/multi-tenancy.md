@@ -37,7 +37,7 @@ its own org-scoped dedupe key, its own resolution state, its own weighting — s
 reading the same recall genuinely disagree about the row, and it is tenant data.
 | `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
 
-The eight catalog tables (ticket 15, migration 0015) are tenant data by the same test as the rest:
+The eight catalog tables (ticket 15, migration 0020) are tenant data by the same test as the rest:
 two hospitals stocking the same drug hold different items, different suppliers, different contract
 prices and different shelves. Nothing about a facility's catalog is a shared external fact.
 
