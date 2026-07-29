@@ -117,6 +117,15 @@ export interface CaseState {
   status: CaseStatus;
   severity?: Severity;
   alternatives: string[];
+  /**
+   * The alternatives agent's OWN stated confidence in `alternatives` and `draft`, 0 to 1.
+   *
+   * Surfaced because a pharmacist deciding on generated text needs the model's own hedge in front
+   * of them, not only the routing outcome it produced. Absent when the protocol came from
+   * organizational memory or from a pharmacist resolving an exception — neither is a model
+   * estimate, and reusing the field for them would misreport a human decision as a model's.
+   */
+  researchConfidence?: number;
   draft?: string;
   decision?: ReviewDecision;
   /** Weeks the case has spent in monitoring (proves long-horizon durability). */

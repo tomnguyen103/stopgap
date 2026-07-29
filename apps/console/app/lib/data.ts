@@ -6,6 +6,8 @@ import {
   getKpis,
   getSignalByKey,
   latestScoresForSignals,
+  listCaseQueue,
+  listEvidenceForSignal,
   listSignalsPage,
   listAcknowledgments,
   listApiKeys,
@@ -25,8 +27,11 @@ import type { CaseStatus, Role } from "@stopgap/core";
 import type {
   ApiKeyRow,
   Kpis,
+  CaseQueueOptions,
+  QueuedCase,
   RankedCase,
   RiskSignalRow,
+  SignalEvidenceRow,
   SignalPageOptions,
   UserRow,
 } from "@stopgap/db";
@@ -361,5 +366,41 @@ export async function getSignalDetail(dedupeKey: string): Promise<
       .orderBy(desc(schema.riskScoreSnapshots.computedAt), desc(schema.riskScoreSnapshots.id))
       .limit(1);
     return { signal, snapshot };
+  });
+}
+
+/** One page of the pharmacist's review queue, ranked by risk score (ticket 11). */
+export async function getCaseQueue(
+  options: CaseQueueOptions,
+): Promise<{ rows: QueuedCase[]; total: number; page: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => listCaseQueue(db, orgId, options));
+}
+
+/**
+ * The evidence trail behind a case, via the signal that names the same product.
+ *
+ * Returns an empty array rather than throwing when nothing matches: a case the feeds have not
+ * classified has no evidence yet, which is a thing the drawer says, not an error.
+ */
+export async function getCaseEvidence(genericName: string): Promise<{
+  signal: RiskSignalRow | undefined;
+  evidence: SignalEvidenceRow[];
+}> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const [signal] = await db
+      .select()
+      .from(schema.riskSignals)
+      .where(
+        and(
+          eq(schema.riskSignals.orgId, orgId),
+          sql`lower(${schema.riskSignals.entityIdentifier}) = lower(${genericName})`,
+        ),
+      )
+      .orderBy(desc(schema.riskSignals.publishedAt))
+      .limit(1);
+    if (!signal) return { signal: undefined, evidence: [] };
+    return { signal, evidence: await listEvidenceForSignal(db, orgId, signal.id) };
   });
 }

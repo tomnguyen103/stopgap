@@ -17,11 +17,18 @@ export function ReviewPanel({
   status,
   draft,
   alternatives,
+  confidence,
 }: {
   workflowId: string;
   status: string;
   draft: string;
   alternatives: string[];
+  /**
+   * The alternatives agent's own stated confidence, already formatted, or null when there is no
+   * model estimate at all — a protocol reused from memory or written by a pharmacist has none, and
+   * rendering that as 0% would attribute a human decision to the model at its least certain.
+   */
+  confidence: string | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
@@ -50,6 +57,7 @@ export function ReviewPanel({
         <p className="sub">
           This case is blocked on your decision. Alternatives proposed:{" "}
           {alternatives.length > 0 ? alternatives.join(", ") : "none"}
+          {confidence ? ` · model confidence ${confidence}` : ""}
         </p>
         <textarea
           className="draft-input"
