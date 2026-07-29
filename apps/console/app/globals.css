@@ -615,3 +615,77 @@ button.danger {
     transition-duration: 1ms;
   }
 }
+
+/* ---- Ticket 08: the viewer's figures, filter chips and pager ------------------------------- */
+/*
+  Additive, and token-only. Every declaration below reads the SEMANTIC layer already defined at the
+  top of this file — no new colour is introduced, because a dashboard that invents one is how a
+  console ends up with two greys that are almost the same.
+*/
+.ds-figures {
+  display: grid;
+  /* `minmax(0, 1fr)`, not `1fr`: a long figure otherwise widens its track and pushes the page
+     sideways on a 320px viewport. */
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: var(--space-6);
+  margin: var(--space-7) 0;
+}
+.ds-figure {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad-y) var(--card-pad-x);
+}
+.ds-figure__value {
+  font-size: 28px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.ds-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+}
+.ds-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.ds-chip {
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  padding: var(--badge-pad-y) var(--badge-pad-x);
+  font-size: var(--text-sm);
+  color: var(--text-default);
+  text-decoration: none;
+}
+.ds-chip:hover {
+  background: var(--surface-hover);
+}
+.ds-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* The applied state is carried by BOTH colour and the `aria-pressed` the markup sets, so it is
+   legible to a screen reader and to someone who cannot separate these two greys. */
+.ds-chip--on {
+  border-color: var(--interactive);
+  color: var(--interactive);
+}
+.ds-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+  margin-top: var(--space-7);
+}
+/* A pager link at the end of its range stays visible and stops responding, rather than vanishing
+   and moving the two controls beside it. */
+.ds-pager [aria-disabled="true"] {
+  opacity: var(--button-disabled-opacity);
+  pointer-events: none;
+}
