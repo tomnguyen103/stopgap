@@ -57,13 +57,52 @@ function renderPredicate(node: unknown): string[] {
   return names;
 }
 
+/**
+ * An order-by argument rendered as text: the column name plus the ` asc` / ` desc` fragment
+ * drizzle appends. Direction is the whole point for `listCasesAwaitingHuman`, whose cap keeps
+ * whichever end of the list the ordering puts first.
+ */
+function renderOrder(node: unknown): string {
+  const parts: string[] = [];
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    const rec = n as Record<string, unknown>;
+    if (typeof rec.name === "string" && typeof rec.columnType === "string") {
+      parts.push(rec.name);
+      return;
+    }
+    // A StringChunk — the literal SQL between the column refs.
+    if (Array.isArray(rec.value) && rec.value.every((v) => typeof v === "string")) {
+      parts.push(...(rec.value as string[]));
+      return;
+    }
+    for (const value of Object.values(rec)) {
+      if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === "object") walk(value);
+    }
+  };
+  walk(node);
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+const orderings: string[] = [];
+const limits: number[] = [];
+
 /** The subset of the drizzle select/insert/update chain these functions actually use. */
 function fakeDb(rows: Record<string, unknown>[]) {
   const inserted: Record<string, unknown>[] = [];
   const chain = (result: unknown[]) => {
     const self: Record<string, unknown> = {};
-    const passthrough = ["from", "orderBy", "limit", "set", "returning", "onConflictDoNothing"];
+    const passthrough = ["from", "set", "returning", "onConflictDoNothing"];
     for (const method of passthrough) self[method] = () => self;
+    self.orderBy = (order: unknown) => {
+      orderings.push(renderOrder(order));
+      return self;
+    };
+    self.limit = (n: number) => {
+      limits.push(n);
+      return self;
+    };
     self.where = (predicate: unknown) => {
       predicates.push(renderPredicate(predicate));
       return self;
@@ -88,9 +127,13 @@ function fakeDb(rows: Record<string, unknown>[]) {
 
 vi.mock("./client.js", () => ({ getDb: () => ({}) }));
 
-const { workflowIdForKey, getCaseByKey, getCaseByWorkflowId, upsertCaseForRecord } = await import(
-  "./cases.js"
-);
+const {
+  workflowIdForKey,
+  getCaseByKey,
+  getCaseByWorkflowId,
+  upsertCaseForRecord,
+  listCasesAwaitingHuman,
+} = await import("./cases.js");
 
 describe("workflowIdForKey", () => {
   it("mints an ORG-QUALIFIED id for a new case", () => {
@@ -166,5 +209,27 @@ describe("finding a case written BEFORE the workflow-id format changed", () => {
     expect(inserted).toHaveLength(1);
     expect(inserted[0]?.workflowId).toBe(`org-${ORG}-case-cefazolin`);
     expect(inserted[0]?.orgId).toBe(ORG);
+  });
+});
+
+describe("listCasesAwaitingHuman", () => {
+  it("bounds the read in the QUERY and keeps the longest-waiting end of the list", async () => {
+    predicates.length = 0;
+    orderings.length = 0;
+    limits.length = 0;
+    const { db } = fakeDb([{ key: "heparin sodium", status: "awaiting_review" }]);
+
+    await listCasesAwaitingHuman(db as never, ORG, 25);
+
+    // The cap belongs to the query, not only to whatever the caller renders: the daily brief runs
+    // this once per tenant per day, and a tenant with a thousand parked cases would otherwise read
+    // all thousand to show twenty-five.
+    expect(limits).toEqual([25]);
+    // Oldest first is what makes the cap keep the right end. Reversed, the bound would hide the
+    // case parked for three weeks behind twenty-five opened this morning.
+    expect(orderings[0]).toContain("opened_at");
+    expect(orderings[0]).toContain("asc");
+    expect(predicates[0]).toContain("org_id");
+    expect(predicates[0]).toContain("status");
   });
 });

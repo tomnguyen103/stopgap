@@ -78,6 +78,10 @@ vi.mock("@stopgap/db", () => ({
 }));
 
 vi.mock("@stopgap/agents", () => ({
+  // The real value, restated: this mock replaces the whole module, and the activity passes the
+  // cap to `listCasesAwaitingHuman` as the query's bound. Nothing here asserts on the number —
+  // `packages/db/src/cases.test.ts` pins that the query is bounded and ordered.
+  LISTED_REVIEW_CASES: 25,
   draftDailyBrief: (input: { current: { entity: string; score: number | undefined }[] }) => {
     draftInputs.push(input);
     if (providerDown) throw new Error("all providers unhealthy");

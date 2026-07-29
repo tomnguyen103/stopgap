@@ -1,5 +1,5 @@
 import { Context } from "@temporalio/activity";
-import { draftDailyBrief } from "@stopgap/agents";
+import { draftDailyBrief, LISTED_REVIEW_CASES } from "@stopgap/agents";
 import { screenContent, describeViolations } from "@stopgap/compliance";
 import {
   latestScoresForSignals,
@@ -81,7 +81,10 @@ export async function generateDailyBriefs(now = new Date()): Promise<{
           signals.map((s) => s.id),
         );
         const previous = await previousDailyBrief(db, org.id, briefDate);
-        const awaiting = await listCasesAwaitingHuman(db, org.id);
+        // Bounded in the QUERY, not only in the prompt: the cap is what the brief will render, so
+        // reading a tenant's whole parked backlog to throw most of it away is work nobody asked
+        // for on a path that runs once per tenant per day.
+        const awaiting = await listCasesAwaitingHuman(db, org.id, LISTED_REVIEW_CASES);
         // Highest risk first, because that is what the model is told it is being given. An
         // unscored signal sorts last rather than as a zero: "not scored yet" and "scored zero"
         // are different facts, and only one of them means the signal is unimportant.

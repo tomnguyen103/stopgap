@@ -43,7 +43,7 @@ const LISTED_SIGNALS = 25;
  * Cutting from that end instead would hide precisely the cases the section exists to surface —
  * a case parked for three weeks needs a human more than one opened this morning.
  */
-const LISTED_REVIEW_CASES = 25;
+export const LISTED_REVIEW_CASES = 25;
 
 /**
  * Wrap upstream text in the `<record>` boundary the system instruction classifies as untrusted, with

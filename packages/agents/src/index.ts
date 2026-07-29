@@ -1,6 +1,6 @@
 export { assessImpact } from "./impact.js";
 export { researchAlternatives } from "./alternatives.js";
-export { draftDailyBrief, type BriefInput } from "./brief.js";
+export { draftDailyBrief, LISTED_REVIEW_CASES, type BriefInput } from "./brief.js";
 export {
   ImpactAssessment,
   AlternativesResearch,

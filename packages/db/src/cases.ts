@@ -245,17 +245,23 @@ export async function resetFeedMiss(db: Db, orgId: string, caseId: string): Prom
 }
 
 /**
- * Cases in this tenant that are waiting on a person, LONGEST-WAITING FIRST. Its one consumer — the
- * daily brief — bounds the list, and the case parked for three weeks is the one that needs a human
- * more than the one opened this morning.
+ * Cases in this tenant that are waiting on a person, LONGEST-WAITING FIRST.
+ *
+ * `limit` is required rather than defaulted: the caller — the daily brief — renders this list into
+ * a model prompt, so the bound is a product decision that belongs with the prompt, and a tenant
+ * with a thousand parked cases must not be able to decide how much this query reads. Oldest-first
+ * ordering is what makes the cap keep the right end: a case parked for three weeks needs a human
+ * more than one opened this morning.
  */
 export async function listCasesAwaitingHuman(
   db: Db,
   orgId: string,
+  limit: number,
 ): Promise<{ key: string; status: string }[]> {
   return db
     .select({ key: cases.key, status: cases.status })
     .from(cases)
     .where(and(eq(cases.orgId, orgId), inArray(cases.status, [...AWAITING_HUMAN_STATUSES])))
-    .orderBy(asc(cases.openedAt));
+    .orderBy(asc(cases.openedAt))
+    .limit(limit);
 }
