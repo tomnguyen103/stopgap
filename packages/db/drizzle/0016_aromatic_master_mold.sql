@@ -18,11 +18,12 @@
 -- Writing 100 would retroactively claim they were scored on a basis they never had.
 --
 -- Additive: no column is dropped, no row is deleted, and no existing value changes.
+--
+-- `risk_score_snapshots_signal_idx` was created here on the branch this ticket was built on, where
+-- 0015 had declared it in the Drizzle schema without emitting the DDL. 0015 creates it now, so
+-- repeating the statement here would abort this migration on every database that ran 0015 —
+-- the index is the same one, not a second one, and one migration owns it.
 
 ALTER TABLE "risk_score_snapshots" ADD COLUMN "reachable_max" numeric(6, 2);--> statement-breakpoint
 UPDATE "risk_score_snapshots" SET "reachable_max" = 65 WHERE "reachable_max" IS NULL;--> statement-breakpoint
-ALTER TABLE "risk_score_snapshots" ALTER COLUMN "reachable_max" SET NOT NULL;--> statement-breakpoint
-
--- Serves `latestScoresForSignals`, which reads by signal. Without it that read walks the tenant's
--- whole scoring history to answer "what is this one signal's latest score".
-CREATE INDEX "risk_score_snapshots_signal_idx" ON "risk_score_snapshots" USING btree ("org_id","signal_id","computed_at");
+ALTER TABLE "risk_score_snapshots" ALTER COLUMN "reachable_max" SET NOT NULL;
