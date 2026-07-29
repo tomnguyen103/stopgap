@@ -20,6 +20,13 @@ import {
   recordAcknowledgment,
   syntheticUserIdForLabel,
   listOpenMonitoringCases,
+  matchSignalToCatalog,
+  matchSignalsToCatalog,
+  exposureFacts,
+  summarizeExposure,
+  type ExposureFacts,
+  type Db,
+  catalogExposure,
   listRoleRecipients,
   recordFeedRecords,
   lastFiredByRule,
@@ -42,6 +49,7 @@ import {
 } from "@stopgap/db";
 import { sendChat, sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { incrementCounter } from "@stopgap/observability";
+import type { SignalMatch } from "@stopgap/catalog";
 import { componentsToRecord, scoreSignals, type ScorableSignal } from "@stopgap/scorer";
 import {
   evaluateAlerts,
@@ -63,6 +71,7 @@ import {
   type AshpEntry,
   type NormalizedSignal,
   type OpenFdaResult,
+  matchHintsForRecord,
 } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, markResolved, startCase } from "./client.js";
@@ -172,7 +181,31 @@ export async function persistStatus(
 /** Impact assessment via the Zod-validated AI SDK agent (Gemini/Ollama, health-routed). */
 export async function assessImpact(input: CaseInput): Promise<ImpactResult> {
   try {
-    return await agents.assessImpact(input.record);
+    // Ticket 16 — the assessment reads THIS facility's catalog rather than a simulated formulary.
+    // Scoped to the case's own org, like every other read on this path: a shortage means something
+    // different to a hospital that stocks four presentations of the drug than to one that stocks
+    // none, and that difference is exactly what the model was previously left to guess at.
+    const catalog = await withOrgDb(input.orgId, async (db) => {
+      const matches = await matchSignalToCatalog(
+        db,
+        input.orgId,
+        matchHintsForRecord(input.record),
+      );
+      const exposure = await catalogExposure(
+        db,
+        input.orgId,
+        matches.map((m) => m.itemId),
+        new Date(),
+      );
+      return {
+        matchedItems: matches.length,
+        daysOnHand: exposure.daysOnHand,
+        supplierSiteCount: exposure.supplierSiteCount,
+        soleSourcedItems: exposure.soleSourcedItemIds.length,
+      };
+    });
+    const assessment = await agents.assessImpact(input.record, catalog);
+    return { ...assessment, affectedFormularyItems: catalog.matchedItems };
   } catch (err) {
     // Count the throw before it propagates to Temporal's retry (PHASE6 §6.4 task-failure metric).
     // A provider outage is the common cause and is exactly what the ops dashboard should surface.
@@ -411,18 +444,57 @@ function normalizeForOrg(
 /**
  * Score each signal this poll wrote, one snapshot apiece.
  *
- * PER SIGNAL rather than per facility, deliberately and temporarily: until ticket 16 matches
- * signals to catalog items there is no item to aggregate onto, and inventing one would mean
- * guessing which signals belong together — the exact judgement the matching layer exists to make.
- * The catalog components therefore go unsupplied here, which is why every snapshot this poll
- * writes reports them as UNAVAILABLE rather than as zero.
+ * PER SIGNAL rather than per facility: each signal is matched against THIS tenant's catalog
+ * (ticket 16), and the exposure that match unlocks — days on hand, supplier sites — is what
+ * switches on the two components that were dark while the catalog slice was outstanding.
+ *
+ * A signal that matches NOTHING still scores. Its catalog components stay UNAVAILABLE rather than
+ * becoming zero, because "this facility does not stock the affected product" and "we have no
+ * catalog data" are different facts and only one of them means there is no exposure. The scorer
+ * reports the total against `reachableMax`, so a partially-scored signal is still comparable.
  */
-function scoreForPoll(
+async function scoreForPoll(
+  db: Db,
+  orgId: string,
   signals: NormalizedSignal[],
   persisted: { id: string; dedupeKey: string }[],
   evaluatedAt: string,
 ) {
   const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
+
+  // ONE match pass and ONE fact fetch for the whole batch, not one per signal. A poll writes tens
+  // of signals per tenant inside a single transaction, and a per-signal round trip would hold that
+  // transaction — and its pooled connection — open across an N+1 for work that is one query either
+  // way.
+  //
+  // A CATALOG FAILURE DEGRADES THE SCORE, IT DOES NOT LOSE THE SIGNAL. This runs inside the same
+  // transaction as `upsertSignals`, so letting the error escape would roll back signals that were
+  // written perfectly well. Scoring falls back to the no-catalog reading — components unavailable,
+  // exactly as before the catalog landed — and says so.
+  let matchesBySignal = new Map<string, SignalMatch[]>();
+  let facts: ExposureFacts = { stock: [], burn: [], links: [] };
+  try {
+    const matched = await matchSignalsToCatalog(
+      db,
+      orgId,
+      signals.map((s) => s.matchHints),
+    );
+    matchesBySignal = new Map(signals.map((s, i) => [s.dedupeKey, matched[i] ?? []]));
+    facts = await exposureFacts(
+      db,
+      orgId,
+      [...new Set(matched.flat().map((m) => m.itemId))],
+      new Date(evaluatedAt),
+    );
+  } catch (err) {
+    incrementCounter("stopgap_catalog_match_failures_total");
+    console.error(
+      `[poll] catalog matching failed for org ${orgId}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        "Signals are still written and scored; their catalog components stay unavailable.",
+    );
+  }
+
   const snapshots: ScoreSnapshotInput[] = [];
   // Collapsed on the dedupe key first, exactly as `upsertSignals` collapses its own batch. Two feed
   // records deriving the same key resolve to ONE persisted row, so scoring both would emit two
@@ -443,7 +515,19 @@ function scoreForPoll(
       publishedAt: signal.publishedAt,
       sourceResolved: signal.sourceResolved,
     };
-    const result = scoreSignals({ signals: [scorable], evaluatedAt });
+    const exposure = summarizeExposure(
+      facts,
+      (matchesBySignal.get(signal.dedupeKey) ?? []).map((m) => m.itemId),
+    );
+    const result = scoreSignals({
+      signals: [scorable],
+      catalog: {
+        daysOnHand: exposure.daysOnHand,
+        supplierSiteCount: exposure.supplierSiteCount,
+        soleSourcedItemIds: exposure.soleSourcedItemIds,
+      },
+      evaluatedAt,
+    });
     snapshots.push({
       signalId,
       score: result.score,
@@ -721,7 +805,7 @@ export async function pollAndOpenCases(): Promise<{
           // in the same transaction, so a snapshot can never describe a signal row that failed to
           // land. `pollTimestamp` is the evaluation time for EVERY org in this poll, which is what
           // makes two tenants' scores comparable and the whole poll reproducible.
-          const snapshots = scoreForPoll(signals, persisted, pollTimestamp);
+          const snapshots = await scoreForPoll(db, org.id, signals, persisted, pollTimestamp);
           await recordScoreSnapshots(db, org.id, snapshots);
           // Ticket 09 — the durable trail behind each signal. A pointer and a fingerprint, never
           // the payload: see the table's own doc block for why a long-retention table stays free

@@ -27,7 +27,8 @@
     "@stopgap/comms": "workspace:*",
     "@stopgap/scorer": "workspace:*",
     "@stopgap/alerts": "workspace:*",
-    "@stopgap/compliance": "workspace:*"
+    "@stopgap/compliance": "workspace:*",
+    "@stopgap/catalog": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.11.0"

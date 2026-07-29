@@ -169,6 +169,7 @@ export {
   type EvidenceInput,
   type SignalPageOptions,
 } from "./signals.js";
+export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
 export type {
   AlertRuleRow,
   AlertEventRow,
@@ -200,3 +201,13 @@ export type {
   NewShadowRunRow,
   DailyBriefRow,
 } from "./schema.js";
+export {
+  BURN_WINDOW_DAYS,
+  catalogExposure,
+  exposureFacts,
+  matchSignalToCatalog,
+  matchSignalsToCatalog,
+  summarizeExposure,
+  type CatalogExposureReading,
+  type ExposureFacts,
+} from "./matching.js";
