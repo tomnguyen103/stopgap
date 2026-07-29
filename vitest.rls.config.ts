@@ -10,7 +10,7 @@ import { defineConfig } from "vitest/config";
  *
  *   pnpm test:rls
  *
- * Four suites, with different connection requirements — both stated in each file's header:
+ * Six suites, with different connection requirements — both stated in each file's header:
  *  - `rls.e2e.test.ts` needs `DATABASE_URL` to name a role the policies APPLY to, and refuses to
  *    run otherwise (a green isolation suite under a superuser proves nothing);
  *  - `migrations.e2e.test.ts` needs `DATABASE_URL_MAINTENANCE` to name the OWNER, because it

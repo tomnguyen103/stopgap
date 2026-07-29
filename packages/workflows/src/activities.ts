@@ -190,6 +190,13 @@ export async function assessImpact(input: CaseInput): Promise<ImpactResult> {
     // Scoped to the case's own org, like every other read on this path: a shortage means something
     // different to a hospital that stocks four presentations of the drug than to one that stocks
     // none, and that difference is exactly what the model was previously left to guess at.
+    //
+    // A CATALOG FAILURE DEGRADES THE ASSESSMENT, IT DOES NOT LOSE THE CASE — the same stance
+    // `scoreForPoll` takes on the same read. The catalog is an enrichment: without it the model
+    // assesses the shortage on the record alone, which is exactly what it did before ticket 16.
+    // Letting the read escape would instead fail the activity, count a task failure, retry into
+    // the same unavailable table and finally park a real shortage case mid-assessment — a
+    // strictly worse outcome than an assessment that knows less about this facility's stock.
     const catalog = await withOrgDb(input.orgId, async (db) => {
       const matches = await matchSignalToCatalog(
         db,
@@ -208,6 +215,10 @@ export async function assessImpact(input: CaseInput): Promise<ImpactResult> {
         supplierSiteCount: exposure.supplierSiteCount,
         soleSourcedItems: exposure.soleSourcedItemIds.length,
       };
+    }).catch((err: unknown) => {
+      incrementCounter("stopgap_catalog_read_failures_total", { activity: "assessImpact" });
+      console.warn(`[workflows] catalog read failed for org ${input.orgId}; assessing without it`, err);
+      return { matchedItems: 0, soleSourcedItems: 0 };
     });
     const assessment = await agents.assessImpact(input.record, catalog);
     return { ...assessment, affectedFormularyItems: catalog.matchedItems };
@@ -1167,6 +1178,19 @@ export async function sweepRetention(): Promise<RetentionSweepResult[]> {
   const runToken = currentRunId() ?? now.toISOString();
   const results: RetentionSweepResult[] = [];
   for (const org of orgs) {
+    // One beat per tenant, for the same reason the brief activity beats per tenant: this
+    // activity's runtime scales with the organization registry, so without a heartbeat a worker
+    // that dies mid-sweep is only detected at the start-to-close bound.
+    // Guarded for the same reason `reportProgress` in `brief.ts` is: this function is also called
+    // outside a worker by its own unit tests, and `Context.current()` THROWS rather than
+    // returning undefined when no activity is running. The catch means "there is nobody to report
+    // progress to", never a swallowed heartbeat failure — a heartbeat inside a real activity does
+    // not throw.
+    try {
+      Context.current().heartbeat({ org: org.id, done: results.length, of: orgs.length });
+    } catch {
+      // Not running as a Temporal activity — no heartbeat sink exists.
+    }
     try {
       const result = await sweepOrgRetention(org.id, now, windows, runToken);
       results.push(result);

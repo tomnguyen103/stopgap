@@ -93,3 +93,14 @@ boundary inside each alternative, exactly as `national_identifier` was fixed on 
 
 So batch A step 4 is: cherry-pick `c25071b` alone, then close #13 noting ticket 10 landed
 via #31 and only the label fix remained.
+
+## STATE 2026-07-29 ~21:5xZ
+
+Batch A ASSEMBLED and pushed. Branch `feat/catalog-schema-and-csv-import` head `3c01098`,
+16 commits over main, one migration (0020), `pnpm gate` exit 0. Tickets 15, 16, 19, 18, 10.
+No schema drift beyond 0020 — 16/19/18 read and sweep existing columns, drizzle-kit says
+"No schema changes".
+
+Remaining for batch A: local review over the whole batch diff -> fix -> retitle #15 ->
+close #32 #26 #27 #13 as superseded -> ready flip (the ONE review event) -> wait protocol
+-> merge. Last completed CodeRabbit review was 20:01:34Z, so the flip waits until ~22:16Z.

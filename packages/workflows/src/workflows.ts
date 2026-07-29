@@ -500,6 +500,24 @@ export async function dailyBriefWorkflow(): Promise<{ generated: number; degrade
 }
 
 /**
+ * The retention sweep gets its own proxy for exactly the reason the brief does: `sweepRetention`
+ * loops over the WHOLE organization registry and deletes in batches inside each one, so its
+ * runtime scales with the deployment while every activity on `acts` is a single bounded
+ * operation. Under the shared one-minute timeout the first sweep of an aged deployment times out
+ * and then retries into the same wall, which is a cleanup that never completes rather than one
+ * that is merely slow. Retries are capped at two: a per-org failure is already absorbed inside
+ * the activity (it counts the failure and moves to the next tenant), so an exhausted retry here
+ * means something structural that repeating will not fix.
+ */
+const retentionActs = proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 minutes",
+  // The activity heartbeats once per tenant, so a worker that dies mid-sweep is detected in
+  // minutes rather than at the 30-minute bound.
+  heartbeatTimeout: "5 minutes",
+  retry: { maximumAttempts: 2, initialInterval: "10s", backoffCoefficient: 2 },
+});
+
+/**
  * The retention workflow (ticket 18). One run = one sweep of every organization's expired records.
  * A daily Temporal Schedule fires it (`scripts/start-schedule.ts`) — the same orchestrator
  * everything else already runs on, so "did the cleanup run" is answerable in the place an operator
@@ -508,7 +526,7 @@ export async function dailyBriefWorkflow(): Promise<{ generated: number; degrade
 export async function retentionSweepWorkflow(): Promise<
   { orgId: string; removed: number }[]
 > {
-  const results = await acts.sweepRetention();
+  const results = await retentionActs.sweepRetention();
   // The workflow RESULT is deliberately the small summary: per-kind counts are already in each
   // organization's audit chain, and a workflow history is not the place to keep a second copy.
   return results.map((result) => ({
