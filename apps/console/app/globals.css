@@ -695,3 +695,43 @@ button.danger {
   opacity: var(--button-disabled-opacity);
   cursor: default;
 }
+
+/* ---- Ticket 11: the evidence drawer -------------------------------------------------------- */
+/*
+  A native `<dialog>`, so the backdrop, the top-layer stacking, Escape-to-close and the focus trap
+  are the platform's rather than this stylesheet's. Only the surface is styled.
+*/
+.ds-drawer {
+  background: var(--surface-raised);
+  color: var(--text-default);
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius);
+  padding: var(--card-pad-y) var(--card-pad-x);
+  /* Wide enough to read a source URL without wrapping it to death, and never wider than the
+     viewport it opens over. */
+  width: min(680px, calc(100vw - var(--space-9)));
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.ds-drawer::backdrop {
+  background: rgb(0 0 0 / 0.55);
+}
+.ds-drawer__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-6);
+}
+.ds-drawer__list {
+  list-style: none;
+  margin: var(--space-7) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-7);
+}
+.ds-drawer__list li {
+  border-top: 1px solid var(--border-default);
+  padding-top: var(--space-6);
+  /* A captured URL is one long unbreakable token; without this it widens the dialog. */
+  overflow-wrap: anywhere;
+}

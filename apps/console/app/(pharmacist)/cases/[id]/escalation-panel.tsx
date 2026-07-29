@@ -32,6 +32,7 @@ export function EscalationPanel({
   ackError,
   acks,
   canAck,
+  unavailableReason,
 }: {
   workflowId: string;
   escalationStep: number | undefined;
@@ -40,6 +41,8 @@ export function EscalationPanel({
   ackError: string | undefined;
   acks: AckRow[];
   canAck: boolean;
+  /** Why the control is unavailable, naming the role it needs. Null when it is available. */
+  unavailableReason?: string | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
@@ -97,7 +100,7 @@ export function EscalationPanel({
             // The click handler no-ops instead.
             aria-disabled={!canAck || pending}
             data-state={!canAck ? "error" : undefined}
-            title={canAck ? undefined : "Requires the pharmacist role"}
+            title={canAck ? undefined : (unavailableReason ?? "Requires the pharmacist role")}
             onClick={() => {
               if (!canAck || pending) return;
               setError(undefined);

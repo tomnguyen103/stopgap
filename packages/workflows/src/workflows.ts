@@ -339,6 +339,9 @@ export async function shortageCaseWorkflow(input: CaseInput): Promise<CaseState>
         state.alternatives = research.alternatives;
         state.draft = research.draft;
         state.protocolSource = "agent";
+        // Recorded whether or not the case routes to the exception queue below: the number that
+        // sent it there is exactly what a pharmacist reading the case needs to see.
+        state.researchConfidence = research.confidence;
 
         // No therapeutic equivalent, no draft text, or the agent isn't confident enough to
         // auto-draft → exception queue (always human; PROJECT_PLAN §2 exception matrix, §8
