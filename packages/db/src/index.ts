@@ -139,6 +139,7 @@ export {
   type DailyBriefInput,
 } from "./briefs.js";
 export {
+  dedupeByKey,
   upsertSignals,
   bumpSignalFeedMiss,
   listSignals,
