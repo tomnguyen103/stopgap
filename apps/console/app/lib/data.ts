@@ -5,6 +5,7 @@ import {
   getCaseByWorkflowId,
   getLlmSpend,
   listAlertHistory,
+  lastFiredByRule,
   listAlertRules,
   unacknowledgedCritical,
   getDb,
@@ -429,7 +430,12 @@ export interface OversightData {
   trend: DailyCount[];
   unacknowledged: UnacknowledgedCase[];
   spend: DailySpend;
-  pendingVersions: { protocol: ProtocolRow; version: ProtocolVersionRow; previousBody: string }[];
+  pendingVersions: {
+    protocol: ProtocolRow;
+    version: ProtocolVersionRow;
+    previousBody: string;
+    supersedes: number | null;
+  }[];
 }
 
 export async function getOversight(): Promise<OversightData> {
@@ -457,33 +463,62 @@ export async function getOversight(): Promise<OversightData> {
         and(eq(schema.protocolVersions.orgId, orgId), eq(schema.protocolVersions.state, "draft")),
       )
       .orderBy(desc(schema.protocolVersions.createdAt));
+    // The approved version each draft would replace. `DISTINCT ON` with an explicit order, not a
+    // bare filter: `approveProtocolVersion` supersedes the previous approval in the same
+    // transaction so there should be one per protocol, and "should be" is not an ordering — an
+    // unordered read would let the planner pick either row on any day the invariant slipped.
     const approved = await db
-      .select({
+      .selectDistinctOn([schema.protocolVersions.protocolId], {
         protocolId: schema.protocolVersions.protocolId,
+        version: schema.protocolVersions.version,
         body: schema.protocolVersions.body,
       })
       .from(schema.protocolVersions)
       .where(
         and(eq(schema.protocolVersions.orgId, orgId), eq(schema.protocolVersions.state, "approved")),
-      );
-    const approvedByProtocol = new Map(approved.map((row) => [row.protocolId, row.body]));
+      )
+      .orderBy(schema.protocolVersions.protocolId, desc(schema.protocolVersions.version));
+    const approvedByProtocol = new Map(
+      approved.map((row) => [row.protocolId, { body: row.body, version: row.version }]),
+    );
     return {
       kpis,
       trend,
       unacknowledged,
       spend,
-      pendingVersions: rows.map((row) => ({
-        ...row,
-        previousBody: approvedByProtocol.get(row.protocol.id) ?? "",
-      })),
+      pendingVersions: rows.map((row) => {
+        const previous = approvedByProtocol.get(row.protocol.id);
+        return {
+          ...row,
+          previousBody: previous?.body ?? "",
+          // The version this draft would SUPERSEDE, read from the approved row rather than guessed
+          // as "mine minus one" — with two drafts pending, that guess names another draft.
+          supersedes: previous?.version ?? null,
+        };
+      }),
     };
   });
 }
 
-/** This tenant's alert rules, for the director's rules panel. */
-export async function getAlertRules(): Promise<AlertRuleRow[]> {
+/** This tenant's alert rules with when each last fired, for the director's rules panel. */
+export async function getAlertRules(): Promise<{
+  rules: AlertRuleRow[];
+  lastFired: Record<string, string>;
+}> {
   const orgId = await currentOrgId();
-  return withOrgDb(orgId, (db) => listAlertRules(db, orgId));
+  return withOrgDb(orgId, async (db) => {
+    const rules = await listAlertRules(db, orgId);
+    return {
+      rules,
+      // ONE query for the whole list, not one per rule: `lastFiredByRule` is a DISTINCT ON over the
+      // events table and a per-row lookup would be a round trip per rule on every render.
+      lastFired: await lastFiredByRule(
+        db,
+        orgId,
+        rules.map((rule) => rule.id),
+      ),
+    };
+  });
 }
 
 /** One page of alert history, with the rule that produced each event. */
