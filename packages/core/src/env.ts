@@ -155,7 +155,10 @@ const EnvSchema = z.object({
   /** OIDC client id registered in the realm. */
   KEYCLOAK_CLIENT_ID: z.string().default("stopgap-console"),
   /** OIDC client secret. Optional: a public client, or a deployment that has not wired auth. */
-  KEYCLOAK_CLIENT_SECRET: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
+  KEYCLOAK_CLIENT_SECRET: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.string().min(1).optional(),
+  ),
 
   /**
    * Base URL of the public REST API (PHASE6 §6.7) — where the MCP server sends its requests.
