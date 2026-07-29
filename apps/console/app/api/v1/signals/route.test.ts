@@ -60,7 +60,7 @@ const itemRow = {
   updatedAt: new Date("2026-07-02T00:00:00.000Z"),
 };
 
-const listSignalsPage = vi.fn(async () => ({ rows: [signalRow], total: 1 }));
+const listSignalsPageForApi = vi.fn(async () => ({ rows: [signalRow], total: 1 }));
 const listScoresPage = vi.fn(async () => ({ rows: [scoreRow], total: 1 }));
 const listCatalogItemsPage = vi.fn(async () => ({ rows: [itemRow], total: 1 }));
 const getSignalForApi = vi.fn(async (_db: unknown, _orgId: string, key: string) =>
@@ -72,7 +72,7 @@ vi.mock("@stopgap/db", async (importOriginal) => {
   return {
     API_SCOPES: actual.API_SCOPES,
     isApiScope: actual.isApiScope,
-    listSignalsPage: (...a: unknown[]) => listSignalsPage(...(a as [])),
+    listSignalsPageForApi: (...a: unknown[]) => listSignalsPageForApi(...(a as [])),
     listScoresPage: (...a: unknown[]) => listScoresPage(...(a as [])),
     listCatalogItemsPage: (...a: unknown[]) => listCatalogItemsPage(...(a as [])),
     getSignalForApi: (...a: unknown[]) =>
@@ -102,7 +102,7 @@ const { GET: getItems } = await import("../catalog/items/route");
 beforeEach(() => {
   scopedOrgIds.length = 0;
   heldScopes = ["signals:read", "scores:read", "catalog:read"];
-  for (const spy of [listSignalsPage, listScoresPage, listCatalogItemsPage, getSignalForApi]) spy.mockClear();
+  for (const spy of [listSignalsPageForApi, listScoresPage, listCatalogItemsPage, getSignalForApi]) spy.mockClear();
 });
 
 describe("GET /api/v1/signals", () => {
@@ -131,7 +131,7 @@ describe("GET /api/v1/signals", () => {
     await getSignals(
       new Request("https://console.test/api/v1/signals?sort=title&dir=asc&page=2&pageSize=25&riskDomain=recall&q=cef"),
     );
-    expect(listSignalsPage).toHaveBeenCalledWith(
+    expect(listSignalsPageForApi).toHaveBeenCalledWith(
       {},
       KEY_ORG_ID,
       expect.objectContaining({
@@ -149,7 +149,7 @@ describe("GET /api/v1/signals", () => {
     heldScopes = ["cases:read"];
     const response = await getSignals(new Request("https://console.test/api/v1/signals"));
     expect(response.status).toBe(403);
-    expect(listSignalsPage).not.toHaveBeenCalled();
+    expect(listSignalsPageForApi).not.toHaveBeenCalled();
     expect(scopedOrgIds).toEqual([]);
   });
 });

@@ -6,7 +6,7 @@ import {
   getSignalForApi,
   listCatalogItemsPage,
   listScoresPage,
-  listSignalsPage,
+  listSignalsPageForApi,
 } from "./public-lists.js";
 
 /**
@@ -99,11 +99,11 @@ const page = { limit: 50, offset: 0 };
 
 describe("the public API's list queries are tenant-scoped", () => {
   it("lists only this tenant's signals, and counts only this tenant's rows", async () => {
-    const a = await withOrgDb(ORG_A, (db) => listSignalsPage(db, ORG_A, page));
+    const a = await withOrgDb(ORG_A, (db) => listSignalsPageForApi(db, ORG_A, page));
     expect(a.rows.map((r) => r.entityIdentifier)).toEqual(["alpha-cefazolin"]);
     expect(a.total).toBe(1);
 
-    const b = await withOrgDb(ORG_B, (db) => listSignalsPage(db, ORG_B, page));
+    const b = await withOrgDb(ORG_B, (db) => listSignalsPageForApi(db, ORG_B, page));
     expect(b.rows.map((r) => r.entityIdentifier)).toEqual(["beta-cefazolin"]);
   });
 

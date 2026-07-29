@@ -140,8 +140,18 @@ function signalPredicates(orgId: string, options: PagedListOptions): SQL[] {
   return predicates;
 }
 
-/** This tenant's risk signals, one page of them, plus the total the filters matched. */
-export async function listSignalsPage(
+/**
+ * This tenant's risk signals, one page of them, plus the total the filters matched.
+ *
+ * `ForApi`, matching `getSignalForApi` beside it, because the console has its OWN
+ * `listSignalsPage` in `signals.js` and the two are genuinely different functions: this one speaks
+ * the public API's `limit`/`offset` dialect and returns the narrowed `SignalListRow` a key holder
+ * is entitled to, while the console's speaks `page` and returns the whole row. They collided in
+ * the package barrel as one name exported from two modules — a duplicate-identifier error that
+ * neither ticket could see alone, since one shipped on the catalog branch and the other on the
+ * console branch.
+ */
+export async function listSignalsPageForApi(
   db: Db,
   orgId: string,
   options: PagedListOptions,

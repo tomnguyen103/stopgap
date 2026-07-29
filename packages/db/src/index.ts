@@ -154,7 +154,7 @@ export {
 } from "./signals.js";
 export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
 export {
-  listSignalsPage,
+  listSignalsPageForApi,
   getSignalForApi,
   listScoresPage,
   listCatalogItemsPage,

@@ -1,4 +1,4 @@
-import { listSignalsPage, withOrgDb } from "@stopgap/db";
+import { listSignalsPageForApi, withOrgDb } from "@stopgap/db";
 import { authenticateApiRequest } from "../../../lib/api-auth";
 import { parseApiListQuery, pageMeta } from "../../../lib/api-list-query";
 import { jsonOk } from "../../../lib/api-response";
@@ -22,7 +22,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const query = parseApiListQuery("signals", new URL(request.url));
   const orgId = auth.key.orgId;
-  const page = await withOrgDb(orgId, (db) => listSignalsPage(db, orgId, query));
+  const page = await withOrgDb(orgId, (db) => listSignalsPageForApi(db, orgId, query));
   return jsonOk(
     signalListSchema.parse({
       signals: page.rows.map(toSignalResource),
