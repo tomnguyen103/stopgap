@@ -44,8 +44,10 @@ export function TrendChart({ series }: { series: DailyCount[] }) {
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`Cases opened and alerts fired per day, ${first?.day ?? ""} to ${last?.day ?? ""}. Peak ${peak} per day.`}
-        preserveAspectRatio="none"
+        // The label IS the accessible content: `role="img"` collapses the subtree, so the per-day
+        // `<title>` elements below are hover text for a pointer and nothing more. The figure's
+        // caption carries the same numbers as text for everyone else.
+        aria-label={`Cases opened and alerts fired per day, ${first?.day ?? ""} to ${last?.day ?? ""}. Peak ${peak} per day. Latest: ${last?.casesOpened ?? 0} cases opened, ${last?.alertsFired ?? 0} alerts fired.`}
       >
         {/* One baseline, recessive: the reference the eye needs, and nothing else competing with
             the data for attention. */}

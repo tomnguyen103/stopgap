@@ -42,7 +42,7 @@ export default async function ApprovalsPage() {
           </p>
         </Card>
       ) : (
-        pendingVersions.map(({ protocol, version, previousBody }) => {
+        pendingVersions.map(({ protocol, version, previousBody, supersedes }) => {
           const diff = diffLines(previousBody, version.body);
           return (
             <Card
@@ -66,7 +66,7 @@ export default async function ApprovalsPage() {
               <div className="actions">
                 <ApproveButton
                   versionId={version.id}
-                  supersedes={previousBody === "" ? null : version.version - 1}
+                  supersedes={supersedes}
                   unavailableReason={reason}
                 />
               </div>

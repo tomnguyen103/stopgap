@@ -72,14 +72,14 @@ export default async function OversightPage() {
 
       <Card
         title="Unacknowledged critical cases"
-        sub="How far the escalation ladder has run, and who has not answered it"
+        sub="Critical cases the escalation ladder has not got an answer for"
       >
         {oversight.unacknowledged.length === 0 ? (
           <p className="sub sub-tight">Every open critical case has been acknowledged.</p>
         ) : (
           <Table
             label="Critical cases with no acknowledgment"
-            head={["Case", "Opened", "Ladder tier reached"]}
+            head={["Case", "Opened", "Unanswered for"]}
           >
             {oversight.unacknowledged.map((row) => (
               <tr key={row.id}>
@@ -91,11 +91,9 @@ export default async function OversightPage() {
                 </td>
                 <td className="sub">{row.openedAt.toISOString().slice(0, 10)}</td>
                 <td>
-                  {row.escalationStep === null ? (
-                    <span className="sub">not yet escalated</span>
-                  ) : (
-                    `tier ${String(row.escalationStep)}`
-                  )}
+                  {row.hoursOpen < 24
+                    ? `${String(row.hoursOpen)} hour${row.hoursOpen === 1 ? "" : "s"}`
+                    : `${String(Math.floor(row.hoursOpen / 24))} day${row.hoursOpen < 48 ? "" : "s"}`}
                 </td>
               </tr>
             ))}
@@ -103,7 +101,10 @@ export default async function OversightPage() {
         )}
       </Card>
 
-      <Card title="Model spend" sub={`Today, ${oversight.spend.day}`}>
+      {/* Deployment-wide, and labelled as such: `llm_spend` is one row per day for the whole
+          deployment (see docs/multi-tenancy.md), so presenting it as this facility's spend would
+          attribute every tenant's calls to whoever is reading. */}
+      <Card title="Model spend" sub={`Deployment-wide, today (${oversight.spend.day})`}>
         <p>
           <strong>${oversight.spend.usd.toFixed(2)}</strong>
           <span className="sub">

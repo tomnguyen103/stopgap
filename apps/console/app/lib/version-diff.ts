@@ -21,7 +21,10 @@ function splitLines(text: string): string[] {
   // A trailing newline is not a line. Without this, appending one to an unchanged body reports a
   // removed-and-added empty line and a director reads "changed" where nothing did.
   const lines = text.replace(/\r\n/g, "\n").split("\n");
-  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  // Exactly ONE, which is the split artifact of a trailing newline. Popping every trailing blank
+  // would report "no textual change" when an author deliberately removed the blank lines under a
+  // protocol — a real edit, silently swallowed.
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   return lines;
 }
 

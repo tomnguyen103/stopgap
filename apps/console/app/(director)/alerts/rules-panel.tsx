@@ -13,6 +13,15 @@ export interface RuleView {
   channels: string[];
   riskDomain: string | null;
   entityContains: string | null;
+  /**
+   * The rule's chat webhook, carried through every edit.
+   *
+   * `updateAlertRule` REPLACES the row's settable columns, so a panel that omitted this field would
+   * silently delete the tenant's webhook the first time somebody toggled a rule off and on — and a
+   * chat rule with no destination fails quietly, which is the failure mode alerting exists to
+   * prevent.
+   */
+  chatWebhookUrl: string | null;
   /** When this rule last fired, already formatted by the server. */
   lastFired: string | null;
 }
@@ -38,10 +47,30 @@ export function RulesPanel({
   const blocked = Boolean(unavailableReason);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
+  // Cooldown edits are CONTROLLED, keyed by rule. With an uncontrolled input the toggle button
+  // beside it sends the value from props, so typing 30 and then clicking Enabled wrote 30 on blur
+  // and immediately wrote the old number back.
+  const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
   const [minSeverity, setMinSeverity] = useState("high");
   const [cooldown, setCooldown] = useState("60");
   const [channels, setChannels] = useState<string[]>(["email"]);
+  const [webhook, setWebhook] = useState("");
+
+  /** The whole rule as the server takes it, with one field replaced. */
+  function settings(rule: RuleView, change: Partial<RuleView>) {
+    const merged = { ...rule, ...change };
+    return {
+      name: merged.name,
+      minSeverity: merged.minSeverity,
+      cooldownMinutes: merged.cooldownMinutes,
+      channels: merged.channels,
+      riskDomain: merged.riskDomain,
+      entityContains: merged.entityContains,
+      chatWebhookUrl: merged.chatWebhookUrl,
+      enabled: merged.enabled,
+    };
+  }
 
   function run(action: () => Promise<void>) {
     if (blocked) return;
@@ -101,23 +130,19 @@ export function RulesPanel({
                     id={`cooldown-${rule.id}`}
                     type="number"
                     min={1}
-                    defaultValue={rule.cooldownMinutes}
+                    value={cooldowns[rule.id] ?? rule.cooldownMinutes}
                     disabled={pending}
                     aria-disabled={blocked || undefined}
                     title={unavailableReason ?? undefined}
-                    onBlur={(event) => {
+                    onChange={(event) => {
                       const next = Number(event.target.value);
+                      setCooldowns((current) => ({ ...current, [rule.id]: next }));
+                    }}
+                    onBlur={() => {
+                      const next = cooldowns[rule.id] ?? rule.cooldownMinutes;
                       if (next === rule.cooldownMinutes) return;
                       run(() =>
-                        updateAlertRuleAction(rule.id, {
-                          name: rule.name,
-                          minSeverity: rule.minSeverity,
-                          cooldownMinutes: next,
-                          channels: rule.channels,
-                          riskDomain: rule.riskDomain,
-                          entityContains: rule.entityContains,
-                          enabled: rule.enabled,
-                        }),
+                        updateAlertRuleAction(rule.id, settings(rule, { cooldownMinutes: next })),
                       );
                     }}
                   />
@@ -132,16 +157,16 @@ export function RulesPanel({
                     title={unavailableReason ?? undefined}
                     disabled={pending}
                     onClick={() => {
+                      // The cooldown from the box, not from props: an unsaved edit sitting in the
+                      // input must not be reverted by a toggle on the same row.
                       run(() =>
-                        updateAlertRuleAction(rule.id, {
-                          name: rule.name,
-                          minSeverity: rule.minSeverity,
-                          cooldownMinutes: rule.cooldownMinutes,
-                          channels: rule.channels,
-                          riskDomain: rule.riskDomain,
-                          entityContains: rule.entityContains,
-                          enabled: !rule.enabled,
-                        }),
+                        updateAlertRuleAction(
+                          rule.id,
+                          settings(rule, {
+                            enabled: !rule.enabled,
+                            cooldownMinutes: cooldowns[rule.id] ?? rule.cooldownMinutes,
+                          }),
+                        ),
                       );
                     }}
                   >
@@ -211,12 +236,32 @@ export function RulesPanel({
             {channel}
           </label>
         ))}
+        {channels.includes("chat") ? (
+          <input
+            className="ds-input"
+            aria-label="Chat webhook URL"
+            type="url"
+            placeholder="https://chat.example/hooks/…"
+            value={webhook}
+            disabled={pending}
+            onChange={(event) => {
+              setWebhook(event.target.value);
+            }}
+          />
+        ) : null}
         <button
           type="button"
           className="ds-button"
           aria-disabled={blocked || undefined}
           title={unavailableReason ?? undefined}
-          disabled={pending || name.trim().length === 0 || channels.length === 0}
+          disabled={
+            pending ||
+            name.trim().length === 0 ||
+            channels.length === 0 ||
+            // A chat rule with no destination delivers nothing and says it fired. Refused here
+            // rather than accepted and left to fail at send time.
+            (channels.includes("chat") && webhook.trim().length === 0)
+          }
           onClick={() => {
             run(async () => {
               await createAlertRuleAction({
@@ -224,8 +269,10 @@ export function RulesPanel({
                 minSeverity,
                 cooldownMinutes: Number(cooldown),
                 channels,
+                chatWebhookUrl: channels.includes("chat") ? webhook.trim() : null,
               });
               setName("");
+              setWebhook("");
             });
           }}
         >

@@ -20,10 +20,15 @@ export const dynamic = "force-dynamic";
  * never held would be a filter that returns nothing forever.
  */
 const HISTORY_SCHEMA: ListParamsSchema = {
+  // One order only — newest first — so `sort` and `dir` are not offered at all rather than parsed
+  // from the address and ignored.
   sortKeys: ["fired"],
   defaultSort: "fired",
   defaultDir: "desc",
-  filters: { outcome: ["fired", "suppressed", "failed"] },
+  // The two values the column actually holds (`packages/db/src/alerts.ts`). `failed` is not one of
+  // them: a send that fails is a `fired` event with `deliveredAny` false, which the table shows in
+  // its own column.
+  filters: { outcome: ["fired", "suppressed_cooldown"] },
   pageSizes: [25, 50],
   defaultPageSize: 25,
 };
@@ -42,7 +47,7 @@ export default async function AlertsPage({
 }) {
   await requireGroup("pharmacy_director");
   const params = parseListParams(await searchParams, HISTORY_SCHEMA);
-  const [rules, history, principal] = await Promise.all([
+  const [{ rules, lastFired }, history, principal] = await Promise.all([
     getAlertRules(),
     getAlertHistory({
       outcome: filterValue(params, "outcome"),
@@ -77,9 +82,10 @@ export default async function AlertsPage({
             channels: rule.channels,
             riskDomain: rule.riskDomain,
             entityContains: rule.entityContains,
+            chatWebhookUrl: rule.chatWebhookUrl,
             // Formatted on the server: `toLocaleString()` in a client component reads a locale and
             // a time zone that differ between the render and the hydration.
-            lastFired: null,
+            lastFired: lastFired[rule.id]?.replace("T", " ").slice(0, 16) ?? null,
           }))}
           unavailableReason={reason}
         />
@@ -97,7 +103,7 @@ export default async function AlertsPage({
                 href={toggleFilterHref(params, "outcome", value, HISTORY_SCHEMA)}
                 aria-current={active ? "true" : undefined}
               >
-                {value}
+                {value.replace(/_/g, " ")}
               </Link>
             );
           })}
@@ -117,12 +123,14 @@ export default async function AlertsPage({
                 <td className="sub">{event.firedAt.toISOString().replace("T", " ").slice(0, 16)}</td>
                 <td>{ruleName ?? <span className="sub">deleted rule</span>}</td>
                 <td>
-                  {event.outcome === "failed" ? (
-                    <Badge severity="critical">failed</Badge>
-                  ) : event.outcome === "suppressed" ? (
+                  {event.outcome === "suppressed_cooldown" ? (
                     <Badge severity="moderate">suppressed</Badge>
-                  ) : (
+                  ) : event.deliveredAny ? (
                     <Badge tone="status">fired</Badge>
+                  ) : (
+                    // Fired and delivered to nobody. Badging that as a plain "fired" is the
+                    // reading this table exists to prevent.
+                    <Badge severity="critical">reached nobody</Badge>
                   )}
                 </td>
                 <td>{event.matchedCount}</td>
