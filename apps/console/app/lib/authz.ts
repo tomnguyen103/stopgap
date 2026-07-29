@@ -28,6 +28,7 @@ export const CONSOLE_ACTIONS = [
   "review_case",
   "resolve_exception",
   "approve_protocol_version",
+  "manage_alert_rules",
   "manage_users",
   "manage_api_keys",
 ] as const;
@@ -50,6 +51,10 @@ export const ACTION_MIN_ROLE: Record<ConsoleAction, Role> = {
   review_case: "pharmacist",
   resolve_exception: "pharmacist",
   approve_protocol_version: "pharmacy_director",
+  // An alert rule decides who is paged, how often, and about what. That is an oversight decision
+  // rather than a case decision, so it sits with the director: a pharmacist tuning a cooldown
+  // could silence the ladder that exists to escalate past them.
+  manage_alert_rules: "pharmacy_director",
   manage_users: "admin",
   manage_api_keys: "admin",
 };

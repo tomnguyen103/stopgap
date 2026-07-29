@@ -1,7 +1,12 @@
 import "server-only";
 import {
   feedFreshness,
+  dailyCounts,
   getCaseByWorkflowId,
+  getLlmSpend,
+  listAlertHistory,
+  listAlertRules,
+  unacknowledgedCritical,
   getDb,
   getKpis,
   getSignalByKey,
@@ -24,7 +29,13 @@ import {
 } from "@stopgap/db";
 import type { CaseStatus, Role } from "@stopgap/core";
 import type {
+  AlertHistoryOptions,
+  AlertHistoryRow,
+  AlertRuleRow,
   ApiKeyRow,
+  DailyCount,
+  DailySpend,
+  UnacknowledgedCase,
   Kpis,
   CaseQueueOptions,
   QueuedCase,
@@ -428,4 +439,75 @@ export async function getCaseEvidence(genericName: string): Promise<{
     if (!signal) return { signal: undefined, evidence: [] };
     return { signal, evidence: await listEvidenceForSignal(db, orgId, signal.id) };
   });
+}
+
+/** The director's oversight figures (ticket 14). */
+export interface OversightData {
+  kpis: Kpis;
+  trend: DailyCount[];
+  unacknowledged: UnacknowledgedCase[];
+  spend: DailySpend;
+  pendingVersions: { protocol: ProtocolRow; version: ProtocolVersionRow; previousBody: string }[];
+}
+
+export async function getOversight(): Promise<OversightData> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const [kpis, trend, unacknowledged, spend] = await Promise.all([
+      getKpis(orgId, db),
+      dailyCounts(db, orgId),
+      unacknowledgedCritical(db, orgId),
+      getLlmSpend(db),
+    ]);
+    // Drafted versions waiting on a director, each paired with the approved text it would replace
+    // — which is what makes "what changed" answerable without a second round trip per row.
+    const rows = await db
+      .select({ protocol: schema.protocols, version: schema.protocolVersions })
+      .from(schema.protocolVersions)
+      .innerJoin(
+        schema.protocols,
+        and(
+          eq(schema.protocols.orgId, orgId),
+          eq(schema.protocols.id, schema.protocolVersions.protocolId),
+        ),
+      )
+      .where(
+        and(eq(schema.protocolVersions.orgId, orgId), eq(schema.protocolVersions.state, "draft")),
+      )
+      .orderBy(desc(schema.protocolVersions.createdAt));
+    const approved = await db
+      .select({
+        protocolId: schema.protocolVersions.protocolId,
+        body: schema.protocolVersions.body,
+      })
+      .from(schema.protocolVersions)
+      .where(
+        and(eq(schema.protocolVersions.orgId, orgId), eq(schema.protocolVersions.state, "approved")),
+      );
+    const approvedByProtocol = new Map(approved.map((row) => [row.protocolId, row.body]));
+    return {
+      kpis,
+      trend,
+      unacknowledged,
+      spend,
+      pendingVersions: rows.map((row) => ({
+        ...row,
+        previousBody: approvedByProtocol.get(row.protocol.id) ?? "",
+      })),
+    };
+  });
+}
+
+/** This tenant's alert rules, for the director's rules panel. */
+export async function getAlertRules(): Promise<AlertRuleRow[]> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => listAlertRules(db, orgId));
+}
+
+/** One page of alert history, with the rule that produced each event. */
+export async function getAlertHistory(
+  options: AlertHistoryOptions,
+): Promise<{ rows: AlertHistoryRow[]; total: number; page: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => listAlertHistory(db, orgId, options));
 }

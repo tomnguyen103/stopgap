@@ -118,6 +118,15 @@ export {
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export {
+  dailyCounts,
+  listAlertHistory,
+  unacknowledgedCritical,
+  type AlertHistoryOptions,
+  type AlertHistoryRow,
+  type DailyCount,
+  type UnacknowledgedCase,
+} from "./oversight.js";
+export {
   listAlertRules,
   createAlertRule,
   updateAlertRule,
@@ -185,6 +194,8 @@ export {
   type RetentionSweepResult,
 } from "./retention.js";
 export type {
+  AlertRuleRow,
+  AlertEventRow,
   SignalEvidenceRow,
   RiskSignalRow,
   RiskScoreSnapshotRow,
