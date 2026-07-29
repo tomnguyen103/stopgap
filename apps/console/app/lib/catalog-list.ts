@@ -15,8 +15,9 @@ export const CATALOG_LIST_SCHEMA: ListParamsSchema = {
   defaultDir: "asc",
   filters: {
     // Sole-sourced items are the ones a shortage has no second route around, so "show me only
-    // those" is the question this list is opened to answer.
-    sourcing: ["sole", "multi"],
+    // those" is the question this list is opened to answer. `unsourced` is offered beside it
+    // because the two are different problems with different fixes.
+    sourcing: ["sole", "multi", "unsourced"],
   },
   pageSizes: [25, 50, 100],
   defaultPageSize: 25,
@@ -34,13 +35,19 @@ export const UPLOAD_KINDS = CATALOG_KINDS;
 /**
  * How many supplier sites make an item sole-sourced.
  *
- * One. Stated here rather than inline in a query so the list, the badge and the item page cannot
- * disagree about what the word means.
+ * EXACTLY one. An item with no supplier loaded is not sole-sourced — it is unsourced, which is a
+ * gap in the catalog rather than a fact about the supply chain, and badging it as sole-sourced
+ * would put a data-entry omission on the same list as a genuine single point of failure.
  */
-export const SOLE_SOURCE_MAX_SITES = 1;
+export const SOLE_SOURCE_SITES = 1;
 
 export function isSoleSourced(supplierSiteCount: number): boolean {
-  return supplierSiteCount <= SOLE_SOURCE_MAX_SITES;
+  return supplierSiteCount === SOLE_SOURCE_SITES;
+}
+
+/** No supplier loaded at all — a hole in the catalog, reported as one. */
+export function isUnsourced(supplierSiteCount: number): boolean {
+  return supplierSiteCount === 0;
 }
 
 /**

@@ -6,6 +6,7 @@ import { isActionAllowed } from "../../../lib/authz";
 import { unavailableReason } from "../../../lib/case-queue";
 import {
   isSoleSourced,
+  isUnsourced,
   parseCatalogListParams,
   CATALOG_LIST_SCHEMA,
   UPLOAD_KINDS,
@@ -44,7 +45,7 @@ export default async function CatalogPage({
   ]);
   const pages = pageCount(catalog.total, params.pageSize);
   const reason = unavailableReason(
-    isActionAllowed(principal.roles, "manage_users"),
+    isActionAllowed(principal.roles, "manage_catalog"),
     "admin",
     isDemoMode(),
   );
@@ -96,7 +97,11 @@ export default async function CatalogPage({
                 href={toggleFilterHref(params, "sourcing", value, CATALOG_LIST_SCHEMA)}
                 aria-current={active ? "true" : undefined}
               >
-                {value === "sole" ? "sole-sourced" : "more than one site"}
+                {value === "sole"
+                  ? "sole-sourced"
+                  : value === "multi"
+                    ? "more than one site"
+                    : "no supplier loaded"}
               </Link>
             );
           })}
@@ -140,6 +145,13 @@ export default async function CatalogPage({
                     <>
                       {" "}
                       <Badge severity="high">sole-sourced</Badge>
+                    </>
+                  ) : isUnsourced(row.supplierSiteCount) ? (
+                    // A different problem with a different fix: nothing is known about how this
+                    // item is supplied, which is a gap in the file rather than a supply fact.
+                    <>
+                      {" "}
+                      <Badge severity="moderate">no supplier loaded</Badge>
                     </>
                   ) : null}
                 </td>
