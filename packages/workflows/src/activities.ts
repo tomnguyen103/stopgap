@@ -487,6 +487,9 @@ function evidenceForPoll(
     });
   }
   return entries;
+}
+
+/**
  * Pair each signal with the row it was persisted as and the score it was given.
  *
  * By dedupe KEY, never by array index: `scoreForPoll` skips a signal that has no persisted row, so
@@ -731,13 +734,17 @@ export async function pollAndOpenCases(): Promise<{
           // in the same transaction, so a snapshot can never describe a signal row that failed to
           // land. `pollTimestamp` is the evaluation time for EVERY org in this poll, which is what
           // makes two tenants' scores comparable and the whole poll reproducible.
-          await recordScoreSnapshots(db, org.id, scoreForPoll(signals, persisted, pollTimestamp));
+          // ONE scoring pass, whose result is written and then handed to the alert evaluation.
+          // The union of two branches had scored twice and written twice — the same snapshots,
+          // in the same transaction, which the unique index would eventually have refused.
+          const snapshots = scoreForPoll(signals, persisted, pollTimestamp);
+          await recordScoreSnapshots(db, org.id, snapshots);
           // Ticket 09 — the durable trail behind each signal. A pointer and a fingerprint, never
           // the payload: see the table's own doc block for why a long-retention table stays free
           // of content.
           await recordEvidence(db, org.id, evidenceForPoll(signals, persisted, pollTimestamp));
-          const snapshots = scoreForPoll(signals, persisted, pollTimestamp);
-          await recordScoreSnapshots(db, org.id, snapshots);
+          // Ticket 12 — what the alert rules are evaluated against, paired inside this transaction
+          // and notified outside it.
           scoredForAlerts = pairScored(signals, persisted, snapshots);
         });
         // Ticket 12 — decide what is worth telling someone about, and tell them. Outside the write

@@ -269,6 +269,8 @@ const TENANT_TABLES: TenantTable[] = [
     updateOthers: (tx) =>
       tx`update signal_evidence set origin_url = 'hijacked' where id = ${ID.evidenceB} returning id`,
     deleteOthers: (tx) => tx`delete from signal_evidence where id = ${ID.evidenceB} returning id`,
+  },
+  {
     name: "alert_rules",
     readOthers: (tx) => tx`select id from alert_rules where id = ${ID.ruleB}`,
     insertAs: (tx, org) =>
