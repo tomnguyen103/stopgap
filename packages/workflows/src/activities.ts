@@ -22,7 +22,9 @@ import {
   listOpenMonitoringCases,
   listRoleRecipients,
   recordFeedRecords,
+  recordEvidence,
   recordScoreSnapshots,
+  type EvidenceInput,
   type ScoreSnapshotInput,
   resetFeedMiss,
   upsertSignals,
@@ -438,6 +440,36 @@ function scoreForPoll(
   return snapshots;
 }
 
+/**
+ * One evidence artifact per signal this poll wrote.
+ *
+ * `contentHash` is the same `contentHash` the poller already uses for feed records, so "has this
+ * record changed since we captured it" is answered by comparing two fingerprints rather than by
+ * keeping two copies of the text.
+ */
+function evidenceForPoll(
+  signals: NormalizedSignal[],
+  persisted: { id: string; dedupeKey: string }[],
+  capturedAt: string,
+): EvidenceInput[] {
+  const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
+  const entries: EvidenceInput[] = [];
+  for (const signal of signals) {
+    const signalId = idByKey.get(signal.dedupeKey);
+    if (!signalId) continue;
+    entries.push({
+      signalId,
+      type: "provider_record" as const,
+      source: signal.source,
+      sourceId: signal.sourceId,
+      originUrl: signal.evidenceUrl,
+      contentHash: contentHash(signal.raw),
+      capturedAt: new Date(capturedAt),
+    });
+  }
+  return entries;
+}
+
 export async function pollAndOpenCases(): Promise<{
   polled: number;
   opened: number;
@@ -522,6 +554,10 @@ export async function pollAndOpenCases(): Promise<{
           // land. `pollTimestamp` is the evaluation time for EVERY org in this poll, which is what
           // makes two tenants' scores comparable and the whole poll reproducible.
           await recordScoreSnapshots(db, org.id, scoreForPoll(signals, persisted, pollTimestamp));
+          // Ticket 09 — the durable trail behind each signal. A pointer and a fingerprint, never
+          // the payload: see the table's own doc block for why a long-retention table stays free
+          // of content.
+          await recordEvidence(db, org.id, evidenceForPoll(signals, persisted, pollTimestamp));
         });
       } catch (err) {
         incrementCounter("stopgap_signal_persist_failures_total");

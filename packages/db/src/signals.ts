@@ -1,6 +1,13 @@
 import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 
-import { cases, riskScoreSnapshots, riskSignals, type RiskSignalRow } from "./schema.js";
+import {
+  cases,
+  riskScoreSnapshots,
+  riskSignals,
+  signalEvidence,
+  type RiskSignalRow,
+  type SignalEvidenceRow,
+} from "./schema.js";
 import type { Db } from "./client.js";
 
 /**
@@ -509,4 +516,77 @@ export async function latestScoresForSignals(
     });
   }
   return out;
+}
+
+/**
+ * What an artifact points at.
+ *
+ * A closed vocabulary because `type` is part of the trail's unique key: a typo would not mislabel
+ * a row, it would fork one capture into two artifacts.
+ */
+export const EVIDENCE_TYPES = ["provider_record", "evidence_link"] as const;
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
+
+export interface EvidenceInput {
+  signalId: string;
+  type: EvidenceType;
+  source: string;
+  sourceId: string;
+  originUrl: string;
+  /** SHA-256 of the payload as seen. NEVER the payload. */
+  contentHash: string;
+  capturedAt: Date;
+}
+
+/**
+ * Record the evidence behind this tenant's signals (ticket 09).
+ *
+ * Re-capturing an UNCHANGED record restates its row rather than appending: the trail answers "what
+ * did we see, and when did we first see it", and a poll running hourly would otherwise add an
+ * identical artifact every hour forever. `capturedAt` therefore keeps its FIRST value — the answer
+ * to "when was this claim first evidenced" is the interesting one, and the signal row already
+ * carries `lastFetchedAt` for the other question.
+ */
+export async function recordEvidence(
+  db: Db,
+  orgId: string,
+  entries: EvidenceInput[],
+): Promise<number> {
+  if (entries.length === 0) return 0;
+  await db
+    .insert(signalEvidence)
+    .values(entries.map((e) => ({ orgId, ...e })))
+    .onConflictDoUpdate({
+      target: [
+        signalEvidence.orgId,
+        signalEvidence.signalId,
+        signalEvidence.type,
+        signalEvidence.contentHash,
+      ],
+      // Only the pointer may move — a record re-published at a new URL is the same evidence.
+      // `captured_at` is deliberately absent: see the doc block.
+      set: { originUrl: sql`excluded.origin_url` },
+    });
+  return entries.length;
+}
+
+/**
+ * The evidence behind one signal, newest capture first. Org-scoped both ways.
+ *
+ * Bounded, like `listSignals`: a signal whose provider record churns daily accumulates a row per
+ * change, and an unbounded read of a years-long trail is a page that stops loading rather than a
+ * page that shows everything.
+ */
+export async function listEvidenceForSignal(
+  db: Db,
+  orgId: string,
+  signalId: string,
+  limit = 200,
+): Promise<SignalEvidenceRow[]> {
+  return db
+    .select()
+    .from(signalEvidence)
+    .where(and(eq(signalEvidence.orgId, orgId), eq(signalEvidence.signalId, signalId)))
+    .orderBy(desc(signalEvidence.capturedAt))
+    .limit(limit);
 }

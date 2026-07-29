@@ -121,6 +121,8 @@ export {
   listSignals,
   getSignalByKey,
   recordScoreSnapshots,
+  recordEvidence,
+  listEvidenceForSignal,
   latestScoresForSignals,
   listSignalsPage,
   rankedOpenCases,
@@ -129,6 +131,7 @@ export {
   type ListSignalsOptions,
   type RankedCase,
   type ScoreSnapshotInput,
+  type EvidenceInput,
   type SignalPageOptions,
 } from "./signals.js";
 export type {
