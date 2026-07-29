@@ -11,7 +11,6 @@ import {
   listSignalsPage,
   listAcknowledgments,
   listApiKeys,
-  listCases,
   listDailyBriefs,
   listOrganizations,
   listShadowRuns,
@@ -78,12 +77,6 @@ async function currentOrgId(): Promise<string> {
  */
 export async function getFeedFreshness(): Promise<FeedFreshness[]> {
   return feedFreshness(getDb());
-}
-
-/** All cases in the caller's org, newest-touched first (list view). */
-export async function getCases(): Promise<CaseRow[]> {
-  const orgId = await currentOrgId();
-  return withOrgDb(orgId, (db) => listCases(db, orgId, 200));
 }
 
 /** An acknowledgment with the acking user's human label resolved, for the escalation timeline. */
@@ -389,17 +382,31 @@ export async function getCaseEvidence(genericName: string): Promise<{
 }> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, async (db) => {
+    // The signal the RANK came from — highest latest score first, newest publication only as the
+    // tiebreak. Picking the newest signal instead would let the evidence card name one signal
+    // while the queue ranked the case on another, which reads as the page contradicting itself.
     const [signal] = await db
-      .select()
+      .select({ signal: schema.riskSignals })
       .from(schema.riskSignals)
+      .leftJoin(
+        schema.riskScoreSnapshots,
+        and(
+          eq(schema.riskScoreSnapshots.orgId, orgId),
+          eq(schema.riskScoreSnapshots.signalId, schema.riskSignals.id),
+        ),
+      )
       .where(
         and(
           eq(schema.riskSignals.orgId, orgId),
           sql`lower(${schema.riskSignals.entityIdentifier}) = lower(${genericName})`,
         ),
       )
-      .orderBy(desc(schema.riskSignals.publishedAt))
-      .limit(1);
+      .orderBy(
+        sql`${schema.riskScoreSnapshots.score} / nullif(${schema.riskScoreSnapshots.reachableMax}, 0) desc nulls last`,
+        desc(schema.riskSignals.publishedAt),
+      )
+      .limit(1)
+      .then((rows) => rows.map((row) => row.signal));
     if (!signal) return { signal: undefined, evidence: [] };
     return { signal, evidence: await listEvidenceForSignal(db, orgId, signal.id) };
   });

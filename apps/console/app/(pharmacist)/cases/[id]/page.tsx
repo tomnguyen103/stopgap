@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
+
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isDemoMode } from "@stopgap/demo";
-import { screenContent } from "@stopgap/compliance";
+import { describeViolations, screenContent } from "@stopgap/compliance";
 import { isActionAllowed } from "../../../lib/authz";
 import { confidenceLabel, unavailableReason } from "../../../lib/case-queue";
 import { getCaseDetail, getCaseEvidence, getWorkflowState } from "../../../lib/data";
@@ -41,6 +43,18 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     ? screenContent(live.alternatives.join("\n"))
     : undefined;
   const confidence = confidenceLabel(live?.researchConfidence);
+  // ONE decision, read everywhere the draft could reach the page. Screening at the review panel
+  // and rendering the same text again in the protocol card below would be a guard that announces
+  // itself and then hands over the text anyway.
+  const draftWithheld = draftScreen !== undefined && !draftScreen.ok;
+  const alternativesWithheld = alternativesScreen !== undefined && !alternativesScreen.ok;
+  // A FINGERPRINT for the React key, never the draft itself: a key is serialized into the Flight
+  // payload the client receives, so keying on the text ships the withheld draft to the browser
+  // that was not allowed to see it.
+  const draftFingerprint = createHash("sha256")
+    .update(live?.draft ?? "")
+    .digest("hex")
+    .slice(0, 16);
   // Server component, so the caller's roles are available here. `isActionAllowed` is the pure,
   // non-throwing half of the same matrix `requireRole` enforces in the action.
   const principal = await resolvePrincipal();
@@ -96,56 +110,50 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               id: entry.id,
               type: entry.type,
               source: entry.source,
-              sourceId: entry.sourceId,
               originUrl: entry.originUrl,
               contentHash: entry.contentHash,
-              capturedAt: entry.capturedAt.toISOString(),
+              // ISO, formatted once on the server: see the note on `EvidenceEntry.capturedAt`.
+              capturedAt: entry.capturedAt.toISOString().replace("T", " ").slice(0, 19) + "Z",
             }))}
           />
         </div>
       </div>
 
-      {live && isDemoMode() ? (
-        // The server action refuses these decisions in demo mode regardless; showing buttons
-        // that always fail would be a worse lie than saying so up front. The draft below is
-        // still the live one, so a visitor sees exactly what a pharmacist would decide on.
+      {live && draftWithheld ? (
+        // WITHHELD MEANS NO DECISION, not a decision on blank text. Rendering the panel with an
+        // emptied draft leaves an Approve button that reads as "approve" while the pharmacist has
+        // seen nothing — the same failure as approving text you cannot see, arrived at politely.
         <div className="card">
-          <h2>Pharmacist review (disabled in demo)</h2>
+          <h2>Draft withheld</h2>
           <p className="sub">
-            This case is blocked on a pharmacist decision. Approving clinical guidance needs a
-            verified reviewer, and this deployment has no auth layer — so the demo shows the gate
-            without opening it.
+            The compliance guard objected to this draft, so it is not rendered and no decision can
+            be taken on it here. Categories: {describeViolations(draftScreen)}. The excerpt stays in
+            the audit payload rather than on this page — a false positive is only fixable if
+            somebody can see the line that tripped it, and a case page is a wider audience than
+            that.
           </p>
         </div>
       ) : live ? (
-        <>
-        {draftScreen && !draftScreen.ok ? (
-          <div className="card">
-            <h2>Draft withheld</h2>
-            <p className="sub">
-              The compliance guard objected to this draft, so it is not rendered. The categories are{" "}
-              {draftScreen.violations
-                .map((v) => v.category)
-                .filter((category, i, all) => all.indexOf(category) === i)
-                .join(", ")}
-              . The excerpt stays in the audit payload rather than on the page: a false positive is
-              only fixable if somebody can see the line that tripped it, and this page is a wider
-              audience than that.
-            </p>
-          </div>
-        ) : null}
         <ReviewPanel
-          // Keyed on case + view + draft: two cases sharing a draft (including two empty ones
-          // in the exception view) would otherwise reuse one panel instance and carry a
-          // half-typed rejection reason or resolution into the next case.
-          key={`${c.workflowId}:${live.status}:${live.draft ?? ""}`}
+          // Keyed on case + view + a FINGERPRINT of the draft: two cases sharing a draft (including
+          // two empty ones in the exception view) would otherwise reuse one panel instance and
+          // carry a half-typed rejection reason into the next case. The fingerprint rather than the
+          // text, because a key travels to the client.
+          key={`${c.workflowId}:${live.status}:${draftFingerprint}`}
           workflowId={c.workflowId}
           status={live.status}
-          draft={draftScreen && !draftScreen.ok ? "" : (live.draft ?? "")}
-          alternatives={alternativesScreen && !alternativesScreen.ok ? [] : live.alternatives}
+          draft={live.draft ?? ""}
+          alternatives={alternativesWithheld ? [] : live.alternatives}
+          alternativesWithheld={alternativesWithheld}
           confidence={confidence}
+          // Demo mode refuses every decision server-side. The controls RENDER, disabled, naming why
+          // — a visitor should see the gate that exists rather than a page with no gate at all.
+          unavailableReason={unavailableReason(
+            isActionAllowed(principal.roles, "review_case"),
+            "pharmacist",
+            isDemoMode(),
+          )}
         />
-        </>
       ) : c.status === "awaiting_review" || c.status === "exception" ? (
         // Without live state there is no draft to read, and approving text you cannot see is
         // worse than waiting. Say why the gate is missing instead of rendering an empty one.
@@ -169,7 +177,16 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
                 ? "Written by a pharmacist resolving the exception"
                 : "Drafted by the alternatives agent"}
           </p>
-          {live.draft ? <pre className="draft">{live.draft}</pre> : null}
+          {/* Screened HERE too, not only at the review panel: this card renders the same text,
+              and a guard that withholds a draft in one place and prints it in another guards
+              nothing. */}
+          {draftWithheld ? (
+            <p className="sub sub-tight">
+              Withheld by the compliance guard ({describeViolations(draftScreen)}).
+            </p>
+          ) : live.draft ? (
+            <pre className="draft">{live.draft}</pre>
+          ) : null}
         </div>
       ) : null}
 
