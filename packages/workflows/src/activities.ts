@@ -522,9 +522,11 @@ function pairScored(
  * across an email round trip pins a pooled connection for the duration of somebody else's network,
  * which is how a poll starves a deployment.
  *
- * The send is guarded by the ROW, not by the caller remembering: `recordAlertEvents` returns only
- * the events that were genuinely new, so a retried poll conflicts on the idempotency key, gets an
- * empty list, and sends nothing.
+ * The send is guarded by the ROW, not by the caller remembering. `recordAlertEvents` inserts with
+ * `ON CONFLICT DO NOTHING` and returns only the rows it actually inserted, so a retried poll — or a
+ * second poller running concurrently — conflicts on the idempotency key, gets an empty list, and
+ * sends nothing. The claim and the guard are the same statement, which is the only arrangement two
+ * processes cannot race through.
  */
 async function evaluateAndNotify(
   orgId: string,

@@ -1,4 +1,5 @@
 import { getEnv } from "@stopgap/core/env";
+import { refuseWebhookTarget } from "./webhook-target.js";
 
 /**
  * Outbound comms (PROJECT_PLAN §5, §13 Phase 4): the approved protocol goes to the pharmacy
@@ -143,8 +144,18 @@ export async function sendChat(
       reason: "no chat webhook configured for this rule",
     };
   }
+  // CHECKED BEFORE THE FETCH, not after: the request itself is the damage in a server-side request
+  // forgery, and a response that never comes back is still a request the deployment made on a
+  // tenant's behalf.
+  const refusal = refuseWebhookTarget(message.webhookUrl);
+  if (refusal) {
+    return { channel: "chat", delivered: false, reason: `webhook refused: ${refusal}` };
+  }
   try {
     const response = await fetch(message.webhookUrl, {
+      // No redirect following. A permitted host that answers 302 to the metadata service would
+      // otherwise walk the fetch straight past the check above.
+      redirect: "error",
       method: "POST",
       headers: { "content-type": "application/json" },
       // A hung webhook must not hold the poll open; the send becomes a recorded non-delivery.

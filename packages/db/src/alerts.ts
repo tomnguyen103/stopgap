@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { alertEvents, alertRules, type AlertEventRow, type AlertRuleRow } from "./schema.js";
 import { MIN_COOLDOWN_MINUTES } from "@stopgap/alerts";
 import type { Db } from "./client.js";
@@ -32,6 +32,49 @@ export interface AlertRuleInput {
  * depends on, so two firings in one minute would share a key and the second would vanish rather
  * than send. Refusing is the honest answer to a request the system cannot serve safely.
  */
+/**
+ * The values these text columns may hold.
+ *
+ * Postgres stores them as `text` — the same choice `severity` and `status` make elsewhere in this
+ * schema — so the constraint has to live somewhere. Here, at the one door every writer passes
+ * through, rather than in each caller: a rule stored with `minSeverity: 'urgent'` matches nothing
+ * for the rest of its life and reports no error while doing it.
+ */
+const ALLOWED_SEVERITIES = ["low", "moderate", "high", "critical"] as const;
+const ALLOWED_CHANNELS = ["email", "chat"] as const;
+const ALLOWED_DOMAINS = ["shortage", "recall"] as const;
+
+function assertRuleVocabulary(input: AlertRuleInput): void {
+  if (!(ALLOWED_SEVERITIES as readonly string[]).includes(input.minSeverity)) {
+    throw new Error(
+      `alert rule severity must be one of ${ALLOWED_SEVERITIES.join(", ")} (got ${input.minSeverity})`,
+    );
+  }
+  if (input.channels.length === 0) {
+    throw new Error("alert rule must name at least one channel — one that reaches nobody is not a rule");
+  }
+  for (const channel of input.channels) {
+    if (!(ALLOWED_CHANNELS as readonly string[]).includes(channel)) {
+      throw new Error(
+        `alert rule channel must be one of ${ALLOWED_CHANNELS.join(", ")} (got ${channel})`,
+      );
+    }
+  }
+  if (
+    input.riskDomain !== undefined &&
+    input.riskDomain !== null &&
+    !(ALLOWED_DOMAINS as readonly string[]).includes(input.riskDomain)
+  ) {
+    throw new Error(
+      `alert rule risk domain must be one of ${ALLOWED_DOMAINS.join(", ")} (got ${input.riskDomain})`,
+    );
+  }
+  // A chat rule with no destination delivers nothing and records that it fired.
+  if (input.channels.includes("chat") && !input.chatWebhookUrl) {
+    throw new Error("a chat rule needs a webhook to deliver to");
+  }
+}
+
 function assertCooldown(minutes: number): number {
   if (!Number.isInteger(minutes) || minutes < MIN_COOLDOWN_MINUTES) {
     throw new Error(
@@ -51,6 +94,7 @@ export async function createAlertRule(
   orgId: string,
   input: AlertRuleInput,
 ): Promise<AlertRuleRow> {
+  assertRuleVocabulary(input);
   const [row] = await db
     .insert(alertRules)
     .values({
@@ -81,6 +125,7 @@ export async function updateAlertRule(
   ruleId: string,
   input: AlertRuleInput,
 ): Promise<AlertRuleRow | undefined> {
+  assertRuleVocabulary(input);
   const [row] = await db
     .update(alertRules)
     .set({
@@ -91,7 +136,13 @@ export async function updateAlertRule(
       minSeverity: input.minSeverity,
       cooldownMinutes: assertCooldown(input.cooldownMinutes),
       channels: input.channels,
-      chatWebhookUrl: input.chatWebhookUrl ?? null,
+      // OMITTED MEANS UNCHANGED, and only an explicit null clears it.
+      //
+      // A chat webhook is a bearer credential: whoever holds the URL can post into the room. With
+      // `?? null` every editor had to send the stored secret back to keep it, which meant handing
+      // it to whatever client was doing the editing. Preserving it here is what lets a console
+      // tune a cooldown without ever being given the credential.
+      ...(input.chatWebhookUrl === undefined ? {} : { chatWebhookUrl: input.chatWebhookUrl }),
       updatedAt: new Date(),
     })
     .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
@@ -179,20 +230,38 @@ export async function recordAlertEvents(
   events: AlertEventInput[],
 ): Promise<AlertEventRow[]> {
   if (events.length === 0) return [];
-  return db
+  // THE INSERT IS THE CLAIM, and `DO NOTHING` is what makes it one.
+  //
+  // With `DO UPDATE` the statement returned a row whether it inserted or merely restated one, so
+  // two evaluations racing on the same window each got a row back and each sent — the cooldown
+  // measured in the database, defeated by two processes reading it at once. `DO NOTHING` returns
+  // ONLY the rows this statement actually inserted, so exactly one caller can go on to deliver.
+  const claimed = await db
     .insert(alertEvents)
     .values(events.map((e) => ({ orgId, ...e })))
-    .onConflictDoUpdate({
-      target: [alertEvents.orgId, alertEvents.idempotencyKey],
-      // The match count may legitimately have grown since the first attempt — the feed returns
-      // more each poll. `delivered_any` and `deliveries` are NOT touched: they are the record of
-      // what actually happened, and only the send path may write them.
-      set: {
-        matchedCount: sql`excluded.matched_count`,
-        matchedKeys: sql`excluded.matched_keys`,
-      },
-    })
+    .onConflictDoNothing({ target: [alertEvents.orgId, alertEvents.idempotencyKey] })
     .returning();
+
+  // The rows somebody else already claimed still get their match count refreshed: the feed returns
+  // more each poll and the record should say what was matched, even though this caller must not
+  // send for it. Separate statement, and deliberately NOT returned.
+  const claimedKeys = new Set(claimed.map((row) => row.idempotencyKey));
+  const stale = events.filter((event) => !claimedKeys.has(event.idempotencyKey));
+  for (const event of stale) {
+    await db
+      .update(alertEvents)
+      .set({ matchedCount: event.matchedCount, matchedKeys: event.matchedKeys })
+      .where(
+        and(
+          eq(alertEvents.orgId, orgId),
+          eq(alertEvents.idempotencyKey, event.idempotencyKey),
+          // Never overwrite a smaller count onto a larger one: two pollers arriving out of order
+          // would otherwise make the record shrink.
+          lt(alertEvents.matchedCount, event.matchedCount),
+        ),
+      );
+  }
+  return claimed;
 }
 
 /**
