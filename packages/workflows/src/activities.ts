@@ -23,7 +23,9 @@ import {
   listRoleRecipients,
   recordFeedRecords,
   dedupeByKey,
+  recordEvidence,
   recordScoreSnapshots,
+  type EvidenceInput,
   type ScoreSnapshotInput,
   resetFeedMiss,
   upsertSignals,
@@ -410,10 +412,8 @@ function scoreForPoll(
 ) {
   const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
   const snapshots: ScoreSnapshotInput[] = [];
-  // Collapsed on the dedupe key first, exactly as `upsertSignals` collapses its own batch. Two feed
-  // records deriving the same key resolve to ONE persisted row, so scoring both would emit two
-  // snapshots sharing (org, signal, scorer version, moment) — and `ON CONFLICT DO UPDATE` refuses
-  // to touch a row twice in one statement, aborting the whole tenant's write, signals included.
+  // Collapsed again here, even though the poll now collapses its list at the source: this is an
+  // exported pure function, and its correctness must not depend on a caller having done it.
   for (const signal of dedupeByKey(signals)) {
     const signalId = idByKey.get(signal.dedupeKey);
     // A signal with no persisted row is one the upsert did not return; scoring it would attach a
@@ -441,6 +441,40 @@ function scoreForPoll(
     });
   }
   return snapshots;
+}
+
+/**
+ * One evidence artifact per signal this poll wrote.
+ *
+ * `contentHash` is the same `contentHash` the poller already uses for feed records, so "has this
+ * record changed since we captured it" is answered by comparing two fingerprints rather than by
+ * keeping two copies of the text.
+ */
+function evidenceForPoll(
+  signals: NormalizedSignal[],
+  persisted: { id: string; dedupeKey: string }[],
+  capturedAt: string,
+): EvidenceInput[] {
+  const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
+  const entries: EvidenceInput[] = [];
+  // Collapsed for the same reason as the scoring pass: `recordEvidence` upserts on
+  // (org, signal, type, content hash), so two feed records deriving one dedupe key and one payload
+  // would emit the same artifact twice in one statement — which `ON CONFLICT DO UPDATE` refuses,
+  // aborting the tenant's whole write rather than the duplicate row.
+  for (const signal of dedupeByKey(signals)) {
+    const signalId = idByKey.get(signal.dedupeKey);
+    if (!signalId) continue;
+    entries.push({
+      signalId,
+      type: "provider_record" as const,
+      source: signal.source,
+      sourceId: signal.sourceId,
+      originUrl: signal.evidenceUrl,
+      contentHash: contentHash(signal.raw),
+      capturedAt: new Date(capturedAt),
+    });
+  }
+  return entries;
 }
 
 export async function pollAndOpenCases(): Promise<{
@@ -504,7 +538,17 @@ export async function pollAndOpenCases(): Promise<{
       // Ticket 06 — this tenant's INTERPRETATION of what the feeds returned. Normalized per org
       // (the dedupe key is org-scoped), written inside this org's own transaction, and never
       // shared: two hospitals reading the same recall hold genuinely different signals.
-      const signals = normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp });
+      // COLLAPSED ONCE, here, rather than by each consumer in turn.
+      //
+      // Two feed records can derive one dedupe key — the openFDA mapper hashes (generic name,
+      // presentation) when no NDC is given — and every write below keys on it: the signal upsert,
+      // the score snapshot and the evidence artifact each have a unique constraint that
+      // `ON CONFLICT DO UPDATE` refuses to touch twice in one statement. Collapsing at the source
+      // means the three of them cannot disagree about how many signals this poll saw, and a fourth
+      // consumer added later inherits the same list rather than the same bug.
+      const signals = dedupeByKey(
+        normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp }),
+      );
       // ONE TENANT'S SIGNAL WRITE MUST NOT STOP THE POLL — the containment the resolution loop
       // below already applies per case, and the reason `fetchFeeds` contains an additive feed's
       // failure. Unguarded, one org's write error means every LATER org gets no case opened this
@@ -527,6 +571,10 @@ export async function pollAndOpenCases(): Promise<{
           // land. `pollTimestamp` is the evaluation time for EVERY org in this poll, which is what
           // makes two tenants' scores comparable and the whole poll reproducible.
           await recordScoreSnapshots(db, org.id, scoreForPoll(signals, persisted, pollTimestamp));
+          // Ticket 09 — the durable trail behind each signal. A pointer and a fingerprint, never
+          // the payload: see the table's own doc block for why a long-retention table stays free
+          // of content.
+          await recordEvidence(db, org.id, evidenceForPoll(signals, persisted, pollTimestamp));
         });
       } catch (err) {
         incrementCounter("stopgap_signal_persist_failures_total");

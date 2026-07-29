@@ -45,8 +45,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *
  * `fn` receives the transaction handle. Queries issued on it inherit the setting; queries issued
  * on a DIFFERENT handle (a stray `getDb()` call inside the callback) run on a DIFFERENT pooled
- * connection where `app.current_org` is unset — and, per the fail-closed note below, will see
- * nothing rather than everything. Pass the handle down.
+ * connection where `app.current_org` is unset — and, per the fail-closed note below, will not see
+ * another tenant's rows. It will do one of two things, depending on whether that connection has
+ * ever carried a scope: return NOTHING if it has not, or FAIL with `22P02` if it has. The second is
+ * the common case in a warm pool, and it is not a bug to paper over: LOCAL reverts the setting to
+ * the connection's session value, and a custom GUC set even once has the empty string there rather
+ * than nothing, so the policies cast `''::uuid` and raise. Both are closed. Pass the handle down.
  */
 export async function withOrgDb<T>(orgId: string, fn: (db: Db) => Promise<T>): Promise<T> {
   if (!UUID_RE.test(orgId)) {
@@ -69,11 +73,14 @@ export async function withOrgDb<T>(orgId: string, fn: (db: Db) => Promise<T>): P
  * that any forgotten `withOrgDb` silently produces.
  *
  * TWO THINGS ARE REQUIRED to actually read across tenants, and only one of them is the absence of
- * a scope. `app.current_org` is never set here, so `current_setting('app.current_org', true)`
- * returns NULL, every policy predicate evaluates to NULL, and NULL is not TRUE — on an ordinary
- * role the rows are INVISIBLE, not universally visible. That is the correct fail-closed direction
- * (a forgotten scope shows an empty page, not another hospital's patients), but it also means an
- * unscoped connection alone cannot do this function's job. The other half is the CONNECTION: RLS
+ * a scope. `app.current_org` is never set here, so on an ordinary role the rows are UNREACHABLE
+ * rather than universally visible: on a connection that has never carried a scope
+ * `current_setting('app.current_org', true)` returns NULL, every policy predicate evaluates to NULL,
+ * NULL is not TRUE, and the read returns nothing; on one that has, the placeholder has been
+ * materialised as the empty string and the policies' `''::uuid` raises `22P02` instead (see
+ * `withOrgDb` above, and `docs/multi-tenancy.md`). Both are the correct fail-closed direction, and
+ * both mean an unscoped connection alone cannot do this function's job. The other half is the
+ * CONNECTION: RLS
  * applies to a role, not to a statement, so the query has to arrive on a connection whose role
  * holds `BYPASSRLS` (or is a superuser). That connection is `getMaintenanceDb()`, configured by
  * `DATABASE_URL_MAINTENANCE`.

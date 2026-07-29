@@ -12,6 +12,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -815,6 +816,10 @@ export const riskSignals = pgTable(
     // makes this double as the org-filter index, and it keeps uniqueness meaning "within this
     // tenant" even if the key's shape is ever changed.
     uniqueIndex("risk_signals_dedupe_uq").on(t.orgId, t.dedupeKey),
+    // Referenced by the composite foreign keys on the snapshot and evidence tables. Redundant as
+    // an index (`id` is already unique), but Postgres requires a unique constraint over exactly
+    // the referenced columns before it will accept the pair as a foreign-key target.
+    uniqueIndex("risk_signals_org_id_uq").on(t.orgId, t.id),
     index("risk_signals_domain_idx").on(t.orgId, t.riskDomain, t.publishedAt),
     index("risk_signals_entity_idx").on(t.orgId, t.entityIdentifier),
   ],
@@ -835,9 +840,7 @@ export const riskScoreSnapshots = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    signalId: uuid("signal_id")
-      .notNull()
-      .references(() => riskSignals.id, { onDelete: "cascade" }),
+    signalId: uuid("signal_id").notNull(),
     /** 0–100, as the console ranks on. */
     score: numeric("score", { precision: 6, scale: 2 }).notNull(),
     /** The banded reading of the same number, for filtering. */
@@ -883,6 +886,86 @@ export const riskScoreSnapshots = pgTable(
     index("risk_score_snapshots_rank_idx").on(t.orgId, t.computedAt, t.score),
     // `latestScoresForSignals` reads by signal; without this it walks the tenant's whole history.
     index("risk_score_snapshots_signal_idx").on(t.orgId, t.signalId, t.computedAt),
+    // Composite, for the reason spelled out on `signal_evidence` below: a plain FK proves the
+    // signal exists, not that it belongs to this tenant.
+    foreignKey({
+      columns: [t.orgId, t.signalId],
+      foreignColumns: [riskSignals.orgId, riskSignals.id],
+      name: "risk_score_snapshots_org_signal_fk",
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * The evidence behind a signal (ticket 09). A TENANT table.
+ *
+ * WHAT IT DELIBERATELY DOES NOT HOLD: content. No provider body, no fetched page, no excerpt. An
+ * artifact records WHERE the claim came from, WHEN it was captured and a fingerprint of what was
+ * seen — enough for a pharmacist to go and check the source themselves, and enough for an auditor
+ * to prove the record has not changed underneath them.
+ *
+ * The claim is about RETENTION LIFETIME, not about exposure. `risk_signals.raw` already holds the
+ * full provider payload, and deliberately so — it is the evidence a signal is read against, and it
+ * lives and dies with that signal. This table outlives it: the trail is what remains after a signal
+ * is retired, which makes it the worst possible place to be holding provider prose a hospital would
+ * then have to treat as protected. So it holds none.
+ *
+ * What it DOES hold that came from the provider — `source_id`, and the query embedded in
+ * `origin_url` — is catalog identity: an NDC, an FDA recall number, a generic name. Public
+ * identifiers of a product, published by a regulator. No patient, no prescriber, no facility.
+ */
+export const signalEvidence = pgTable(
+  "signal_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    // No plain `.references()` here: the COMPOSITE key below is the referential check, and a second
+    // single-column FK to the same table would enforce a strictly weaker condition twice.
+    signalId: uuid("signal_id").notNull(),
+    /**
+     * What KIND of thing is being pointed at — `EvidenceType` in `signals.ts`.
+     *
+     * Part of the unique key, so a typo does not merely mislabel a row: it forks the trail into
+     * two artifacts for one capture. The vocabulary is a TypeScript union rather than a CHECK
+     * constraint, matching how `severity` and `status` are handled elsewhere in this schema.
+     */
+    type: text("type").notNull(),
+    /** The feed that produced it, in the contract's vocabulary. */
+    source: text("source").notNull(),
+    /** The feed's own identifier for the record. */
+    sourceId: text("source_id").notNull(),
+    /** Where a human goes to check the claim. */
+    originUrl: text("origin_url").notNull(),
+    /**
+     * SHA-256 of the payload as it was seen, from the same `contentHash` the poller already uses.
+     *
+     * A fingerprint rather than the payload: it proves the record has not changed since capture,
+     * which is the audit question, without retaining the text that would raise the retention one.
+     */
+    contentHash: text("content_hash").notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    // One artifact per (signal, type, content) — re-capturing an unchanged record restates the row
+    // rather than growing the trail by one entry per poll, forever. A CHANGED record hashes
+    // differently and lands as a new row, which is the point: the trail is the history of what the
+    // provider said, and each version of it is a separate thing to have seen.
+    uniqueIndex("signal_evidence_point_uq").on(t.orgId, t.signalId, t.type, t.contentHash),
+    index("signal_evidence_signal_idx").on(t.orgId, t.signalId, t.capturedAt),
+    // COMPOSITE foreign key, not a plain one to `risk_signals.id`.
+    //
+    // A plain FK proves the signal exists; it does not prove it belongs to THIS tenant. The
+    // referential check runs with RLS bypassed, and `org_id` is written by the calling function, so
+    // a row naming another tenant's signal would pass both the FK and `WITH CHECK` and land — an
+    // artifact filed under org A pointing at org B's signal. Requiring the PAIR to match makes that
+    // unrepresentable in the database rather than a rule the application has to remember.
+    foreignKey({
+      columns: [t.orgId, t.signalId],
+      foreignColumns: [riskSignals.orgId, riskSignals.id],
+      name: "signal_evidence_org_signal_fk",
+    }).onDelete("cascade"),
   ],
 );
 
@@ -912,3 +995,5 @@ export type DemoRunRow = typeof demoRuns.$inferSelect;
 export type ApiKeyRow = typeof apiKeys.$inferSelect;
 export type NewApiKeyRow = typeof apiKeys.$inferInsert;
 export type ApiKeyRequestRow = typeof apiKeyRequests.$inferSelect;
+export type SignalEvidenceRow = typeof signalEvidence.$inferSelect;
+export type NewSignalEvidenceRow = typeof signalEvidence.$inferInsert;
