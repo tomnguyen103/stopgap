@@ -185,3 +185,39 @@ these branches that replays ticket 02 twice and ticket 03's scaffolding out of o
 
 After a branch switch that changes the route tree, remember:
 `rm -rf apps/console/.next && rm -f apps/console/tsconfig.tsbuildinfo`.
+
+## STATE 2026-07-29 22:50Z — all three batches assembled
+
+| PR | Batch | Base | State | Head |
+| --- | --- | --- | --- | --- |
+| #15 | A — tickets 15, 16, 19, 18, 10 | main | READY, parked on rate limit | `c3cd437` |
+| #34 | B — tickets 02, 03, 08, 11, 04 | main | draft | `0e581cc` |
+| #35 | C — tickets 14, 17 | feat/batch-b | draft | `6fbf3f9` |
+
+All twelve original PRs are closed as superseded. Branches left in place, not deleted.
+
+VERIFIED: a throwaway integration branch of A + B + C runs `pnpm gate` to exit 0, so the
+three batches compose. That check is what surfaced the two cross-batch defects below; it is
+worth rebuilding after any further change to a batch.
+
+### Cross-batch defects found and fixed (invisible to any single ticket)
+
+1. `listSignalsPage` existed TWICE — `public-lists.ts` (ticket 19, batch A) and `signals.ts`
+   (ticket 08, batch B) — both exported from the `@stopgap/db` barrel, a duplicate-identifier
+   error failing typecheck for every importing package. Fixed in batch A: the API side is
+   `listSignalsPageForApi` now, matching `getSignalForApi` beside it.
+2. `assertRuleVocabulary` refused EVERY rules-panel edit of a chat rule (batch C). Fixed:
+   the guard takes the webhook the rule will actually have, `alerts.test.ts` pins six cases.
+3. `/brief` was orphaned outside the route groups (batch B). Moved into `(director)`.
+
+### Batch C's dependencies — do not forget
+
+C is stacked on B and ALSO needs A (ticket 17 browses the catalog). It does not typecheck
+standalone. After A and B merge: rebase C onto main and retarget its PR base to main.
+
+### Next action
+
+Batch A's review. Last SPENT event was the 22:23:30Z refusal; 2h19m from a completed review
+was not enough, so allow 3h+ from the refusal — roughly 01:30Z — before commenting
+`@coderabbitai review` ONCE on #15's head. Then the wait protocol, merge A, flip B ready,
+merge B, rebase and retarget C, flip C ready, merge C. Then ticket 21.
