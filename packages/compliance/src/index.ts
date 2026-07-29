@@ -89,7 +89,14 @@ const RULES: readonly Rule[] = [
     rule: "medical_record_number",
     // The separator class allows `-` so the hyphenated form (`MRN-4471902`, and identifiers
     // embedded in slugs and keys) is caught, not just `MRN: 4471902`.
-    pattern: /\b(?:MRN|medical record (?:number|no\.?|#))\b[\s:#-]*[A-Z0-9][A-Z0-9-]{3,}/gi,
+    //
+    // Each label alternative carries its OWN boundary, and there is none after the alternation:
+    // `no.` and `#` end in a non-word character, so a boundary demanded after them can never hold
+    // in front of the separator and `Medical Record No. A-99213` would slip past the rule that
+    // names it. The boundary sits before the dot in `no\b\.?` rather than after it for the same
+    // reason, and it has to be there at all because `no` is a prefix of ordinary words — without
+    // it the branch reads "medical record no" out of "medical record notification".
+    pattern: /\b(?:MRN\b|medical record (?:number\b|no\b\.?|#))[\s:#-]*[A-Z0-9][A-Z0-9-]{3,}/gi,
   },
   {
     category: "phi_identifier",
