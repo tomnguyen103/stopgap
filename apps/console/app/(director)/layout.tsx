@@ -12,6 +12,7 @@ import { requireGroup } from "../lib/group-guard";
 
 const NAV: NavLink[] = [
   { href: "/oversight", label: "Oversight" },
+  { href: "/brief", label: "Brief" },
   { href: "/metrics", label: "KPIs" },
 ];
 

@@ -1,5 +1,5 @@
 import { DEGRADED_REASONS, type DegradedReason } from "@stopgap/db";
-import { getDailyBriefs } from "../lib/data";
+import { getDailyBriefs } from "../../lib/data";
 
 export const dynamic = "force-dynamic";
 
