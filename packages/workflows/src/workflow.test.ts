@@ -8,6 +8,7 @@ import type { CaseInput, RecordProtocolInput } from "./shared.js";
 import {
   acknowledgeSignal,
   anchorAuditWorkflow,
+  dailyBriefWorkflow,
   exceptionResolvedSignal,
   pollFeedsWorkflow,
   resolvedSignal,
@@ -381,6 +382,19 @@ describe("anchorAuditWorkflow (time-skipped)", () => {
       expect(await handle.result()).toEqual([
         { orgId: TEST_ORG_ID, maxAuditId: 7, headHash: "deadbeef", sink: "file" },
       ]);
+    });
+  }, 60_000);
+});
+
+describe("dailyBriefWorkflow (time-skipped)", () => {
+  it("delegates to the generateDailyBriefs activity and returns its result", async () => {
+    await withWorker(async () => {
+      const handle = await env.client.workflow.start(dailyBriefWorkflow, {
+        args: [],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-brief-${Date.now()}`,
+      });
+      expect(await handle.result()).toEqual({ generated: 0, degraded: 0 });
     });
   }, 60_000);
 });

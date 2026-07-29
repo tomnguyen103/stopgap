@@ -12,6 +12,9 @@ describe("screenContent — protected information", () => {
     ["a spelled-out record number", "Medical Record Number: A-99213"],
     ["a date of birth", "DOB 1972-04-11, admitted Tuesday."],
     ["a national identifier", "SSN 123-45-6789 on file."],
+    ["an unpunctuated labelled national identifier", "SSN 123456789 on file."],
+    ["a space-separated labelled national identifier", "SSN 123 45 6789 on file."],
+    ["a spelled-out national identifier", "Social Security Number: 123-45-6789 on file."],
     ["a phone number", "Call the family at 415-555-0134."],
     ["an email address", "Forward to j.doe@example-hospital.org."],
   ])("detects %s", (_label, text) => {
@@ -37,6 +40,11 @@ describe("screenContent — clinical boundary", () => {
     [
       "diagnosis language",
       "Patients diagnosed with sepsis should receive it.",
+      "diagnosis_or_treatment",
+    ],
+    [
+      "a possessive prognosis",
+      "The patient's prognosis improved once the alternative arrived.",
       "diagnosis_or_treatment",
     ],
     [
@@ -72,6 +80,9 @@ describe("screenContent — clinical boundary", () => {
     ["a stock cart", "Ward bed 12 stock cart was not restocked."],
     ["an ordinary adjective", "An epic backlog of back-ordered vials cleared this week."],
     ["a lot number", "Lot 415 555 0134 shipped on Tuesday."],
+    ["an unlabelled nine-digit run", "Batch 123456789 cleared quality release."],
+    ["monograph comorbidity prose", "Comorbidities associated with reduced renal function."],
+    ["a coding reference", "Differential diagnosis codes are out of scope for this note."],
   ])("does not fire on label and supply vocabulary: %s", (_label, text) => {
     // Every line here is text a legitimate substitution protocol or supply note plausibly
     // contains. The rules are anchored on language pointing at a PERSON precisely so that these
@@ -104,7 +115,11 @@ describe("screenContent — report shape", () => {
       rule: "phone_number",
       excerpt: "415-555-0134",
     });
-    expect(report.violations[0]?.index).toBe(report.violations[0]?.index ?? -1);
+    // The offset must point AT the match in the screened string — an operator quoting the report
+    // back against the text is the whole reason the field exists.
+    expect(report.violations[0]?.index).toBe(
+      "Contact the caregiver on 415-555-0134 about the swap.".indexOf("415-555-0134"),
+    );
   });
 
   it("reports every violation in one pass, not just the first", () => {

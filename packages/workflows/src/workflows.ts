@@ -46,6 +46,10 @@ const acts = proxyActivities<typeof activities>({
  */
 const briefActs = proxyActivities<typeof activities>({
   startToCloseTimeout: "30 minutes",
+  // The activity heartbeats per tenant and on both sides of each model call, so a worker that dies
+  // mid-run is detected in minutes instead of at the 30-minute start-to-close bound. The window is
+  // wide enough for one provider call to run long without being mistaken for a dead worker.
+  heartbeatTimeout: "5 minutes",
   retry: { maximumAttempts: 2, initialInterval: "10s", backoffCoefficient: 2 },
 });
 

@@ -1,5 +1,5 @@
 import { generateStructured } from "@stopgap/providers";
-import { UNTRUSTED_RECORD_NOTICE } from "./prompt.js";
+import { escapeRecordValue, UNTRUSTED_RECORD_NOTICE } from "./prompt.js";
 import { DailyBrief } from "./schemas.js";
 
 /** One scored signal, as the brief sees it. */
@@ -34,6 +34,22 @@ export interface DraftedBrief {
 
 /** How many signals are listed by name. Beyond this they are counted, to bound the prompt. */
 const LISTED_SIGNALS = 25;
+/**
+ * The same bound for cases awaiting a human. Without it one tenant's backlog decides the prompt
+ * size: a few hundred parked cases push the request past the provider's context limit, and a day
+ * that had more to say than usual is exactly the day the brief comes back degraded.
+ */
+const LISTED_REVIEW_CASES = 25;
+
+/**
+ * Wrap upstream text in the `<record>` boundary the system instruction classifies as untrusted, with
+ * the XML-special characters escaped so no value can close the boundary early. A signal's `entity`
+ * and `title` are feed content nobody here wrote, and a case key is derived from one — interpolating
+ * them bare puts attacker-chosen text where the model reads it as instructions (CWE-74/1427).
+ */
+function record(fields: string): string {
+  return `<record>${fields}</record>`;
+}
 
 /**
  * Draft the daily brief (ticket 13).
@@ -56,8 +72,14 @@ export async function draftDailyBrief(input: BriefInput): Promise<DraftedBrief> 
   const appeared = input.current.filter((s) => !previous.has(s.key));
   const goneCount = input.previousKeys.filter((k) => !currentKeys.has(k)).length;
   const line = (s: BriefSignal) =>
-    `- ${s.entity} · ${s.domain} · ${s.severity} · ` +
-    `${s.score === undefined ? "not scored yet" : `score ${String(s.score)}`} — ${s.title}`;
+    `- ${record(
+      `${escapeRecordValue(s.entity)} · ${escapeRecordValue(s.domain)} · ` +
+        `${escapeRecordValue(s.severity)} · ` +
+        `${s.score === undefined ? "not scored yet" : `score ${String(s.score)}`} — ` +
+        `${escapeRecordValue(s.title)}`,
+    )}`;
+  const caseLine = (c: { key: string; status: string }) =>
+    `- ${record(`${escapeRecordValue(c.key)} · ${escapeRecordValue(c.status)}`)}`;
 
   const { object, meta } = await generateStructured({
     schema: DailyBrief,
@@ -85,7 +107,7 @@ export async function draftDailyBrief(input: BriefInput): Promise<DraftedBrief> 
       `No longer present: ${String(goneCount)}`,
       "",
       `Cases awaiting a human decision (${String(input.awaitingReview.length)}):`,
-      ...input.awaitingReview.map((c) => `- ${c.key} · ${c.status}`),
+      ...input.awaitingReview.slice(0, LISTED_REVIEW_CASES).map(caseLine),
     ].join("\n"),
   });
   // `meta` also went to the telemetry sinks inside `generateStructured` — provider, model, token

@@ -1,3 +1,4 @@
+import { Context } from "@temporalio/activity";
 import { draftDailyBrief } from "@stopgap/agents";
 import { screenContent, describeViolations } from "@stopgap/compliance";
 import {
@@ -31,6 +32,25 @@ function utcDate(at: Date): string {
 /** How many signals the model is shown. The rest are counted, not listed. */
 const BRIEF_SIGNAL_LIMIT = 100;
 
+/**
+ * Report progress to Temporal, so a worker that dies mid-run is noticed in minutes rather than at
+ * the activity's full 30-minute `startToCloseTimeout`. Without it every tenant after the crash
+ * waits for that timeout to expire before the retry starts, which on a daily schedule is most of
+ * the window the brief is supposed to land in.
+ *
+ * GUARDED because this function is also called OUTSIDE a worker — its own unit tests do, and
+ * `Context.current()` throws rather than returning undefined when no activity is running. The
+ * catch means "there is nobody to report progress to", never a swallowed heartbeat failure: a
+ * heartbeat inside a real activity does not throw.
+ */
+function reportProgress(detail: string): void {
+  try {
+    Context.current().heartbeat(detail);
+  } catch {
+    // Not running as a Temporal activity — no heartbeat sink exists.
+  }
+}
+
 export async function generateDailyBriefs(now = new Date()): Promise<{
   generated: number;
   degraded: number;
@@ -40,7 +60,10 @@ export async function generateDailyBriefs(now = new Date()): Promise<{
   let generated = 0;
   let degraded = 0;
 
-  for (const org of orgs) {
+  for (const [index, org] of orgs.entries()) {
+    // Which tenant the loop reached, so a stalled run says where it stalled rather than only that
+    // it did.
+    reportProgress(`org ${String(index + 1)}/${String(orgs.length)}: ${org.id}`);
     try {
       const { input, previousKeys, since } = await withOrgDb(org.id, async (db) => {
         const signals = await listSignals(db, org.id, {
@@ -105,6 +128,10 @@ export async function generateDailyBriefs(now = new Date()): Promise<{
             `${err instanceof Error ? err.message : String(err)}. Recording a degraded brief.`,
         );
       }
+
+      // The model call is the long leg of a tenant's turn; beating on both sides of it keeps the
+      // gap between heartbeats to one provider call rather than one whole tenant.
+      reportProgress(`org ${String(index + 1)}/${String(orgs.length)}: drafted`);
 
       // THE GUARD RUNS BEFORE THE TEXT IS STORED, not before it is displayed. Storing first and
       // screening later means the unscreened text has already been written somewhere a query can

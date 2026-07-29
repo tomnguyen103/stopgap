@@ -97,8 +97,16 @@ const RULES: readonly Rule[] = [
     pattern: /\b(?:DOB|date of birth)\b[\s:]*\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}/gi,
   },
   // A US national identifier has a shape distinctive enough to match unlabelled; a lot number does
-  // not look like this.
-  { category: "phi_identifier", rule: "national_identifier", pattern: /\b\d{3}-\d{2}-\d{4}\b/g },
+  // not look like this. The LABELLED forms are matched too, because the label is what makes an
+  // otherwise ordinary 9-digit run identifiable: `SSN 123456789` and `SSN 123 45 6789` are the same
+  // protected number as the hyphenated one, and an unlabelled `123456789` stays unmatched — that is
+  // a batch quantity or a catalogue code far more often than it is a person.
+  {
+    category: "phi_identifier",
+    rule: "national_identifier",
+    pattern:
+      /\b(?:\d{3}-\d{2}-\d{4}|(?:SSN|social security (?:number|no\.?|#))\b[\s:#-]*\d{3}[\s-]?\d{2}[\s-]?\d{4})\b/gi,
+  },
   // Punctuated forms only. A space-separated `415 555 0134` is indistinguishable from a lot number
   // or a pack quantity in product prose, and this rule is not worth a false positive on either.
   {
@@ -140,10 +148,15 @@ const RULES: readonly Rule[] = [
   // a patient, a possessive, a directive — rather than at a product. What is given up is real:
   // clinical advice phrased entirely impersonally passes. That is the deliberate trade, because
   // the alternative is a guard that blocks ordinary protocols and gets switched off within a week.
+  // Person-anchored like every other rule in this category, and for the same reason: bare
+  // `diagnosis`/`comorbidity` is monograph vocabulary — "comorbidities associated with reduced
+  // renal function", "differential diagnosis codes" — so an unanchored pattern fires on the
+  // permitted surface rather than on clinical advice about someone.
   {
     category: "diagnosis_or_treatment",
     rule: "diagnosis_language",
-    pattern: /\b(?:diagnos(?:is|es|ed|e)|prognosis|comorbidit(?:y|ies))\b/gi,
+    pattern:
+      /\b(?:patients?\s+(?:who\s+(?:are|were)\s+|(?:are|were|been)\s+)?diagnosed|diagnos(?:e|ing)\s+(?:this|the|a)\s+patient|(?:this|the)\s+patient(?:'s|’s)?\s+(?:diagnosis|prognosis|comorbidit(?:y|ies))|(?:their|his|her)\s+(?:diagnosis|prognosis|comorbidit(?:y|ies)))\b/gi,
   },
   {
     category: "diagnosis_or_treatment",
