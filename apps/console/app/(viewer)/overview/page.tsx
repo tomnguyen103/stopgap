@@ -1,10 +1,12 @@
 import Link from "next/link";
 
-import { Badge, Card, Table, type Severity } from "../../components/ui";
+import { Badge, Card, Table } from "../../components/ui";
 import { getSignalsPage, getViewerOverview } from "../../lib/data";
 import { resolvePrincipal } from "../../lib/principal";
 import { requireGroup } from "../../lib/group-guard";
 import {
+  bandSeverity,
+  filterValue,
   pageCount,
   parseSignalListParams,
   partialScoreNotice,
@@ -41,12 +43,15 @@ export default async function OverviewPage({
   const principal = await resolvePrincipal();
   const params = parseSignalListParams(await searchParams);
   const [overview, signals] = await Promise.all([
-    getViewerOverview(),
+    // One search term narrows BOTH lists: story 17 asks to search "signals and cases by drug name
+    // or identifier", and a term that quietly applied to one of them would leave a filtered list
+    // beside an unfiltered one under a single search box.
+    getViewerOverview(params.q),
     getSignalsPage({
       q: params.q,
-      riskDomain: params.filters.domain?.[0],
-      severity: params.filters.severity?.[0],
-      freshness: params.filters.freshness?.[0],
+      riskDomain: filterValue(params, "domain"),
+      severity: filterValue(params, "severity"),
+      freshness: filterValue(params, "freshness"),
       sort: params.sort,
       dir: params.dir,
       page: params.page,
@@ -54,10 +59,10 @@ export default async function OverviewPage({
     }),
   ]);
   const pages = pageCount(signals.total, params.pageSize);
-  // Read off a real snapshot rather than a constant: the notice disappears on its own once the
-  // catalog slice lands and the scorer starts filling those components.
-  const scored = overview.ranked.find((row) => row.components !== null);
-  const notice = partialScoreNotice(scored?.components ?? null);
+  // The tenant's newest snapshot, not whichever ranked row happens to carry one: which components
+  // the scorer can fill is a property of its inputs, and sampling a row makes the notice vanish the
+  // moment that row is unscored.
+  const notice = partialScoreNotice(overview.latestComponents);
 
   return (
     <>
@@ -65,6 +70,11 @@ export default async function OverviewPage({
       <p className="sub">
         Read-only supply picture · {principal.authenticated ? principal.label : "anonymous visitor"}
       </p>
+      {notice ? (
+        <p className="sub" role="note">
+          {notice}
+        </p>
+      ) : null}
 
       <section className="ds-figures" aria-label="Headline figures">
         <Figure label="Open cases" value={overview.kpis.openCases} />
@@ -76,7 +86,10 @@ export default async function OverviewPage({
         {overview.ranked.length === 0 ? (
           <p className="sub sub-tight">No open cases.</p>
         ) : (
-          <Table label="Open cases ranked by risk score" head={["Case", "Status", "Score", "Band"]}>
+          <Table
+            label="Open cases ranked by risk score"
+            head={["Case", "Status", "Score", "Band", "Breakdown"]}
+          >
             {overview.ranked.map((row) => (
               <tr key={row.id}>
                 <td>{row.genericName}</td>
@@ -94,15 +107,19 @@ export default async function OverviewPage({
                 <td>
                   {row.band ? <Badge severity={bandSeverity(row.band)}>{row.band}</Badge> : "—"}
                 </td>
+                <td>
+                  {/* Where the rank came from. A number with no way to reach its components is the
+                      "trust me" this ticket exists to refuse. */}
+                  {row.signalKey ? (
+                    <Link href={"/signals/" + encodeURIComponent(row.signalKey)}>components</Link>
+                  ) : (
+                    <span className="sub">no signal names this product</span>
+                  )}
+                </td>
               </tr>
             ))}
           </Table>
         )}
-        {notice ? (
-          <p className="sub sub-tight" role="note">
-            {notice}
-          </p>
-        ) : null}
       </Card>
 
       <Card title="Signals" sub={`${signals.total} in this facility's feed`}>
@@ -119,12 +136,16 @@ export default async function OverviewPage({
             defaultValue={params.q ?? ""}
             placeholder="heparin, 0409-1234-56 …"
           />
-          {/* Filters already applied survive the search; without these it silently widens the view. */}
+          {/* Filters AND sort survive the search. Without these the form drops both, so searching
+              from a sorted, filtered view silently widens and reorders it. */}
           {Object.entries(params.filters).flatMap(([key, values]) =>
             values.map((value) => (
               <input key={`${key}:${value}`} type="hidden" name={key} value={value} />
             )),
           )}
+          <input type="hidden" name="sort" value={params.sort} />
+          <input type="hidden" name="dir" value={params.dir} />
+          <input type="hidden" name="pageSize" value={String(params.pageSize)} />
           <button className="ds-button" type="submit">
             Search
           </button>
@@ -140,7 +161,9 @@ export default async function OverviewPage({
                   key={value}
                   className={active ? "ds-chip ds-chip--on" : "ds-chip"}
                   href={toggleFilterHref(params, key, value)}
-                  aria-pressed={active}
+                  /* A link is not a button: aria-pressed is not valid on role=link, and what is
+                     being announced is "this is the view you are on". */
+                  aria-current={active ? "true" : undefined}
                 >
                   {value}
                 </Link>
@@ -158,6 +181,7 @@ export default async function OverviewPage({
             label="Risk signals"
             head={[
               <SortLink key="entity" params={params} sortKey="entity" label="Product" />,
+              "Source",
               "Domain",
               <SortLink key="severity" params={params} sortKey="severity" label="Severity" />,
               <SortLink key="published" params={params} sortKey="published" label="Published" />,
@@ -173,6 +197,7 @@ export default async function OverviewPage({
                   </Link>
                   <div className="sub">{signal.title}</div>
                 </td>
+                <td>{signal.source.replace(/_/g, " ")}</td>
                 <td>{signal.riskDomain}</td>
                 <td>
                   <Badge severity={bandSeverity(signal.severity)}>{signal.severity}</Badge>
@@ -189,23 +214,33 @@ export default async function OverviewPage({
         )}
 
         <nav className="ds-pager" aria-label="Signal pages">
-          <Link
-            className="ds-button ds-button--quiet"
-            href={signalListHref(params, { page: Math.max(1, params.page - 1) })}
-            aria-disabled={params.page === 1}
-          >
-            Previous
-          </Link>
+          {/* At the end of the range the control is not a link at all. aria-disabled on an anchor
+              still navigates from the keyboard — a control that says one thing to a screen reader
+              and does another. The page shown is the one the query CLAMPED to, so a bookmarked
+              ?page=500 reports the page it actually rendered. */}
+          {signals.page > 1 ? (
+            <Link
+              className="ds-button ds-button--quiet"
+              href={signalListHref(params, { page: signals.page - 1 })}
+            >
+              Previous
+            </Link>
+          ) : (
+            <span className="ds-button ds-button--quiet is-inert">Previous</span>
+          )}
           <span className="sub">
-            Page {params.page} of {pages}
+            Page {signals.page} of {pages}
           </span>
-          <Link
-            className="ds-button ds-button--quiet"
-            href={signalListHref(params, { page: Math.min(pages, params.page + 1) })}
-            aria-disabled={params.page >= pages}
-          >
-            Next
-          </Link>
+          {signals.page < pages ? (
+            <Link
+              className="ds-button ds-button--quiet"
+              href={signalListHref(params, { page: signals.page + 1 })}
+            >
+              Next
+            </Link>
+          ) : (
+            <span className="ds-button ds-button--quiet is-inert">Next</span>
+          )}
         </nav>
       </Card>
     </>
@@ -237,11 +272,4 @@ function SortLink({
       {active ? <span aria-hidden="true">{params.dir === "asc" ? " ↑" : " ↓"}</span> : null}
     </Link>
   );
-}
-
-/** The scorer's bands and the console's severity ramp share names; anything else stays neutral. */
-function bandSeverity(band: string): Severity {
-  return band === "critical" || band === "high" || band === "moderate" || band === "low"
-    ? band
-    : "none";
 }

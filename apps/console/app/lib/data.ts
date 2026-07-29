@@ -20,8 +20,15 @@ import {
   verifyAuditChain,
   withOrgDb,
 } from "@stopgap/db";
-import type { Role } from "@stopgap/core";
-import type { ApiKeyRow, Kpis, RankedCase, RiskSignalRow, UserRow } from "@stopgap/db";
+import type { CaseStatus, Role } from "@stopgap/core";
+import type {
+  ApiKeyRow,
+  Kpis,
+  RankedCase,
+  RiskSignalRow,
+  SignalPageOptions,
+  UserRow,
+} from "@stopgap/db";
 import type {
   AnchorVerification,
   AuditRow,
@@ -255,20 +262,41 @@ export interface ViewerOverview {
   kpis: Kpis;
   awaitingReview: number;
   ranked: RankedCase[];
+  /**
+   * The component map of this tenant's most recent snapshot — what the dormant-score notice is
+   * read from.
+   *
+   * Deliberately the LATEST snapshot rather than one of the ranked rows: which components the
+   * scorer can currently fill is a property of the scorer's inputs, not of whichever case happens
+   * to rank first, and sampling a row means the notice disappears the moment that row is unscored.
+   */
+  latestComponents: Record<string, number> | null;
 }
 
-export async function getViewerOverview(rankedLimit = 10): Promise<ViewerOverview> {
+const AWAITING_REVIEW: CaseStatus = "awaiting_review";
+
+export async function getViewerOverview(q: string | null = null): Promise<ViewerOverview> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, async (db) => {
     const kpis = await getKpis(orgId, db);
     const [awaiting] = await db
       .select({ count: sql<string>`count(*)` })
       .from(schema.cases)
-      .where(and(eq(schema.cases.orgId, orgId), eq(schema.cases.status, "awaiting_review")));
+      .where(and(eq(schema.cases.orgId, orgId), eq(schema.cases.status, AWAITING_REVIEW)));
+    const [newest] = await db
+      .select({ components: schema.riskScoreSnapshots.components })
+      .from(schema.riskScoreSnapshots)
+      .where(eq(schema.riskScoreSnapshots.orgId, orgId))
+      .orderBy(
+        desc(schema.riskScoreSnapshots.computedAt),
+        desc(schema.riskScoreSnapshots.id),
+      )
+      .limit(1);
     return {
       kpis,
       awaitingReview: Number(awaiting?.count ?? 0),
-      ranked: await rankedOpenCases(db, orgId, rankedLimit),
+      ranked: await rankedOpenCases(db, orgId, q),
+      latestComponents: (newest?.components ?? null) as Record<string, number> | null,
     };
   });
 }
@@ -280,11 +308,11 @@ export interface ScoredSignal {
 }
 
 export async function getSignalsPage(
-  options: Parameters<typeof listSignalsPage>[2],
-): Promise<{ rows: ScoredSignal[]; total: number }> {
+  options: SignalPageOptions,
+): Promise<{ rows: ScoredSignal[]; total: number; page: number }> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, async (db) => {
-    const { rows, total } = await listSignalsPage(db, orgId, options);
+    const { rows, total, page } = await listSignalsPage(db, orgId, options);
     // ONE score lookup for the whole page. Per-row lookups turn a 100-row page into 100 round
     // trips, which is the shape that makes paging pointless.
     const scores = await latestScoresForSignals(
@@ -292,7 +320,7 @@ export async function getSignalsPage(
       orgId,
       rows.map((row) => row.id),
     );
-    return { rows: rows.map((signal) => ({ signal, score: scores.get(signal.id) })), total };
+    return { rows: rows.map((signal) => ({ signal, score: scores.get(signal.id) })), total, page };
   });
 }
 

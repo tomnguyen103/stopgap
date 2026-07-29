@@ -3,10 +3,10 @@ import { notFound } from "next/navigation";
 
 import { COMPONENT_BUDGET, type ComponentName } from "@stopgap/scorer";
 
-import { Badge, Card, Table, type Severity } from "../../../components/ui";
+import { Badge, Card, Table } from "../../../components/ui";
 import { getSignalDetail } from "../../../lib/data";
 import { requireGroup } from "../../../lib/group-guard";
-import { componentLabel, partialScoreNotice } from "../../../lib/signal-list";
+import { bandSeverity, componentLabel, partialScoreNotice } from "../../../lib/signal-list";
 
 export const dynamic = "force-dynamic";
 
@@ -14,14 +14,29 @@ export const dynamic = "force-dynamic";
  * One signal, its evidence and the breakdown behind its score (ticket 08).
  *
  * The evidence link points at the ORIGINATING source record, not at a copy of it held here: the
- * claim a viewer is asked to act on has to be checkable against the body that made it. `raw` is
- * shown as the payload the connector actually received, so a disagreement between this page and the
- * feed is visible rather than arguable.
+ * claim a viewer is asked to act on has to be checkable against the body that made it, and a
+ * viewer who disagrees with this page can read what the body actually published.
  */
+/**
+ * The dedupe key as it was stored, from a segment that arrives percent-encoded.
+ *
+ * A dedupe key holds colons (`org:source:id`), so the link that reaches here is encoded and the
+ * segment has to be decoded to match the row. `decodeURIComponent` THROWS on a lone `%`, though,
+ * and a hand-typed `/signals/100%` would then be a 500 rather than a miss — so a malformed escape
+ * degrades to the raw segment, which simply finds nothing.
+ */
+function decodeKey(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export default async function SignalDetailPage({ params }: { params: Promise<{ key: string }> }) {
   await requireGroup("viewer");
   const { key } = await params;
-  const detail = await getSignalDetail(decodeURIComponent(key));
+  const detail = await getSignalDetail(decodeKey(key));
   // A signal belonging to another tenant is not found rather than forbidden: a 403 would confirm
   // the key exists somewhere, which is a fact about another hospital's supply.
   if (!detail) notFound();
@@ -124,10 +139,4 @@ export default async function SignalDetailPage({ params }: { params: Promise<{ k
       </Card>
     </>
   );
-}
-
-function bandSeverity(band: string): Severity {
-  return band === "critical" || band === "high" || band === "moderate" || band === "low"
-    ? band
-    : "none";
 }

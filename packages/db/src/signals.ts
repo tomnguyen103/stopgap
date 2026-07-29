@@ -228,7 +228,7 @@ export interface SignalPageOptions {
   q?: string | null;
   riskDomain?: string;
   severity?: string;
-  /** `fresh` | `recent` | `stale`, as the contract's own staleness label. */
+  /** The contract's own staleness label — `fresh` | `aging` | `stale`. */
   freshness?: string;
   sort: string;
   dir: "asc" | "desc";
@@ -263,7 +263,7 @@ export async function listSignalsPage(
   db: Db,
   orgId: string,
   options: SignalPageOptions,
-): Promise<{ rows: RiskSignalRow[]; total: number }> {
+): Promise<{ rows: RiskSignalRow[]; total: number; page: number }> {
   const predicates = [eq(riskSignals.orgId, orgId)];
   if (options.riskDomain) predicates.push(eq(riskSignals.riskDomain, options.riskDomain));
   if (options.severity) predicates.push(eq(riskSignals.severity, options.severity));
@@ -283,6 +283,15 @@ export async function listSignalsPage(
   const column = Object.hasOwn(SIGNAL_SORT_COLUMNS, options.sort)
     ? SIGNAL_SORT_COLUMNS[options.sort as keyof typeof SIGNAL_SORT_COLUMNS]
     : riskSignals.publishedAt;
+  const [counted] = await db
+    .select({ total: sql<string>`count(*)` })
+    .from(riskSignals)
+    .where(where);
+  const total = Number(counted?.total ?? 0);
+  // The count comes FIRST so the page can be clamped to it. `?page=500` on a three-page list is
+  // in range as far as the parser is concerned — it bounds the offset, and only the count knows
+  // where the rows stop. Unclamped it renders an empty table headed "Page 500 of 3".
+  const page = Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize)));
   const rows = await db
     .select()
     .from(riskSignals)
@@ -291,12 +300,8 @@ export async function listSignalsPage(
     // without it a row can appear on page 1 and again on page 2.
     .orderBy(options.dir === "asc" ? column : desc(column), desc(riskSignals.id))
     .limit(options.pageSize)
-    .offset((options.page - 1) * options.pageSize);
-  const [counted] = await db
-    .select({ total: sql<string>`count(*)` })
-    .from(riskSignals)
-    .where(where);
-  return { rows, total: Number(counted?.total ?? 0) };
+    .offset((page - 1) * options.pageSize);
+  return { rows, total, page };
 }
 
 /** An open case, with the score of the strongest signal naming the same product. */
@@ -305,6 +310,8 @@ export interface RankedCase {
   key: string;
   genericName: string;
   status: string;
+  /** The signal whose score this is — where the breakdown behind the rank is readable. */
+  signalKey: string | null;
   /** Absent when no signal names this product — shown as unscored, never as zero. */
   score: number | null;
   band: string | null;
@@ -324,19 +331,29 @@ export interface RankedCase {
  * beside a product the scorer has genuinely cleared, which is the one reading that is worse than
  * saying "not scored".
  */
-export async function rankedOpenCases(db: Db, orgId: string, limit = 10): Promise<RankedCase[]> {
+export async function rankedOpenCases(
+  db: Db,
+  orgId: string,
+  q: string | null = null,
+  limit = 10,
+): Promise<RankedCase[]> {
+  const term = q?.trim();
+  // Same escape as the signals list: `%` and `_` are LIKE metacharacters, and a product name
+  // legitimately contains both.
+  const escaped = term ? term.replace(/([\\%_])/g, "\\$1") : null;
   const rows = await db.execute<{
     id: string;
     key: string;
     generic_name: string;
     status: string;
+    dedupe_key: string | null;
     score: string | null;
     band: string | null;
     reachable_max: string | null;
     components: Record<string, number> | null;
   }>(sql`
     with latest as (
-      select distinct on (s.id) s.entity_identifier, snap.score, snap.band,
+      select distinct on (s.id) s.entity_identifier, s.dedupe_key, snap.score, snap.band,
              snap.reachable_max, snap.components
         from ${riskSignals} s
         join ${riskScoreSnapshots} snap
@@ -345,18 +362,27 @@ export async function rankedOpenCases(db: Db, orgId: string, limit = 10): Promis
        order by s.id, snap.computed_at desc, snap.id desc
     ),
     best as (
-      select lower(entity_identifier) as entity, score, band, reachable_max, components,
-             row_number() over (partition by lower(entity_identifier) order by score desc) as rank
+      select lower(entity_identifier) as entity, dedupe_key, score, band, reachable_max, components,
+             -- Ranked on the FRACTION of what each score could reach, not on raw points: once the
+             -- catalog slice lands, a 40-out-of-65 and a 45-out-of-100 sit in the same column, and
+             -- comparing the raw numbers would rank the milder hazard first. The dedupe key breaks
+             -- the tie so two equal scores do not swap places between renders.
+             row_number() over (
+               partition by lower(entity_identifier)
+               order by score / nullif(reachable_max, 0) desc, dedupe_key
+             ) as rank
         from latest
     )
-    select c.id, c.key, c.generic_name, c.status,
+    select c.id, c.key, c.generic_name, c.status, best.dedupe_key,
            best.score, best.band, best.reachable_max, best.components
       from ${cases} c
       left join best on best.entity = lower(c.generic_name) and best.rank = 1
      where c.org_id = ${orgId}
        and c.closed_at is null
        and c.status not in ('closed', 'rejected')
-     order by best.score desc nulls last, c.updated_at desc
+       and (${escaped}::text is null
+            or c.generic_name ilike ${escaped === null ? null : "%" + escaped + "%"} escape '\\')
+     order by best.score / nullif(best.reachable_max, 0) desc nulls last, c.updated_at desc
      limit ${limit}
   `);
   return rows.map((row) => ({
@@ -364,6 +390,7 @@ export async function rankedOpenCases(db: Db, orgId: string, limit = 10): Promis
     key: row.key,
     genericName: row.generic_name,
     status: row.status,
+    signalKey: row.dedupe_key,
     score: row.score === null ? null : Number(row.score),
     band: row.band,
     reachableMax: row.reachable_max === null ? null : Number(row.reachable_max),
