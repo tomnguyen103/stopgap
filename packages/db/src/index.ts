@@ -130,7 +130,6 @@ export {
   type AlertEventInput,
 } from "./alerts.js";
 export {
-  dedupeByKey,
   recordDailyBrief,
   previousDailyBrief,
   listDailyBriefs,
