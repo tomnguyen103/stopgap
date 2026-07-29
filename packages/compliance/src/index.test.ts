@@ -10,6 +10,11 @@ describe("screenContent — protected information", () => {
   it.each([
     ["a medical record number", "See MRN 4471902 for the prior order."],
     ["a spelled-out record number", "Medical Record Number: A-99213"],
+    // Every label form the rule LISTS has to actually match. `No.` and `#` end in a non-word
+    // character, so a boundary demanded after the alternation can never hold in front of the
+    // separator, and these two forms went unmatched by the very rule that names them.
+    ["an abbreviated spelled-out record number", "Medical Record No. A-99213"],
+    ["a hash-marked record number", "Medical Record #: A-99213"],
     ["a date of birth", "DOB 1972-04-11, admitted Tuesday."],
     ["a national identifier", "SSN 123-45-6789 on file."],
     ["an unpunctuated labelled national identifier", "SSN 123456789 on file."],
@@ -100,6 +105,10 @@ describe("screenContent — clinical boundary", () => {
     ["an unlabelled nine-digit run", "Batch 123456789 cleared quality release."],
     ["monograph comorbidity prose", "Comorbidities associated with reduced renal function."],
     ["a coding reference", "Differential diagnosis codes are out of scope for this note."],
+    // `no` is a prefix of ordinary words, so the abbreviated label branch has to end at a word
+    // boundary of its own. Without one it reads "medical record no" out of "medical record
+    // notification" and calls the remainder of the word a record number.
+    ["a record-notification workflow", "The medical record notification workflow is out of scope."],
   ])("does not fire on label and supply vocabulary: %s", (_label, text) => {
     // Every line here is text a legitimate substitution protocol or supply note plausibly
     // contains. The rules are anchored on language pointing at a PERSON precisely so that these
