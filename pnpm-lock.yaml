@@ -307,6 +307,9 @@ importers:
       '@stopgap/comms':
         specifier: workspace:*
         version: link:../comms
+      '@stopgap/compliance':
+        specifier: workspace:*
+        version: link:../compliance
       '@stopgap/core':
         specifier: workspace:*
         version: link:../core

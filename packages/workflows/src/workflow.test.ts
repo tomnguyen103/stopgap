@@ -60,6 +60,7 @@ const recordedAcks: { key: string; userId: string; label: string; step: number }
 /** Deterministic in-memory activity stubs — mirror the real signatures, no side effects. */
 const mockActivities: typeof activities = {
   recordDetected: async () => {},
+  generateDailyBriefs: async () => ({ generated: 0, degraded: 0 }),
   persistStatus: async () => {},
   assessImpact: async (input: CaseInput) => {
     // Simulates the provider being down long enough to exhaust the activity's retries.

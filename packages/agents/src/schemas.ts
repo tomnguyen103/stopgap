@@ -59,3 +59,23 @@ export type AlternativesResearch = z.infer<typeof AlternativesResearch>;
  * (a shaky severity call) and `AlternativesResearch.confidence` (a shaky substitution).
  */
 export const CONFIDENCE_THRESHOLD = 0.5;
+
+/**
+ * The daily brief (ticket 13).
+ *
+ * STRUCTURED OUTPUT with schema validation, never free-form text a parser picks apart later. The
+ * difference matters here more than usual: a brief is prose a director reads and acts on, and a
+ * parser that mis-splits a sentence produces a brief that is subtly wrong rather than obviously
+ * broken. A schema makes a malformed answer a validation failure at the boundary.
+ */
+export const DailyBrief = z.object({
+  /** Two or three sentences. What a director reads if they read nothing else. */
+  headline: z.string().trim().min(1),
+  /** What moved since the previous brief — new signals, resolved ones, score changes. */
+  changes: z.array(z.string().trim().min(1)),
+  /** What is newly at risk and why. */
+  newlyAtRisk: z.array(z.string().trim().min(1)),
+  /** What is waiting on a human decision. */
+  needsReview: z.array(z.string().trim().min(1)),
+});
+export type DailyBrief = z.infer<typeof DailyBrief>;
