@@ -88,7 +88,36 @@ export const SOURCE_RESOLVED_FACTOR = 0.35;
  */
 export const DOMAIN_RANK_WEIGHTS = [1, 0.5] as const;
 
-const DOMAIN_WEIGHT_TOTAL = DOMAIN_RANK_WEIGHTS.reduce((a, b) => a + b, 0);
+/**
+ * The weight for any rank, including one past the table.
+ *
+ * Halving continues beyond the listed pair rather than dropping to zero. The contract has two risk
+ * domains today, so the table covers it — but `ScorableSignal.riskDomain` is a string, and a third
+ * domain reaching the scorer with weight 0 would break the property stated above it: each further
+ * matched domain is worth strictly less, and strictly more than nothing. A silent zero would also
+ * make the score non-monotonic — adding a hazard could leave the number unchanged.
+ */
+export function domainRankWeight(rank: number): number {
+  const listed = DOMAIN_RANK_WEIGHTS[rank];
+  if (listed !== undefined) return listed;
+  const lastIndex = DOMAIN_RANK_WEIGHTS.length - 1;
+  const last = DOMAIN_RANK_WEIGHTS[lastIndex] ?? 1;
+  return last / Math.pow(2, rank - lastIndex);
+}
+
+/**
+ * The denominator: what a signal set matching EVERY ranked domain could earn.
+ *
+ * Computed from the domains actually present, not from the table's fixed sum — with a third domain
+ * in play, dividing by the two-domain total would let the component exceed its budget.
+ */
+function domainWeightTotal(count: number): number {
+  let total = 0;
+  for (let rank = 0; rank < Math.max(count, DOMAIN_RANK_WEIGHTS.length); rank++) {
+    total += domainRankWeight(rank);
+  }
+  return total;
+}
 
 /** Bands, read off the same number. Ordered low to high; the index is the rank, as with severity. */
 export const SCORE_BANDS = ["low", "moderate", "high", "critical"] as const;
@@ -268,12 +297,14 @@ function scoreSignalExposure(
 
   let weighted = 0;
   ranking.forEach((entry, rank) => {
-    // A domain beyond the weight table contributes nothing rather than throwing: the table is
-    // sized to the contract's domains, and a feed inventing a new one must not break the poll.
-    weighted += entry.strength * (DOMAIN_RANK_WEIGHTS[rank] ?? 0);
+    // A domain beyond the table is weighted by continuing the halving, never by zero: a feed that
+    // invents a domain must not break the poll, and must not silently contribute nothing either.
+    weighted += entry.strength * domainRankWeight(rank);
   });
 
-  const points = round2((weighted / DOMAIN_WEIGHT_TOTAL) * COMPONENT_BUDGET.signalExposure);
+  const points = round2(
+    (weighted / domainWeightTotal(ranking.length)) * COMPONENT_BUDGET.signalExposure,
+  );
   return {
     ranking,
     component: {
@@ -389,7 +420,11 @@ export function scoreSignals(input: ScoreInput): ScoreResult {
     audit: {
       scorerVersion: SCORER_VERSION,
       evaluatedAt: input.evaluatedAt,
-      signalKeys: input.signals.map((s) => s.dedupeKey),
+      // SORTED, by code point. Two callers holding the same set of signals in different array
+      // orders describe the same exposure, and an audit record that differs between them is one
+      // that cannot be compared — which is the whole point of recording it. Deliberately not
+      // `localeCompare`, for the reason stated at the domain ranking above.
+      signalKeys: [...input.signals.map((s) => s.dedupeKey)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
       domainRanking: exposure.ranking.map((r) => ({
         riskDomain: r.riskDomain,
         strength: round2(r.strength),
