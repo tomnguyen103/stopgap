@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 
 import { importCatalogAction } from "../../../lib/actions";
 
@@ -13,6 +13,9 @@ import { importCatalogAction } from "../../../lib/actions";
  * Failures are listed in full, per row, with their line numbers. An importer that stops at the
  * first bad line turns a 4,000-row export into forty round trips.
  */
+/** What one upload may weigh. Enforced here and again at the server action. */
+const MAX_UPLOAD_BYTES = 8_000_000;
+
 export function ImportPanel({
   kinds,
   unavailableReason,
@@ -27,6 +30,9 @@ export function ImportPanel({
   const [csv, setCsv] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [applied, setApplied] = useState<string | null>(null);
+  // Which selection the pending read belongs to. Two files chosen quickly can resolve out of
+  // order, and without this the panel can hold file A's text under file B's name.
+  const selection = useRef(0);
 
   return (
     <>
@@ -62,15 +68,37 @@ export function ImportPanel({
           disabled={pending}
           onChange={(event) => {
             const file = event.target.files?.[0];
+            const token = ++selection.current;
             setErrors([]);
             setApplied(null);
+            setCsv(null);
             if (!file) {
-              setCsv(null);
               setFileName(null);
               return;
             }
+            // A browser tab holds the whole file in memory before anything is sent, so the bound
+            // is enforced HERE as well as at the server action — an unreadable 400MB export
+            // should say so rather than freeze the page.
+            if (file.size > MAX_UPLOAD_BYTES) {
+              setFileName(file.name);
+              setErrors([
+                `That file is ${(file.size / 1_000_000).toFixed(1)} MB. The import accepts up to ` +
+                  `${String(MAX_UPLOAD_BYTES / 1_000_000)} MB — split the export and load it in parts.`,
+              ]);
+              return;
+            }
             setFileName(file.name);
-            void file.text().then(setCsv);
+            file.text().then(
+              (text) => {
+                if (selection.current === token) setCsv(text);
+              },
+              (error: unknown) => {
+                if (selection.current !== token) return;
+                setErrors([
+                  `The file could not be read: ${error instanceof Error ? error.message : String(error)}`,
+                ]);
+              },
+            );
           }}
         />
         <button
@@ -88,6 +116,10 @@ export function ImportPanel({
                 const result = await importCatalogAction(kind, csv);
                 if (result.ok) {
                   setApplied(`${String(result.rowsApplied)} ${result.kind} rows applied`);
+                  // The file is spent. Leaving it loaded invites a second click that re-applies
+                  // it, which for inventory and procurement is not the same as applying it once.
+                  setCsv(null);
+                  setFileName(null);
                 } else {
                   setErrors(result.errors);
                 }

@@ -3,8 +3,11 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { createHash } from "node:crypto";
+
 import { isRole } from "@stopgap/core";
 import { CATALOG_KINDS, planImport } from "@stopgap/catalog";
+import { describeRowError } from "./catalog-list";
 import {
   appendAudit,
   importCatalog,
@@ -273,9 +276,9 @@ export async function updateAlertRuleAction(ruleId: unknown, input: unknown): Pr
 /**
  * Import a catalog file (ticket 17).
  *
- * Admin-gated through `manage_users` — the same rank that already governs who may change what this
- * deployment knows about itself. A catalog upload rewrites the facts every score is computed from,
- * so it is not a pharmacist's button.
+ * Gated on `manage_catalog`, its own capability at admin rank: a catalog upload rewrites the facts
+ * every score is computed from, and borrowing `manage_users` would have made the role matrix say
+ * something it does not mean.
  *
  * The plan is built and REFUSED as a whole when any row fails: a partially-applied catalog is a
  * facility that believes it stocks things it does not. Every failing row comes back with its line
@@ -286,30 +289,26 @@ export async function importCatalogAction(
   csv: unknown,
 ): Promise<{ ok: true; kind: string; rowsApplied: number } | { ok: false; errors: string[] }> {
   assertMutationAllowed("Importing a catalog file");
-  const principal = await requireRole("manage_users");
+  const principal = await requireRole("manage_catalog");
   const parsedKind = z.enum(CATALOG_KINDS).parse(kind);
   // Bounded before it is parsed: an unbounded upload is memory the request did not ask permission
   // for, and a catalog file that large is a mistake rather than a facility.
   const text = z.string().max(8_000_000).parse(csv);
+  const digest = createHash("sha256").update(text).digest("hex").slice(0, 32);
   const plan = planImport(parsedKind, text);
-  if (!plan.ok) {
-    return {
-      ok: false,
-      errors: plan.errors.map((error) =>
-        error.column === undefined
-          ? `Line ${String(error.line)}: ${error.reason}`
-          : `Line ${String(error.line)}, column "${error.column}": ${error.reason}`,
-      ),
-    };
-  }
+  // The SAME formatter the page uses. Two copies had already drifted on their quote characters,
+  // which is how a message a person is meant to act on becomes two messages.
+  if (!plan.ok) return { ok: false, errors: plan.errors.map(describeRowError) };
   const result = await importCatalog(principal.orgId, plan);
   await recordPrivilegedAudit(
     principal,
     "catalog.imported",
     // The SHAPE of the import, never its contents: the audit chain records that a catalog was
     // replaced and how much of it, not the facility's product list.
-    { kind: result.kind, rowsApplied: result.rowsApplied },
-    `catalog.imported.${result.kind}.${String(Date.now())}`,
+    { kind: result.kind, rowsApplied: result.rowsApplied, contentSha256: digest },
+    // Keyed on WHAT was imported, not on when. A clock-keyed event key makes a double-click two
+    // entries for one import; the digest also lets the chain answer "which file was this".
+    `catalog.imported.${result.kind}.${digest}`,
   );
   revalidatePath("/admin/catalog");
   revalidatePath("/admin");

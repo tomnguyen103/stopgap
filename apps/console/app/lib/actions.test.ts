@@ -58,6 +58,7 @@ const revokeRole = vi.fn(async (_db: unknown, orgId: string, userId: string, _ro
   return true;
 });
 const createAlertRule = vi.fn();
+const importCatalog = vi.fn();
 const updateAlertRule = vi.fn();
 vi.mock("@stopgap/db", () => ({
   appendAudit: (...a: unknown[]) => appendAudit(...a),
@@ -84,6 +85,8 @@ vi.mock("@stopgap/db", () => ({
   revokeApiKey: vi.fn(),
   // Ticket 14 — the alert-rule surface `actions.ts` now imports.
   createAlertRule: (...a: unknown[]) => createAlertRule(...a),
+  // Ticket 17 — the catalog import surface `actions.ts` now imports.
+  importCatalog: (...a: unknown[]) => importCatalog(...a),
   updateAlertRule: (...a: unknown[]) => updateAlertRule(...a),
 }));
 
@@ -109,8 +112,14 @@ vi.mock("@stopgap/demo", () => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const { approveProtocolVersionAction, assignRoleAction, revokeRoleAction, createAlertRuleAction, updateAlertRuleAction } =
-  await import("./actions");
+const {
+  approveProtocolVersionAction,
+  assignRoleAction,
+  revokeRoleAction,
+  createAlertRuleAction,
+  updateAlertRuleAction,
+  importCatalogAction,
+} = await import("./actions");
 const { AuthorizationError } = await import("./authz");
 
 function principal(roles: Principal["roles"]): Principal {
@@ -285,5 +294,48 @@ describe("alert-rule actions (server-enforced authorization)", () => {
     resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
     await expect(createAlertRuleAction({ ...RULE, channels: [] })).rejects.toThrow();
     expect(createAlertRule).not.toHaveBeenCalled();
+  });
+});
+
+describe("importCatalogAction (server-enforced authorization)", () => {
+  const CSV = ["sku,name", "SKU-1,Cefazolin 1g vial", ""].join(String.fromCharCode(10));
+
+  beforeEach(() => {
+    importCatalog.mockReset();
+  });
+
+  it("REFUSES a pharmacy_director — a catalog rewrites what every score is computed from", () => {
+    resolvePrincipal.mockResolvedValue(principal(["pharmacy_director"]));
+    return expect(importCatalogAction("items", CSV))
+      .rejects.toBeInstanceOf(AuthorizationError)
+      .then(() => {
+        expect(importCatalog).not.toHaveBeenCalled();
+        expect(appendAudit).not.toHaveBeenCalled();
+      });
+  });
+
+  it("refuses an unauthenticated caller the same way it refuses an under-privileged one", async () => {
+    resolvePrincipal.mockResolvedValue(principal([]));
+    await expect(importCatalogAction("items", CSV)).rejects.toBeInstanceOf(AuthorizationError);
+    expect(importCatalog).not.toHaveBeenCalled();
+  });
+
+  it("lets an admin through, scoped to their own org, and audits the shape not the contents", async () => {
+    resolvePrincipal.mockResolvedValue(principal(["admin"]));
+    importCatalog.mockResolvedValueOnce({ kind: "items", rowsApplied: 1 });
+    const result = await importCatalogAction("items", CSV);
+    expect(result).toMatchObject({ ok: true, rowsApplied: 1 });
+    expect(scopedOrgIds).toContain(PRINCIPAL_ORG_ID);
+    const detail = appendAudit.mock.calls.at(-1)?.[1] as { detail: Record<string, unknown> };
+    expect(detail.detail).toMatchObject({ kind: "items", rowsApplied: 1 });
+    // The file's fingerprint, never its rows: the chain records which catalog was loaded, not the
+    // facility's product list.
+    expect(JSON.stringify(detail.detail)).not.toContain("Cefazolin");
+  });
+
+  it("refuses a kind the importer cannot read, before touching the database", async () => {
+    resolvePrincipal.mockResolvedValue(principal(["admin"]));
+    await expect(importCatalogAction("not_a_kind", CSV)).rejects.toThrow();
+    expect(importCatalog).not.toHaveBeenCalled();
   });
 });

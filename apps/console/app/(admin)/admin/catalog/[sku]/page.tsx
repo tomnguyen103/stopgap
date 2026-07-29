@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Badge, Card, Table } from "../../../../components/ui";
-import { isSoleSourced } from "../../../../lib/catalog-list";
+import { isSoleSourced, isUnsourced } from "../../../../lib/catalog-list";
 import { getCatalogItemDetail } from "../../../../lib/data";
 import { requireGroup } from "../../../../lib/group-guard";
 import { bandSeverity } from "../../../../lib/signal-list";
@@ -29,8 +29,7 @@ export default async function CatalogItemPage({ params }: { params: Promise<{ sk
   }
   const detail = await getCatalogItemDetail(decoded);
   if (!detail) notFound();
-  const { item, identifiers, suppliers, inventory, signals } = detail;
-  const siteCount = new Set(suppliers.map((s) => s.site ?? s.name)).size;
+  const { item, identifiers, suppliers, inventory, signals, supplierSiteCount } = detail;
 
   return (
     <>
@@ -42,10 +41,15 @@ export default async function CatalogItemPage({ params }: { params: Promise<{ sk
         SKU {item.sku}
         {item.genericName ? ` · ${item.genericName}` : ""}
         {item.unit ? ` · ${item.unit}` : ""}
-        {isSoleSourced(siteCount) ? (
+        {isSoleSourced(supplierSiteCount) ? (
           <>
             {" · "}
             <Badge severity="high">sole-sourced</Badge>
+          </>
+        ) : isUnsourced(supplierSiteCount) ? (
+          <>
+            {" · "}
+            <Badge severity="moderate">no supplier loaded</Badge>
           </>
         ) : null}
       </p>
@@ -68,13 +72,18 @@ export default async function CatalogItemPage({ params }: { params: Promise<{ sk
         )}
       </Card>
 
-      <Card title="Suppliers" sub={`${siteCount} distinct site${siteCount === 1 ? "" : "s"}`}>
+      <Card
+        title="Suppliers"
+        sub={`${String(supplierSiteCount)} distinct site${supplierSiteCount === 1 ? "" : "s"}`}
+      >
         {suppliers.length === 0 ? (
           <p className="sub sub-tight">No supplier loaded for this item.</p>
         ) : (
           <Table label="Item suppliers" head={["Supplier", "Code", "Preferred"]}>
-            {suppliers.map((row) => (
-              <tr key={`${row.name}:${row.site ?? ""}`}>
+            {suppliers.map((row, index) => (
+              // Index-qualified: two rows of the same supplier at different sites are two rows, and
+              // a key built from the name alone would collide.
+              <tr key={`${String(index)}:${row.name}`}>
                 <td>{row.name}</td>
                 <td className="sub">{row.code ?? "—"}</td>
                 <td>{row.preferred ? "yes" : <span className="sub">no</span>}</td>
@@ -92,8 +101,8 @@ export default async function CatalogItemPage({ params }: { params: Promise<{ sk
           </p>
         ) : (
           <Table label="Inventory readings" head={["On hand", "Captured"]}>
-            {inventory.map((row) => (
-              <tr key={row.capturedAt.toISOString()}>
+            {inventory.map((row, index) => (
+              <tr key={`${String(index)}:${row.capturedAt.toISOString()}`}>
                 <td>
                   {row.onHand}
                   {row.unit ? <span className="sub"> {row.unit}</span> : null}
