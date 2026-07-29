@@ -6,6 +6,8 @@ import { z } from "zod";
 import { isRole } from "@stopgap/core";
 import {
   appendAudit,
+  createAlertRule,
+  updateAlertRule,
   approveProtocolVersion,
   assignRole,
   getCaseByKey,
@@ -195,6 +197,75 @@ export async function approveProtocolVersionAction(versionId: unknown): Promise<
     );
   }
   revalidatePath("/protocols");
+}
+
+/**
+ * Alert-rule input, validated at the boundary (ticket 14).
+ *
+ * `cooldownMinutes` is bounded here AND refused by the database helper: this schema is what turns
+ * a form post into a typed value, and `createAlertRule` is what refuses a zero cooldown for the
+ * reason stated on it. Two checks, because a form is not the only caller.
+ */
+const alertRuleSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  minSeverity: z.enum(["low", "moderate", "high", "critical"]),
+  cooldownMinutes: z.coerce.number().int().min(1).max(10_080),
+  channels: z.array(z.enum(["email", "chat"])).min(1),
+  riskDomain: z.enum(["shortage", "recall"]).nullish(),
+  entityContains: z.string().trim().max(200).nullish(),
+  chatWebhookUrl: z.string().url().max(2_000).nullish(),
+  enabled: z.boolean().optional(),
+});
+
+/** Create an alert rule. Director-gated: a rule decides who gets paged and how often. */
+export async function createAlertRuleAction(input: unknown): Promise<void> {
+  assertMutationAllowed("Creating an alert rule");
+  const principal = await requireRole("manage_alert_rules");
+  const parsed = alertRuleSchema.parse(input);
+  const row = await withOrgDb(principal.orgId, (db) => createAlertRule(db, principal.orgId, parsed));
+  await recordPrivilegedAudit(
+    principal,
+    "alert_rule.created",
+    // The rule's SHAPE, not a webhook URL: a chat webhook is a credential, and the audit chain is
+    // read by more people than the settings page that set it.
+    {
+      ruleId: row.id,
+      name: row.name,
+      minSeverity: row.minSeverity,
+      cooldownMinutes: row.cooldownMinutes,
+    },
+    `alert_rule.created.${row.id}`,
+  );
+  revalidatePath("/alerts");
+}
+
+/** Tune an existing rule. Same gate, same reasoning — a cooldown change is a paging change. */
+export async function updateAlertRuleAction(ruleId: unknown, input: unknown): Promise<void> {
+  assertMutationAllowed("Updating an alert rule");
+  const principal = await requireRole("manage_alert_rules");
+  const id = z.string().uuid().parse(ruleId);
+  // The FULL shape, not a patch: `updateAlertRule` replaces the row's settable columns, so a
+  // partial parse here would quietly reset every field the form did not send.
+  const parsed = alertRuleSchema.parse(input);
+  const row = await withOrgDb(principal.orgId, (db) =>
+    updateAlertRule(db, principal.orgId, id, parsed),
+  );
+  // A rule belonging to another tenant is simply not found — the update matched nothing, and the
+  // audit chain must not record a change that did not happen.
+  if (!row) throw new Error("alert rule not found");
+  await recordPrivilegedAudit(
+    principal,
+    "alert_rule.updated",
+    {
+      ruleId: id,
+      enabled: row.enabled,
+      minSeverity: row.minSeverity,
+      cooldownMinutes: row.cooldownMinutes,
+    },
+    // Keyed on the rule AND the moment: a rule tuned twice is two entries, not one restated.
+    `alert_rule.updated.${id}.${String(row.updatedAt.getTime())}`,
+  );
+  revalidatePath("/alerts");
 }
 
 const roleSchema = z.string().refine(isRole, "unknown role");
