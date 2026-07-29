@@ -1008,6 +1008,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+
     "public.feed_records": {
       "name": "feed_records",
       "schema": "",
@@ -1093,6 +1094,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+
     "public.llm_spend": {
       "name": "llm_spend",
       "schema": "",
@@ -1188,6 +1190,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+
     "public.protocol_versions": {
       "name": "protocol_versions",
       "schema": "",
@@ -2343,6 +2346,7 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+
     "public.user_roles": {
       "name": "user_roles",
       "schema": "",
