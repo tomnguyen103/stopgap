@@ -774,3 +774,21 @@ button.danger {
 .ds-diff--unchanged {
   color: var(--text-subtle);
 }
+
+/* ---- Ticket 17: per-row import failures ---------------------------------------------------- */
+/*
+  A list, not a paragraph: an administrator reads this while editing the file beside it, and forty
+  reasons run together are forty they have to re-find.
+*/
+.ds-errors {
+  list-style: none;
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--status-bad);
+  max-height: 320px;
+  overflow-y: auto;
+}

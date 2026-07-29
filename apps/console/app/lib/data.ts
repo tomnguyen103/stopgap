@@ -1,7 +1,10 @@
 import "server-only";
 import {
   feedFreshness,
+  browseCatalog,
+  catalogCoverage,
   dailyCounts,
+  getCatalogItem,
   getCaseByWorkflowId,
   getLlmSpend,
   listAlertHistory,
@@ -31,6 +34,10 @@ import {
 import type { CaseStatus, Role } from "@stopgap/core";
 import type {
   AlertHistoryOptions,
+  CatalogBrowseOptions,
+  CatalogCoverage,
+  CatalogItemDetail,
+  CatalogListItem,
   AlertHistoryRow,
   AlertRuleRow,
   ApiKeyRow,
@@ -527,4 +534,24 @@ export async function getAlertHistory(
 ): Promise<{ rows: AlertHistoryRow[]; total: number; page: number }> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, (db) => listAlertHistory(db, orgId, options));
+}
+
+/** One page of the facility catalog, for the administrator's browser (ticket 17). */
+export async function getCatalogPage(
+  options: CatalogBrowseOptions,
+): Promise<{ rows: CatalogListItem[]; total: number; page: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => browseCatalog(db, orgId, options));
+}
+
+/** One catalog item, with its identifiers, suppliers, inventory and matched signals. */
+export async function getCatalogItemDetail(sku: string): Promise<CatalogItemDetail | undefined> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => getCatalogItem(db, orgId, sku));
+}
+
+/** How much of the catalog exists — the setup checklist's evidence. */
+export async function getCatalogCoverage(): Promise<CatalogCoverage> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => catalogCoverage(db, orgId));
 }
