@@ -44,7 +44,17 @@ const ALLOWED_SEVERITIES = ["low", "moderate", "high", "critical"] as const;
 const ALLOWED_CHANNELS = ["email", "chat"] as const;
 const ALLOWED_DOMAINS = ["shortage", "recall"] as const;
 
-function assertRuleVocabulary(input: AlertRuleInput): void {
+/**
+ * `effectiveWebhookUrl` is the webhook the rule will ACTUALLY HAVE once this write lands, which is
+ * not always the one in `input`. On create the two are the same thing. On update they are not:
+ * omitting `chatWebhookUrl` means "leave the stored one alone" — that is the whole point of the
+ * preservation in `updateAlertRule`, because a chat webhook is a bearer credential and the console
+ * must be able to tune a cooldown without being handed it. Validating `input` there asked whether
+ * the EDITOR supplied a credential rather than whether the rule HAS one, so every edit from the
+ * rules panel — which deliberately never sends it — was refused with "a chat rule needs a webhook
+ * to deliver to" on a rule that had one all along.
+ */
+function assertRuleVocabulary(input: AlertRuleInput, effectiveWebhookUrl: string | null): void {
   if (!(ALLOWED_SEVERITIES as readonly string[]).includes(input.minSeverity)) {
     throw new Error(
       `alert rule severity must be one of ${ALLOWED_SEVERITIES.join(", ")} (got ${input.minSeverity})`,
@@ -70,7 +80,7 @@ function assertRuleVocabulary(input: AlertRuleInput): void {
     );
   }
   // A chat rule with no destination delivers nothing and records that it fired.
-  if (input.channels.includes("chat") && !input.chatWebhookUrl) {
+  if (input.channels.includes("chat") && !effectiveWebhookUrl) {
     throw new Error("a chat rule needs a webhook to deliver to");
   }
 }
@@ -94,7 +104,8 @@ export async function createAlertRule(
   orgId: string,
   input: AlertRuleInput,
 ): Promise<AlertRuleRow> {
-  assertRuleVocabulary(input);
+  // On create there is nothing stored to preserve, so the input IS the effective webhook.
+  assertRuleVocabulary(input, input.chatWebhookUrl ?? null);
   const [row] = await db
     .insert(alertRules)
     .values({
@@ -125,7 +136,19 @@ export async function updateAlertRule(
   ruleId: string,
   input: AlertRuleInput,
 ): Promise<AlertRuleRow | undefined> {
-  assertRuleVocabulary(input);
+  // Read the stored webhook BEFORE validating, because "omitted" means "keep what is there" and
+  // the guard has to know what that is. A rule that does not exist returns undefined here rather
+  // than reaching the guard — otherwise editing a deleted rule reports a missing webhook, which
+  // sends whoever reads it looking for the wrong problem.
+  const [existing] = await db
+    .select({ chatWebhookUrl: alertRules.chatWebhookUrl })
+    .from(alertRules)
+    .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)));
+  if (!existing) return undefined;
+  assertRuleVocabulary(
+    input,
+    input.chatWebhookUrl === undefined ? existing.chatWebhookUrl : input.chatWebhookUrl,
+  );
   const [row] = await db
     .update(alertRules)
     .set({
