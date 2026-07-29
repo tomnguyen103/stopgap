@@ -689,3 +689,9 @@ button.danger {
   opacity: var(--button-disabled-opacity);
   pointer-events: none;
 }
+/* A pager control at the end of its range: present, legible, and not a control. It is a span, not
+   a disabled link, so nothing announces an action that is not there. */
+.ds-button.is-inert {
+  opacity: var(--button-disabled-opacity);
+  cursor: default;
+}
