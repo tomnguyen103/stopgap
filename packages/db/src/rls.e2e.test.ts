@@ -35,8 +35,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  *   - the same for an UPDATE and for a DELETE: zero rows AFFECTED, with org B's row still intact
  *     afterwards. §6.5's bullet says "selects/updates", and a read policy is not a write guarantee;
  *   - an INSERT carrying a foreign `org_id` is REFUSED by the policy's WITH CHECK;
- *   - a session with `app.current_org` unset sees NOTHING (fail-closed, per the two-argument
- *     `current_setting(..., true)` returning NULL).
+ *   - a session with `app.current_org` unset sees NOTHING (fail-closed), in BOTH of the two states
+ *     an unscoped connection can actually be in: never-scoped, where `current_setting(..., true)`
+ *     returns NULL and the read returns zero rows; and recycled after a scoped transaction, where
+ *     the placeholder GUC has been materialised, reverts to the EMPTY STRING rather than to
+ *     nothing, and the read is refused outright with `22P02`. Two closed doors, not one — see the
+ *     `unscoped` / `unscopedAfterScoped` helpers.
  *
  * Plus the per-org audit chain, and `audit_anchors`' deliberately asymmetric SELECT-only policy.
  */
@@ -88,6 +92,31 @@ const MAINTENANCE_URL =
 const db = postgres(DATABASE_URL, { max: 2, onnotice: () => undefined });
 const maint = postgres(MAINTENANCE_URL, { max: 2, onnotice: () => undefined });
 
+/**
+ * A pool NO scoped transaction is ever run on, so `app.current_org` has never been set on any
+ * connection in it. It is separate from `db` rather than sharing it because the two unscoped states
+ * are genuinely different (see `recycled`), and over one pool which one a test got would depend on
+ * connection-checkout order. `max: 1` because nothing here runs concurrently.
+ */
+const neverScoped = postgres(DATABASE_URL, { max: 1, onnotice: () => undefined });
+
+/**
+ * A pool of exactly ONE connection, deliberately dirtied by a scoped transaction before each
+ * unscoped read — because "unset" has two meanings on a pooled connection and only one of them is
+ * NULL.
+ *
+ * `set_config(..., true)` is LOCAL, so the value is reverted at the end of the transaction — but
+ * "reverted" means restored to the value the SESSION held, and for a custom GUC that is not
+ * "undefined". The first `set_config` MATERIALISES the placeholder, and once materialised its reset
+ * value is the EMPTY STRING (rollback does not undo that either, nor does `reset`). So a connection
+ * that has served one tenant reports `current_setting('app.current_org', true) = ''` rather than
+ * NULL, and the policies' `''::uuid` raises `22P02` instead of evaluating to NULL.
+ *
+ * Both are fail-closed, and `docs/multi-tenancy.md` is where that is argued at length. `max: 1` is
+ * what makes "the same connection that just ran a scoped transaction" a fact rather than a hope.
+ */
+const recycled = postgres(DATABASE_URL, { max: 1, onnotice: () => undefined });
+
 /** Run `fn` in a transaction scoped to one tenant — the production `withOrgDb` shape. */
 async function asOrg<T>(
   orgId: string,
@@ -99,9 +128,28 @@ async function asOrg<T>(
   }) as Promise<T>;
 }
 
-/** Run `fn` with NO tenant scope — what a forgotten `withOrgDb` produces. */
+/**
+ * Run `fn` with NO tenant scope, on a connection that has never carried one — what a forgotten
+ * `withOrgDb` produces in a freshly started process.
+ */
 async function unscoped<T>(fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
-  return db.begin((tx) => fn(tx)) as Promise<T>;
+  return neverScoped.begin((tx) => fn(tx)) as Promise<T>;
+}
+
+/**
+ * Scope a transaction to `orgId` and then, on the SAME connection, run `fn` with no scope at all —
+ * what a forgotten `withOrgDb` produces once the pool has been in service, which is every request
+ * after the first.
+ */
+async function unscopedAfterScoped<T>(
+  orgId: string,
+  fn: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
+  await recycled.begin(async (tx) => {
+    await tx`select set_config('app.current_org', ${orgId}, true)`;
+    await tx`select 1`;
+  });
+  return recycled.begin((tx) => fn(tx)) as Promise<T>;
 }
 
 /** Insert the whole fixture for one org, from inside that org's own scope. */
@@ -424,8 +472,10 @@ afterAll(async () => {
   // where it expects two and fails somewhere unrelated. Before the organizations delete: the FK.
   await maint`delete from audit_anchors where org_id in (${ORG_A}, ${ORG_B})`;
   await db`delete from organizations where id in (${ORG_A}, ${ORG_B})`;
-  await db.end({ timeout: 5 });
-  await maint.end({ timeout: 5 });
+  // `allSettled`, not four sequential awaits: a pool that refuses to drain within the timeout must
+  // not stop the other three from closing, or vitest hangs on the open handles rather than
+  // reporting whatever actually went wrong.
+  await Promise.allSettled([db, neverScoped, recycled, maint].map((pool) => pool.end({ timeout: 5 })));
 });
 
 describe("cross-tenant SELECT returns zero rows", () => {
@@ -503,13 +553,75 @@ describe("cross-tenant DELETE affects zero rows", () => {
 describe("an unscoped session sees NOTHING (fail-closed)", () => {
   for (const table of TENANT_TABLES) {
     it(`${table.name}: no app.current_org => zero rows, not every row`, async () => {
-      // `current_setting('app.current_org', true)` returns NULL when unset, `org_id = NULL` is
-      // NULL, and NULL is not TRUE. The direction of that failure is the whole design: a
-      // forgotten scope shows an empty page, never another hospital's data.
+      // `current_setting('app.current_org', true)` returns NULL when the setting has never been
+      // established on this connection, `org_id = NULL` is NULL, and NULL is not TRUE. The
+      // direction of that failure is the whole design: a forgotten scope shows an empty page,
+      // never another hospital's data.
       const rows = await unscoped((tx) => table.readAll(tx));
       expect(rows).toHaveLength(0);
+      // And zero is the POLICY filtering, not an empty table. Without this the assertion above
+      // would stay green if the fixtures had failed to seed — the one way a test whose expected
+      // value is "nothing" can pass for the wrong reason. `maint` holds BYPASSRLS, so it sees the
+      // rows the unscoped tenant connection just could not.
+      const visibleToBypass = await maint.begin((tx) => table.readAll(tx));
+      expect(visibleToBypass.length).toBeGreaterThan(0);
     });
   }
+});
+
+/**
+ * THE SAME PROPERTY ON A CONNECTION THAT HAS ALREADY SERVED A TENANT — which, in a pooled
+ * application, is every connection after its first request, and therefore the shape a forgotten
+ * `withOrgDb` overwhelmingly takes in production.
+ *
+ * The observable outcome is NOT the one above, and pretending otherwise is what this block exists
+ * to stop: the GUC reverts to the empty string rather than to nothing, so the policies' `''::uuid`
+ * raises `22P02` mid-statement (the mechanism is on `recycled`, the argument in
+ * `docs/multi-tenancy.md`).
+ *
+ * That is still fail-closed — an error is not a leak, and no row of any other tenant is returned —
+ * but it is a different failure, so it gets its own assertion rather than being folded into "zero
+ * rows" with an `or`. Writing it as `errors OR returns nothing` would have made the suite pass
+ * whichever branch it took, and the point of the block is to pin down WHICH.
+ *
+ * Note what is deliberately NOT done about it here: the policies are left exactly as they are.
+ * Wrapping them in `nullif(current_setting(...), '')` would turn this into the zero-rows case, but
+ * an error on a forgotten scope is the louder of the two closed outcomes and there is no argument
+ * for trading a crash for a silently empty page on the path whose whole job is refusing to serve
+ * data it cannot attribute.
+ */
+describe("an unscoped session on a RECYCLED connection is fail-closed too", () => {
+  for (const table of TENANT_TABLES) {
+    it(`${table.name}: after a scoped transaction, an unscoped read is refused, not served`, async () => {
+      await expect(unscopedAfterScoped(ORG_B, (tx) => table.readAll(tx))).rejects.toMatchObject({
+        code: "22P02",
+      });
+    });
+  }
+
+  it("the GUC really is the empty string, not NULL, once a scoped transaction has committed", async () => {
+    // The mechanism behind every case above, asserted directly so a future reader does not have to
+    // infer it from a cast error.
+    const [row] = await unscopedAfterScoped(
+      ORG_A,
+      (tx) => tx`select current_setting('app.current_org', true) as value,
+                        (current_setting('app.current_org', true) is null) as is_null`,
+    );
+    expect(row?.value).toBe("");
+    expect(row?.is_null).toBe(false);
+  });
+
+  it("RESET does not restore NULL — the placeholder stays materialised as the empty string", async () => {
+    // Recorded as a test because "just `reset app.current_org` first" is the obvious repair for the
+    // block above, and it does not work: RESET restores the reset value, which for a placeholder
+    // GUC that has been set once is the empty string, not the absence the policies want.
+    const [row] = await unscopedAfterScoped(ORG_A, async (tx) => {
+      await tx`reset app.current_org`;
+      const rows = await tx`select current_setting('app.current_org', true) as value`;
+      return rows;
+    });
+    expect(row?.value).toBe("");
+  });
 });
 
 /**
