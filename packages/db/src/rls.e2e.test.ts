@@ -154,9 +154,9 @@ async function seedOrg(
                      '{}'::jsonb, ${orgId + ":openfda_shortage:src-" + suffix},
                      '{"ndcs":[],"rxcuis":[],"names":[]}'::jsonb)`;
     await tx`insert into risk_score_snapshots (id, org_id, signal_id, score, band, components,
-                                               scorer_version)
+                                               reachable_max, scorer_version)
              values (${ids.scoreId}, ${orgId}, ${ids.signalId}, 42.5, 'moderate', '{}'::jsonb,
-                     'test-1')`;
+                     65, 'test-1')`;
   });
 }
 
@@ -211,8 +211,8 @@ const TENANT_TABLES: TenantTable[] = [
     // supposed to prove tenants stay apart. What this row must isolate is the `org_id` column.
     insertAs: (tx, org) =>
       tx`insert into risk_score_snapshots (org_id, signal_id, score, band, components,
-                                           scorer_version)
-         values (${org}, ${org === ORG_A ? ID.signalA : ID.signalB}, 1, 'low', '{}'::jsonb,
+                                           reachable_max, scorer_version)
+         values (${org}, ${org === ORG_A ? ID.signalA : ID.signalB}, 1, 'low', '{}'::jsonb, 65,
                  ${"v-" + org.slice(0, 4)})`,
     readAll: (tx) => tx`select id from risk_score_snapshots`,
     updateOthers: (tx) =>

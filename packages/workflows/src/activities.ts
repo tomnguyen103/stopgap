@@ -22,6 +22,9 @@ import {
   listOpenMonitoringCases,
   listRoleRecipients,
   recordFeedRecords,
+  dedupeByKey,
+  recordScoreSnapshots,
+  type ScoreSnapshotInput,
   resetFeedMiss,
   upsertSignals,
   updateCaseStatus,
@@ -33,6 +36,7 @@ import {
 } from "@stopgap/db";
 import { sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { incrementCounter } from "@stopgap/observability";
+import { componentsToRecord, scoreSignals, type ScorableSignal } from "@stopgap/scorer";
 import {
   ashpShortageConnector,
   contentHash,
@@ -390,6 +394,55 @@ function normalizeForOrg(
   return feeds.flatMap((f) => f.rows.map((row) => f.normalize(row as never, context)));
 }
 
+/**
+ * Score each signal this poll wrote, one snapshot apiece.
+ *
+ * PER SIGNAL rather than per facility, deliberately and temporarily: until ticket 16 matches
+ * signals to catalog items there is no item to aggregate onto, and inventing one would mean
+ * guessing which signals belong together — the exact judgement the matching layer exists to make.
+ * The catalog components therefore go unsupplied here, which is why every snapshot this poll
+ * writes reports them as UNAVAILABLE rather than as zero.
+ */
+function scoreForPoll(
+  signals: NormalizedSignal[],
+  persisted: { id: string; dedupeKey: string }[],
+  evaluatedAt: string,
+) {
+  const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
+  const snapshots: ScoreSnapshotInput[] = [];
+  // Collapsed on the dedupe key first, exactly as `upsertSignals` collapses its own batch. Two feed
+  // records deriving the same key resolve to ONE persisted row, so scoring both would emit two
+  // snapshots sharing (org, signal, scorer version, moment) — and `ON CONFLICT DO UPDATE` refuses
+  // to touch a row twice in one statement, aborting the whole tenant's write, signals included.
+  for (const signal of dedupeByKey(signals)) {
+    const signalId = idByKey.get(signal.dedupeKey);
+    // A signal with no persisted row is one the upsert did not return; scoring it would attach a
+    // snapshot to nothing. Skipped rather than guessed.
+    if (!signalId) continue;
+    const scorable: ScorableSignal = {
+      dedupeKey: signal.dedupeKey,
+      source: signal.source,
+      riskDomain: signal.riskDomain,
+      severity: signal.severity,
+      severityScore: signal.severityScore,
+      confidence: signal.confidence,
+      publishedAt: signal.publishedAt,
+      sourceResolved: signal.sourceResolved,
+    };
+    const result = scoreSignals({ signals: [scorable], evaluatedAt });
+    snapshots.push({
+      signalId,
+      score: result.score,
+      band: result.band,
+      components: componentsToRecord(result),
+      reachableMax: result.reachableMax,
+      scorerVersion: result.scorerVersion,
+      computedAt: new Date(evaluatedAt),
+    });
+  }
+  return snapshots;
+}
+
 export async function pollAndOpenCases(): Promise<{
   polled: number;
   opened: number;
@@ -458,7 +511,7 @@ export async function pollAndOpenCases(): Promise<{
       // cycle, which reads in the runbook as "the poller stopped".
       try {
         await withOrgDb(org.id, async (db) => {
-          await upsertSignals(db, org.id, signals);
+          const persisted = await upsertSignals(db, org.id, signals);
           // The FEED-ABSENT half, kept distinct from `sourceResolved`: a signal the poll did not
           // return has said nothing about whether the hazard is over.
           await bumpSignalFeedMiss(
@@ -468,6 +521,12 @@ export async function pollAndOpenCases(): Promise<{
             pollRun,
             attestedSources,
           );
+          // Ticket 07 — scoring happens HERE, on the durable poll workflow, and nowhere else. No
+          // second orchestrator: the score is a consequence of the signals this poll just wrote,
+          // in the same transaction, so a snapshot can never describe a signal row that failed to
+          // land. `pollTimestamp` is the evaluation time for EVERY org in this poll, which is what
+          // makes two tenants' scores comparable and the whole poll reproducible.
+          await recordScoreSnapshots(db, org.id, scoreForPoll(signals, persisted, pollTimestamp));
         });
       } catch (err) {
         incrementCounter("stopgap_signal_persist_failures_total");

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SCORER_VERSION } from "@stopgap/scorer";
 import type { OpenMonitoringCase } from "@stopgap/db";
 
 /**
@@ -43,6 +44,8 @@ const counters: string[] = [];
 const writtenSignals: { orgId: string; dedupeKeys: string[] }[] = [];
 /** The sources each org's miss sweep was scoped to, so an outage cannot retire live signals. */
 const missSweeps: { orgId: string; sources: string[] }[] = [];
+/** Score snapshots written per org (ticket 07) — scoring rides the poll, not a second runtime. */
+const writtenSnapshots: { orgId: string; count: number; scorerVersion: string | undefined }[] = [];
 
 vi.mock("@stopgap/db", () => ({
   withOrgDb: (orgId: string, fn: (db: unknown) => Promise<unknown>) => {
@@ -50,6 +53,13 @@ vi.mock("@stopgap/db", () => ({
     return fn({});
   },
   withBypassDb: (fn: (db: unknown) => Promise<unknown>) => fn({}),
+  // The real collapse, not a stub: the poll relies on it to keep two feed records that derive one
+  // dedupe key from becoming two snapshot rows with the same conflict target.
+  dedupeByKey: <T extends { dedupeKey: string }>(signals: T[]): T[] => {
+    const byKey = new Map<string, T>();
+    for (const signal of signals) byKey.set(signal.dedupeKey, signal);
+    return [...byKey.values()];
+  },
   listOrganizations: async () => [
     { id: ORG_A, slug: "a", name: "A", createdAt: new Date() },
     { id: ORG_B, slug: "b", name: "B", createdAt: new Date() },
@@ -64,7 +74,19 @@ vi.mock("@stopgap/db", () => ({
     }),
   upsertSignals: async (_db: unknown, orgId: string, signals: { dedupeKey: string }[]) => {
     writtenSignals.push({ orgId, dedupeKeys: signals.map((s) => s.dedupeKey) });
-    return signals.length;
+    return signals.map((s, i) => ({ id: `sig-${orgId}-${i}`, dedupeKey: s.dedupeKey }));
+  },
+  recordScoreSnapshots: async (
+    _db: unknown,
+    orgId: string,
+    snapshots: { scorerVersion: string }[],
+  ) => {
+    writtenSnapshots.push({
+      orgId,
+      count: snapshots.length,
+      scorerVersion: snapshots[0]?.scorerVersion,
+    });
+    return snapshots.length;
   },
   bumpSignalFeedMiss: async (
     _db: unknown,
@@ -231,6 +253,7 @@ beforeEach(() => {
   counters.length = 0;
   writtenSignals.length = 0;
   missSweeps.length = 0;
+  writtenSnapshots.length = 0;
   openFdaCalls = 0;
 });
 
@@ -315,6 +338,21 @@ describe("the scheduled feed poll (no session, no case)", () => {
    * set exactly as it does for a bad path, so "returned nothing" cannot be told apart from
    * "failed quietly", and treating it as absence would retire live signals on a key expiry.
    */
+  /**
+   * Ticket 07 — scores are produced BY THE POLL, not by a second orchestrator.
+   *
+   * The snapshot rides the same per-org transaction as the signal write, so it can never describe
+   * a row that failed to land, and every org in one poll shares an evaluation timestamp — which is
+   * what makes two tenants' scores comparable rather than merely both present.
+   */
+  it("writes a scored snapshot for each signal, in the same tenant transaction", async () => {
+    await pollAndOpenCases();
+    expect(writtenSnapshots.map((w) => w.orgId)).toEqual([ORG_A, ORG_B]);
+    expect(writtenSnapshots.every((w) => w.count === 1)).toBe(true);
+    // Version-pinned, so a score is reproducible after the weights move.
+    expect(writtenSnapshots[0]?.scorerVersion).toBe(SCORER_VERSION);
+  });
+
   it("sweeps misses only for feeds that returned something, never for a silent one", async () => {
     await pollAndOpenCases();
     for (const sweep of missSweeps) {

@@ -76,8 +76,8 @@ export async function upsertSignals(
   db: Db,
   orgId: string,
   signals: PersistableSignal[],
-): Promise<number> {
-  if (signals.length === 0) return 0;
+): Promise<{ id: string; dedupeKey: string }[]> {
+  if (signals.length === 0) return [];
   const unique = dedupeByKey(signals);
   for (const signal of unique) {
     if (!signal.dedupeKey.startsWith(`${orgId}:`)) {
@@ -94,57 +94,61 @@ export async function upsertSignals(
   // ONE statement for the whole batch, not one per signal. A poll writes every signal a feed
   // returned, for every tenant, inside a single transaction — a round trip per row turns a
   // 200-signal feed across 50 tenants into 10,000 of them.
-  await db
-    .insert(riskSignals)
-    .values(
-      unique.map((signal) => ({
-        orgId,
-        source: signal.source,
-        sourceId: signal.sourceId,
-        riskDomain: signal.riskDomain,
-        entityType: signal.entityType,
-        entityIdentifier: signal.entityIdentifier,
-        title: signal.title,
-        summary: signal.summary,
-        severity: signal.severity,
-        severityScore: signal.severityScore.toString(),
-        confidence: signal.confidence.toString(),
-        observedAt: new Date(signal.observedAt),
-        publishedAt: new Date(signal.publishedAt),
-        lastFetchedAt: new Date(signal.lastFetchedAt),
-        staleness: signal.staleness,
-        sourceResolved: signal.sourceResolved,
-        feedMissCount: 0,
-        evidenceUrl: signal.evidenceUrl,
-        raw: signal.raw as Record<string, unknown>,
-        dedupeKey: signal.dedupeKey,
-        matchHints: signal.matchHints,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: [riskSignals.orgId, riskSignals.dedupeKey],
-      // `excluded` is the row this statement TRIED to insert — the only way to restate a batch
-      // without a statement per row.
-      set: {
-        title: sql`excluded.title`,
-        summary: sql`excluded.summary`,
-        severity: sql`excluded.severity`,
-        severityScore: sql`excluded.severity_score`,
-        confidence: sql`excluded.confidence`,
-        observedAt: sql`excluded.observed_at`,
-        publishedAt: sql`excluded.published_at`,
-        lastFetchedAt: sql`excluded.last_fetched_at`,
-        staleness: sql`excluded.staleness`,
-        sourceResolved: sql`excluded.source_resolved`,
-        // Present in the feed right now — the one fact that resets the absence counter.
-        feedMissCount: sql`0`,
-        evidenceUrl: sql`excluded.evidence_url`,
-        raw: sql`excluded.raw`,
-        matchHints: sql`excluded.match_hints`,
-        updatedAt: sql`now()`,
-      },
-    });
-  return unique.length;
+  return (
+    db
+      .insert(riskSignals)
+      .values(
+        unique.map((signal) => ({
+          orgId,
+          source: signal.source,
+          sourceId: signal.sourceId,
+          riskDomain: signal.riskDomain,
+          entityType: signal.entityType,
+          entityIdentifier: signal.entityIdentifier,
+          title: signal.title,
+          summary: signal.summary,
+          severity: signal.severity,
+          severityScore: signal.severityScore.toString(),
+          confidence: signal.confidence.toString(),
+          observedAt: new Date(signal.observedAt),
+          publishedAt: new Date(signal.publishedAt),
+          lastFetchedAt: new Date(signal.lastFetchedAt),
+          staleness: signal.staleness,
+          sourceResolved: signal.sourceResolved,
+          feedMissCount: 0,
+          evidenceUrl: signal.evidenceUrl,
+          raw: signal.raw as Record<string, unknown>,
+          dedupeKey: signal.dedupeKey,
+          matchHints: signal.matchHints,
+        })),
+      )
+      .onConflictDoUpdate({
+        target: [riskSignals.orgId, riskSignals.dedupeKey],
+        // `excluded` is the row this statement TRIED to insert — the only way to restate a batch
+        // without a statement per row.
+        set: {
+          title: sql`excluded.title`,
+          summary: sql`excluded.summary`,
+          severity: sql`excluded.severity`,
+          severityScore: sql`excluded.severity_score`,
+          confidence: sql`excluded.confidence`,
+          observedAt: sql`excluded.observed_at`,
+          publishedAt: sql`excluded.published_at`,
+          lastFetchedAt: sql`excluded.last_fetched_at`,
+          staleness: sql`excluded.staleness`,
+          sourceResolved: sql`excluded.source_resolved`,
+          // Present in the feed right now — the one fact that resets the absence counter.
+          feedMissCount: sql`0`,
+          evidenceUrl: sql`excluded.evidence_url`,
+          raw: sql`excluded.raw`,
+          matchHints: sql`excluded.match_hints`,
+          updatedAt: sql`now()`,
+        },
+      })
+      // RETURNING covers inserted AND updated rows, which is what the caller needs: scoring attaches
+      // a snapshot to every signal this poll saw, not only to the ones seen for the first time.
+      .returning({ id: riskSignals.id, dedupeKey: riskSignals.dedupeKey })
+  );
 }
 
 /**
@@ -236,7 +240,12 @@ export interface ScoreSnapshotInput {
   signalId: string;
   score: number;
   band: string;
-  components: Record<string, number>;
+  components: Record<
+    string,
+    { points: number; max: number; available: boolean; unavailableReason?: string }
+  >;
+  /** The points this score could have earned — see the column comment on the table. */
+  reachableMax: number;
   scorerVersion: string;
   /**
    * REQUIRED, not defaulted to the clock.
@@ -269,6 +278,7 @@ export async function recordScoreSnapshots(
         score: s.score.toString(),
         band: s.band,
         components: s.components,
+        reachableMax: s.reachableMax.toString(),
         scorerVersion: s.scorerVersion,
         computedAt: s.computedAt,
       })),
