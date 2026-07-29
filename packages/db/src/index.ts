@@ -116,6 +116,7 @@ export {
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export {
+  dedupeByKey,
   upsertSignals,
   bumpSignalFeedMiss,
   listSignals,
