@@ -14,14 +14,12 @@ export interface RuleView {
   riskDomain: string | null;
   entityContains: string | null;
   /**
-   * The rule's chat webhook, carried through every edit.
-   *
-   * `updateAlertRule` REPLACES the row's settable columns, so a panel that omitted this field would
-   * silently delete the tenant's webhook the first time somebody toggled a rule off and on — and a
-   * chat rule with no destination fails quietly, which is the failure mode alerting exists to
-   * prevent.
+   * NO `chatWebhookUrl`. A chat webhook is a bearer credential — whoever holds the URL can post
+   * into the room — and this panel is a client component, so anything listed here is shipped to the
+   * browser. `updateAlertRule` treats an omitted webhook as UNCHANGED and clears it only on an
+   * explicit null, which is what lets the console tune a cooldown without ever being handed the
+   * secret to give back.
    */
-  chatWebhookUrl: string | null;
   /** When this rule last fired, already formatted by the server. */
   lastFired: string | null;
 }
@@ -57,7 +55,7 @@ export function RulesPanel({
   const [channels, setChannels] = useState<string[]>(["email"]);
   const [webhook, setWebhook] = useState("");
 
-  /** The whole rule as the server takes it, with one field replaced. */
+  /** The rule as the server takes it, with one field replaced — minus the webhook it never sees. */
   function settings(rule: RuleView, change: Partial<RuleView>) {
     const merged = { ...rule, ...change };
     return {
@@ -67,7 +65,6 @@ export function RulesPanel({
       channels: merged.channels,
       riskDomain: merged.riskDomain,
       entityContains: merged.entityContains,
-      chatWebhookUrl: merged.chatWebhookUrl,
       enabled: merged.enabled,
     };
   }

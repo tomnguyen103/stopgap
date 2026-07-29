@@ -82,7 +82,6 @@ export default async function AlertsPage({
             channels: rule.channels,
             riskDomain: rule.riskDomain,
             entityContains: rule.entityContains,
-            chatWebhookUrl: rule.chatWebhookUrl,
             // Formatted on the server: `toLocaleString()` in a client component reads a locale and
             // a time zone that differ between the render and the hydration.
             lastFired: lastFired[rule.id]?.replace("T", " ").slice(0, 16) ?? null,

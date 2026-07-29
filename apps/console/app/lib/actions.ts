@@ -244,8 +244,10 @@ export async function updateAlertRuleAction(ruleId: unknown, input: unknown): Pr
   assertMutationAllowed("Updating an alert rule");
   const principal = await requireRole("manage_alert_rules");
   const id = z.string().uuid().parse(ruleId);
-  // The FULL shape, not a patch: `updateAlertRule` replaces the row's settable columns, so a
-  // partial parse here would quietly reset every field the form did not send.
+  // The full shape apart from the webhook: `updateAlertRule` replaces the row's settable columns,
+  // so a partial parse here would quietly reset every field the form did not send. The one
+  // exception is `chatWebhookUrl`, which the rules panel deliberately never holds — omitted there
+  // means unchanged in the database, and only an explicit null clears it.
   const parsed = alertRuleSchema.parse(input);
   const row = await withOrgDb(principal.orgId, (db) =>
     updateAlertRule(db, principal.orgId, id, parsed),
