@@ -3,12 +3,17 @@ import {
   feedFreshness,
   getCaseByWorkflowId,
   getDb,
+  getKpis,
+  getSignalByKey,
+  latestScoresForSignals,
+  listSignalsPage,
   listAcknowledgments,
   listApiKeys,
   listCases,
   listOrganizations,
   listShadowRuns,
   listUsers,
+  rankedOpenCases,
   schema,
   shadowStatsByClass,
   verifyAnchors,
@@ -16,7 +21,7 @@ import {
   withOrgDb,
 } from "@stopgap/db";
 import type { Role } from "@stopgap/core";
-import type { ApiKeyRow, UserRow } from "@stopgap/db";
+import type { ApiKeyRow, Kpis, RankedCase, RiskSignalRow, UserRow } from "@stopgap/db";
 import type {
   AnchorVerification,
   AuditRow,
@@ -31,7 +36,7 @@ import type {
 import type { OrganizationRow } from "@stopgap/db";
 import { evaluatePromotion, type PromotionDecision } from "@stopgap/shadow";
 import { getCaseState, withTemporalClient, type CaseState } from "@stopgap/workflows";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { resolvePrincipal } from "./principal";
 
 /**
@@ -236,5 +241,84 @@ export async function getProtocols(): Promise<
       protocol,
       versions: versions.filter((version) => version.protocolId === protocol.id),
     }));
+  });
+}
+
+/**
+ * The viewer overview's three headline figures and its ranked queue, in one round trip's worth of
+ * scope (ticket 08).
+ *
+ * `awaitingReview` is counted here rather than added to `Kpis`: that type is the KPI board's
+ * contract and every consumer of it would otherwise gain a field it does not use.
+ */
+export interface ViewerOverview {
+  kpis: Kpis;
+  awaitingReview: number;
+  ranked: RankedCase[];
+}
+
+export async function getViewerOverview(rankedLimit = 10): Promise<ViewerOverview> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const kpis = await getKpis(orgId, db);
+    const [awaiting] = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.cases)
+      .where(and(eq(schema.cases.orgId, orgId), eq(schema.cases.status, "awaiting_review")));
+    return {
+      kpis,
+      awaitingReview: Number(awaiting?.count ?? 0),
+      ranked: await rankedOpenCases(db, orgId, rankedLimit),
+    };
+  });
+}
+
+/** One page of the tenant's signals, each carrying its latest score if the scorer has reached it. */
+export interface ScoredSignal {
+  signal: RiskSignalRow;
+  score: { score: number; band: string; scorerVersion: string } | undefined;
+}
+
+export async function getSignalsPage(
+  options: Parameters<typeof listSignalsPage>[2],
+): Promise<{ rows: ScoredSignal[]; total: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const { rows, total } = await listSignalsPage(db, orgId, options);
+    // ONE score lookup for the whole page. Per-row lookups turn a 100-row page into 100 round
+    // trips, which is the shape that makes paging pointless.
+    const scores = await latestScoresForSignals(
+      db,
+      orgId,
+      rows.map((row) => row.id),
+    );
+    return { rows: rows.map((signal) => ({ signal, score: scores.get(signal.id) })), total };
+  });
+}
+
+/** One signal with its evidence and its latest score snapshot, for the detail view. */
+export async function getSignalDetail(dedupeKey: string): Promise<
+  | {
+      signal: RiskSignalRow;
+      snapshot: schema.RiskScoreSnapshotRow | undefined;
+    }
+  | undefined
+> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const signal = await getSignalByKey(db, orgId, dedupeKey);
+    if (!signal) return undefined;
+    const [snapshot] = await db
+      .select()
+      .from(schema.riskScoreSnapshots)
+      .where(
+        and(
+          eq(schema.riskScoreSnapshots.orgId, orgId),
+          eq(schema.riskScoreSnapshots.signalId, signal.id),
+        ),
+      )
+      .orderBy(desc(schema.riskScoreSnapshots.computedAt), desc(schema.riskScoreSnapshots.id))
+      .limit(1);
+    return { signal, snapshot };
   });
 }

@@ -122,11 +122,18 @@ export {
   getSignalByKey,
   recordScoreSnapshots,
   latestScoresForSignals,
+  listSignalsPage,
+  rankedOpenCases,
+  SIGNAL_SORT_KEYS,
   FEED_ABSENT_THRESHOLD,
   type ListSignalsOptions,
+  type RankedCase,
   type ScoreSnapshotInput,
+  type SignalPageOptions,
 } from "./signals.js";
 export type {
+  RiskSignalRow,
+  RiskScoreSnapshotRow,
   OrganizationRow,
   NewOrganizationRow,
   ApiKeyRow,
