@@ -138,3 +138,19 @@ DEFERRED with reasons: 11 (retention predicate unindexed for 4 of 5 kinds) and 1
 (count(*) + ILIKE per page view) are performance work that adds indexes = a migration;
 ticket 21 already carries this batch's next migration. 14/15/16/17/18 are low-severity or
 judgement calls. Ticket 10 plural `numbers` nit not fixed.
+
+## Batch A PARKED 22:23:30Z
+
+Ready flip at 22:20:23Z on head `5d5463a` was REFUSED: `state: success`,
+`description: Review rate limited`. That refusal is now the LAST SPENT EVENT — time the
+next trigger from 22:23:30Z, not from the 20:01:34Z completion.
+
+NEW DATA POINT for the budget model: 2h19m after a COMPLETED review was still not enough.
+The previous session's note said "allow well over an hour, 2-3h after a completed review";
+this refusal shows 2h19m sits inside the window. Next attempt should allow appreciably
+longer — treat 3h+ from the last SPENT event (22:23:30Z, so ~01:30Z) as the floor, and
+remember each refusal pushes the window further out.
+
+Batch A state at park: head `5d5463a`, 19 commits over main, one migration (0020), gate
+exit 0, both local review axes clean, PR retitled, #32/#26/#27/#13 closed as superseded.
+Every finding from both review agents is fixed except the ones recorded as DEFERRED above.
