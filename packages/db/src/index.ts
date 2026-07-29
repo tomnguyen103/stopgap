@@ -115,6 +115,21 @@ export {
   type IssueApiKeyInput,
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
+export {
+  dedupeByKey,
+  upsertSignals,
+  bumpSignalFeedMiss,
+  listSignals,
+  getSignalByKey,
+  recordScoreSnapshots,
+  recordEvidence,
+  listEvidenceForSignal,
+  latestScoresForSignals,
+  FEED_ABSENT_THRESHOLD,
+  type ListSignalsOptions,
+  type ScoreSnapshotInput,
+  type EvidenceInput,
+} from "./signals.js";
 export type {
   OrganizationRow,
   NewOrganizationRow,

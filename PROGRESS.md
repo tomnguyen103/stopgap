@@ -318,15 +318,18 @@ Recorded as they are made, so the reasoning survives the pull request that carri
   quota. The cost is stated rather than hidden: everything stacked on ticket 05 rests on a contract
   CodeRabbit has not reviewed yet, and migration numbering now collides between the catalog branch
   and the signal branch — whichever merges second is renumbered on rebase.
-- **openFDA publishes no device-shortages endpoint** (#14). `/device/shortages.json` answers 404
-  with "Cannot GET", verified live against api.fda.gov, so ticket 05 delivers device **recalls**
-  off `/device/enforcement.json` instead. Recalls are the hazard this pipeline exists to prevent
-  substituting into, so the coverage is the one that matters; the spec's Open decisions section
-  records the substitution when #14 merges.
 - **The new connectors are not wired into the poll workflow yet** (#14). A normalized signal has
   nowhere to land until ticket 06 creates `risk_signal` and its policies, and polling the
   enforcement endpoints to discard the results would spend provider quota for no observable
   effect. Ticket 06 owns the wiring.
+- **openFDA publishes no device-shortages endpoint, so ticket 05 delivers device RECALLS** (#14).
+  The spec named a device-shortage feed. `https://api.fda.gov/device/shortages.json` returns 404 —
+  verified live, not inferred from the documentation, which lists the resource without shipping it.
+  The connector therefore reads `/device/enforcement.json`, which does exist and answers a question the
+  platform actually asks: a recalled device is unavailable supply by another route. Recorded here
+  rather than silently substituted, because a reader comparing the spec to the code would otherwise
+  find a feed named one thing and doing another and have no way to tell whether that was a decision
+  or a mistake.
 - **Highest-role resolution belongs in the pure authorization module, not the middleware** (#11).
   The spec first described a single-role landing function with the rank arithmetic in middleware.
   In `authz.ts` instead, routing and permission cannot disagree about which role a multi-role user
