@@ -147,7 +147,19 @@ const RETENTION_TABLES = {
  * unbounded by construction. `orgId` is in both the select and the delete: RLS would already hide
  * another tenant's row, and the predicate means the statement does not name it either.
  */
-async function sweepKind(orgId: string, kind: RetentionKind, cutoff: Date): Promise<number> {
+/**
+ * `onBatch` is called after EVERY committed batch, not once at the end, for two reasons that
+ * both bite on the first sweep of an aged deployment: the caller's per-kind count then survives a
+ * throw from a later batch (rows already deleted are gone, and a count that resets to 0 tells the
+ * audit chain the opposite of what happened), and the caller gets somewhere to heartbeat from
+ * inside a loop that can otherwise run for many minutes without one.
+ */
+async function sweepKind(
+  orgId: string,
+  kind: RetentionKind,
+  cutoff: Date,
+  onBatch: (removed: number) => void,
+): Promise<number> {
   const columns = RETENTION_TABLES[kind];
   let removed = 0;
   for (;;) {
@@ -170,6 +182,7 @@ async function sweepKind(orgId: string, kind: RetentionKind, cutoff: Date): Prom
       return doomed.length;
     });
     removed += batch;
+    if (batch > 0) onBatch(batch);
     // A short batch means the table is drained; the confirming round trip is skipped, which is the
     // common case where nothing at all has expired.
     if (batch < RETENTION_BATCH_SIZE) return removed;
@@ -201,18 +214,33 @@ export async function sweepOrgRetention(
    * activity are recognisable as one sweep recorded twice rather than as two cleanups.
    */
   runToken = now.toISOString(),
+  /**
+   * Called after every committed batch. The caller uses it to heartbeat: this function's runtime
+   * is unbounded in the size of the tenant, so a sweep that only reported at the end would look
+   * like a dead worker to Temporal long before it finished.
+   */
+  onProgress?: (kind: RetentionKind, removedSoFar: number) => void,
 ): Promise<RetentionSweepResult> {
   const plan = retentionPlan(now, windows);
   const counts = Object.fromEntries(RETENTION_KINDS.map((kind) => [kind, 0])) as RetentionCounts;
 
   try {
     for (const entry of plan) {
-      counts[entry.kind] = await sweepKind(orgId, entry.kind, entry.cutoff);
+      await sweepKind(orgId, entry.kind, entry.cutoff, (removed) => {
+        counts[entry.kind] += removed;
+        onProgress?.(entry.kind, counts[entry.kind]);
+      });
     }
   } finally {
     // Recorded even when a later kind threw. Rows already deleted are gone whether or not the run
     // finished, and an audit chain that only describes complete runs cannot answer "where did
     // those rows go" for the runs that matter most.
+    //
+    // GUARDED, because an await in a `finally` that throws REPLACES the exception on its way out:
+    // a failed audit write would otherwise mask the sweep error that is the actual problem, and
+    // the caller would diagnose the wrong failure. Losing the audit row is bad; losing the reason
+    // the sweep died is worse, so the audit failure is logged and the original error propagates.
+    try {
     await withOrgDb(orgId, (db) =>
       appendAudit(db, {
         orgId,
@@ -229,6 +257,9 @@ export async function sweepOrgRetention(
         eventKey: `retention:${orgId}:${runToken}`,
       }),
     );
+    } catch (auditErr) {
+      console.error(`[retention] org ${orgId}: sweep audit entry failed to write`, auditErr);
+    }
   }
 
   return { orgId, counts, sweptAt: now };

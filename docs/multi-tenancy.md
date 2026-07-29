@@ -28,7 +28,7 @@ tenant. See "The feed poll" below.
 
 | Tenant tables (RLS enforced) | Global tables (no `org_id`) |
 | --- | --- |
-| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
+| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs`, `alert_rules`, `alert_events`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
 
 `risk_signals` and `risk_score_snapshots` (ticket 06) are the sharpest illustration of the test.
 `feed_records` beside them is GLOBAL: one openFDA snapshot is a single physical fact about the drug
@@ -479,14 +479,14 @@ that matters: `v1` hashes a frozen payload with no `org_id`, which is the only r
 cannot invalidate a historical entry — if it ever goes red, every deployment's history has become
 permanently unverifiable and the chain is reporting tampering that never happened.
 
-A third live suite, `packages/db/src/public-lists.e2e.test.ts` (ticket 19), covers the public API's
+A further live suite, `packages/db/src/public-lists.e2e.test.ts` (ticket 19), covers the public API's
 read queries: two tenants holding deliberately similar signals, snapshots and items, so a missing
 `org_id` predicate surfaces as another hospital's row rather than as an empty result that reads like
 a pass. It needs the same application role as `rls.e2e.test.ts` and refuses to run under the owner.
 
 **`pnpm gate` still runs offline and still proves none of this.** Nothing in it can show that
 Postgres refuses a cross-tenant row or that `0013`/`0014` apply cleanly; the SQL was hand-verified
-and the two suites above are how you check it, against a live server, yourself.
+and the live suites in `vitest.rls.config.ts` are how you check it, against a live server, yourself.
 
 What the zero-config gate DOES prove is the layer above the database — that the application never
 ASKS for a cross-tenant row. With `withOrgDb` stubbed to record the org it was opened for:

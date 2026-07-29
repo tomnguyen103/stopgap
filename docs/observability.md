@@ -41,6 +41,8 @@ comms, feed polling, and workflow activities all execute in the worker.
 | `stopgap_comms_delivered_total{channel}` | counter | Comms delivered (`channel="email"｜"ehr"｜"escalation"`) | worker |
 | `stopgap_comms_nondelivered_total{channel}` | counter | Comms recorded non-delivered (honest non-delivery, never faked) | worker |
 | `stopgap_feed_poll_success_total` | counter | Successful feed polls | worker |
+| `stopgap_catalog_match_failures_total` | counter | Signals whose catalog match failed; the score keeps the signal and drops the catalog components (ticket 16) | worker |
+| `stopgap_catalog_read_failures_total` | counter | Catalog reads that failed during impact assessment; the assessment degrades to the record alone rather than losing the case (ticket 16) | worker |
 | `stopgap_retention_success_total` | counter | Organizations swept by the retention job (ticket 18) | worker |
 | `stopgap_retention_failures_total` | counter | Organizations whose retention sweep threw; their expired rows remain and the next run retries them | worker |
 | `stopgap_workflow_task_failures_total{activity}` | counter | Workflow activity failures (`activity="…"`) | worker |

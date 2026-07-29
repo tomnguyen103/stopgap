@@ -218,10 +218,18 @@ export async function assessImpact(input: CaseInput): Promise<ImpactResult> {
     }).catch((err: unknown) => {
       incrementCounter("stopgap_catalog_read_failures_total", { activity: "assessImpact" });
       console.warn(`[workflows] catalog read failed for org ${input.orgId}; assessing without it`, err);
-      return { matchedItems: 0, soleSourcedItems: 0 };
+      // NULL, never a zeroed reading. `NO_CATALOG_DATA` exists in `impact.ts` for exactly this
+      // case and says why: "0 items matched" is a claim about the facility, and the model reasons
+      // from it. A read that failed knows nothing — it did not measure zero. The same reasoning
+      // then keeps `affectedFormularyItems` off the result entirely rather than publishing a
+      // fabricated 0 as a counted one.
+      return null;
     });
-    const assessment = await agents.assessImpact(input.record, catalog);
-    return { ...assessment, affectedFormularyItems: catalog.matchedItems };
+    const assessment = await agents.assessImpact(input.record, catalog ?? agents.NO_CATALOG_DATA);
+    return {
+      ...assessment,
+      ...(catalog === null ? {} : { affectedFormularyItems: catalog.matchedItems }),
+    };
   } catch (err) {
     // Count the throw before it propagates to Temporal's retry (PHASE6 §6.4 task-failure metric).
     // A provider outage is the common cause and is exactly what the ops dashboard should surface.
@@ -1192,7 +1200,15 @@ export async function sweepRetention(): Promise<RetentionSweepResult[]> {
       // Not running as a Temporal activity — no heartbeat sink exists.
     }
     try {
-      const result = await sweepOrgRetention(org.id, now, windows, runToken);
+      const result = await sweepOrgRetention(org.id, now, windows, runToken, (kind, removedSoFar) => {
+        // Per BATCH, not per tenant. One tenant's first sweep can delete for many minutes, which
+        // under a five-minute heartbeat timeout is indistinguishable from a dead worker.
+        try {
+          Context.current().heartbeat({ org: org.id, kind, removedSoFar });
+        } catch {
+          // Not running as a Temporal activity — no heartbeat sink exists.
+        }
+      });
       results.push(result);
       const removed = totalRemoved(result.counts);
       if (removed > 0) console.log(`[retention] org ${org.id}: removed ${removed} rows`, result.counts);

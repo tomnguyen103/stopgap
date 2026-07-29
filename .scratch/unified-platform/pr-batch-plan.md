@@ -104,3 +104,37 @@ No schema drift beyond 0020 — 16/19/18 read and sweep existing columns, drizzl
 Remaining for batch A: local review over the whole batch diff -> fix -> retitle #15 ->
 close #32 #26 #27 #13 as superseded -> ready flip (the ONE review event) -> wait protocol
 -> merge. Last completed CodeRabbit review was 20:01:34Z, so the flip waits until ~22:16Z.
+
+## Batch A standards review — open findings at 22:05Z (head c45aeb6)
+
+Scoring-pass merge verified CORRECT (scores once, evidence + alert pairing intact, no
+use-before-assignment). Migration 0020, db/src/index.ts exports, PROGRESS.md union,
+lockfile, schedule wiring, all four API routes: verified clean.
+
+TO FIX before the ready flip:
+7. `activities.ts` degraded catalog path returns `{matchedItems:0,soleSourcedItems:0}` —
+   but `impact.ts` already ships `NO_CATALOG_DATA = {}` and states "a fabricated zero is
+   not distinguishable from a measured one". `affectedFormularyItems` then republishes the
+   fake 0 as measured. Root cause: `ImpactResult.affectedFormularyItems` non-optional in
+   `shared.ts:103`. THIS IS A REGRESSION I INTRODUCED in c45aeb6.
+9. `retention.ts:212` awaited `appendAudit` in `finally` REPLACES the original sweep error.
+8. `retention.ts:210` `counts[kind] = await sweepKind(...)` — a throw after committed
+   batches records 0 for a kind that removed thousands.
+10. `sweepKind`'s `for(;;)` never heartbeats; one beat per tenant against a 5-min
+    heartbeatTimeout means one large tenant exhausts maximumAttempts.
+4. `activities.tenancy.test.ts` `sweptOrgs` is the only recorder `beforeEach` never resets;
+   the assertion passes only because it is first in file order.
+6. `workflows/src/index.ts` does not re-export `retentionSweepWorkflow` /
+   `RETENTION_SWEEP_WORKFLOW` — the only workflow/name pair missing.
+5. `workflow.test.ts` gained a `sweepRetention` mock but no delegation describe, so the
+   new workflow has zero workflow-level coverage.
+1. `docs/multi-tenancy.md:482,489` still say "A third live suite" / "the two suites above";
+   there are six.
+2. `docs/multi-tenancy.md:31` tenant row omits `alert_rules`/`alert_events`.
+3. `docs/observability.md` missing `stopgap_catalog_match_failures_total` and
+   `stopgap_catalog_read_failures_total`.
+
+DEFERRED with reasons: 11 (retention predicate unindexed for 4 of 5 kinds) and 13
+(count(*) + ILIKE per page view) are performance work that adds indexes = a migration;
+ticket 21 already carries this batch's next migration. 14/15/16/17/18 are low-severity or
+judgement calls. Ticket 10 plural `numbers` nit not fixed.

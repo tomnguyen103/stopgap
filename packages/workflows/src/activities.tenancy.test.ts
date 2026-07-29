@@ -312,6 +312,7 @@ beforeEach(() => {
   missSweeps.length = 0;
   writtenSnapshots.length = 0;
   writtenEvidence.length = 0;
+  sweptOrgs.length = 0;
   openFdaCalls = 0;
 });
 

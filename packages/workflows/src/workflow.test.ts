@@ -9,6 +9,7 @@ import {
   acknowledgeSignal,
   anchorAuditWorkflow,
   dailyBriefWorkflow,
+  retentionSweepWorkflow,
   exceptionResolvedSignal,
   pollFeedsWorkflow,
   resolvedSignal,
@@ -408,6 +409,22 @@ describe("dailyBriefWorkflow (time-skipped)", () => {
         workflowId: `wf-brief-${Date.now()}`,
       });
       expect(await handle.result()).toEqual({ generated: 0, degraded: 0 });
+    });
+  }, 60_000);
+});
+
+describe("retentionSweepWorkflow (time-skipped)", () => {
+  it("delegates to the sweepRetention activity and returns per-org totals, not per-kind counts", async () => {
+    await withWorker(async () => {
+      const handle = await env.client.workflow.start(retentionSweepWorkflow, {
+        args: [],
+        taskQueue: TASK_QUEUE,
+        workflowId: `wf-retention-${Date.now()}`,
+      });
+      // The mock removes 3 + 5 + 1 + 0 + 0. The workflow RESULT is deliberately the summed total:
+      // the per-kind breakdown is already in the organization's audit chain, and a workflow
+      // history is not the place to keep a second copy of it.
+      expect(await handle.result()).toEqual([{ orgId: TEST_ORG_ID, removed: 9 }]);
     });
   }, 60_000);
 });
