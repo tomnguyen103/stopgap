@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SCORER_VERSION } from "@stopgap/scorer";
 import type { OpenMonitoringCase } from "@stopgap/db";
 
 /**
@@ -39,6 +40,12 @@ const unsignalableWorkflowIds = new Set<string>();
 const signalledWorkflowIds: string[] = [];
 /** Counters incremented, so the failure path can be asserted as recorded rather than swallowed. */
 const counters: string[] = [];
+/** Signals written per org (ticket 06) — proof the poll normalizes PER TENANT, not once. */
+const writtenSignals: { orgId: string; dedupeKeys: string[] }[] = [];
+/** The sources each org's miss sweep was scoped to, so an outage cannot retire live signals. */
+const missSweeps: { orgId: string; sources: string[] }[] = [];
+/** Score snapshots written per org (ticket 07) — scoring rides the poll, not a second runtime. */
+const writtenSnapshots: { orgId: string; count: number; scorerVersion: string | undefined }[] = [];
 
 vi.mock("@stopgap/db", () => ({
   withOrgDb: (orgId: string, fn: (db: unknown) => Promise<unknown>) => {
@@ -46,6 +53,13 @@ vi.mock("@stopgap/db", () => ({
     return fn({});
   },
   withBypassDb: (fn: (db: unknown) => Promise<unknown>) => fn({}),
+  // The real collapse, not a stub: the poll relies on it to keep two feed records that derive one
+  // dedupe key from becoming two snapshot rows with the same conflict target.
+  dedupeByKey: <T extends { dedupeKey: string }>(signals: T[]): T[] => {
+    const byKey = new Map<string, T>();
+    for (const signal of signals) byKey.set(signal.dedupeKey, signal);
+    return [...byKey.values()];
+  },
   listOrganizations: async () => [
     { id: ORG_A, slug: "a", name: "A", createdAt: new Date() },
     { id: ORG_B, slug: "b", name: "B", createdAt: new Date() },
@@ -58,6 +72,32 @@ vi.mock("@stopgap/db", () => ({
       const row = caseRows.get(`${orgId}:${k}`);
       return row ? [{ ...row, orgId }] : [];
     }),
+  upsertSignals: async (_db: unknown, orgId: string, signals: { dedupeKey: string }[]) => {
+    writtenSignals.push({ orgId, dedupeKeys: signals.map((s) => s.dedupeKey) });
+    return signals.map((s, i) => ({ id: `sig-${orgId}-${i}`, dedupeKey: s.dedupeKey }));
+  },
+  recordScoreSnapshots: async (
+    _db: unknown,
+    orgId: string,
+    snapshots: { scorerVersion: string }[],
+  ) => {
+    writtenSnapshots.push({
+      orgId,
+      count: snapshots.length,
+      scorerVersion: snapshots[0]?.scorerVersion,
+    });
+    return snapshots.length;
+  },
+  bumpSignalFeedMiss: async (
+    _db: unknown,
+    orgId: string,
+    _seen: string[],
+    _run: string,
+    sources: string[],
+  ) => {
+    missSweeps.push({ orgId, sources });
+    return 0;
+  },
   isUserInOrg: async () => true,
   assertMaintenanceRoleBypassesRls: async () => undefined,
   appendAudit: async (_db: unknown, entry: Record<string, unknown>) => {
@@ -65,12 +105,17 @@ vi.mock("@stopgap/db", () => ({
     return { hash: "h" };
   },
   upsertCaseForRecord: async (_db: unknown, orgId: string, record: { key: string }) => {
-    const row = { id: `case-${orgId}-${record.key}`, workflowId: `org-${orgId}-case-x`, key: record.key };
+    const row = {
+      id: `case-${orgId}-${record.key}`,
+      workflowId: `org-${orgId}-case-x`,
+      key: record.key,
+    };
     caseRows.set(`${orgId}:${record.key}`, row);
     return row;
   },
   updateCaseStatus: async () => undefined,
-  listOpenMonitoringCases: async (_db: unknown, orgId: string) => openMonitoringCases.get(orgId) ?? [],
+  listOpenMonitoringCases: async (_db: unknown, orgId: string) =>
+    openMonitoringCases.get(orgId) ?? [],
   recordFeedRecords: async () => undefined,
   resetFeedMiss: async () => undefined,
   bumpFeedMiss: async () => undefined,
@@ -91,34 +136,82 @@ vi.mock("@stopgap/core/env", () => ({ getEnv: () => ({ FEED_RESOLVE_MISS_THRESHO
 
 // The feed returns ONE snapshot for the whole deployment — the fetch must not repeat per tenant.
 let openFdaCalls = 0;
+const HEPARIN_RECORD = {
+  source: "openfda",
+  sourceId: "s1",
+  key: "heparin",
+  genericName: "Heparin",
+  status: "current",
+  ndcs: [],
+  rxcuis: [],
+  sources: ["openfda"],
+};
+/** One normalized signal per org, so the per-tenant write can be counted. */
+function stubSignal(orgId: string, fetchedAt: string) {
+  return {
+    source: "openfda_shortage",
+    sourceId: "s1",
+    riskDomain: "shortage",
+    entityType: "drug",
+    entityIdentifier: "Heparin",
+    title: "Drug shortage — Heparin",
+    summary: "s",
+    severity: "high",
+    severityScore: 0.7,
+    confidence: 0.8,
+    observedAt: fetchedAt,
+    publishedAt: fetchedAt,
+    lastFetchedAt: fetchedAt,
+    staleness: "fresh",
+    sourceResolved: false,
+    evidenceUrl: "https://example.test/e",
+    raw: {},
+    dedupeKey: `${orgId}:openfda_shortage:s1`,
+    matchHints: { ndcs: [], rxcuis: [], names: ["Heparin"] },
+  };
+}
 vi.mock("@stopgap/ingest", () => ({
-  pollOpenFda: async () => {
-    openFdaCalls += 1;
-    return [
-      {
-        source: "openfda",
-        sourceId: "s1",
-        key: "heparin",
-        genericName: "Heparin",
-        status: "current",
-        ndcs: [],
-        rxcuis: [],
-        sources: ["openfda"],
-      },
-    ];
+  openFdaShortageConnector: {
+    source: "openfda_shortage",
+    fetch: async () => {
+      openFdaCalls += 1;
+      return [{ generic_name: "Heparin" }];
+    },
+    normalize: (_raw: unknown, ctx: { orgId: string; fetchedAt: string }) =>
+      stubSignal(ctx.orgId, ctx.fetchedAt),
   },
-  pollAshp: async () => [],
+  // Returns nothing — so the poll must NOT vouch for it in the miss sweep. An empty answer is
+  // indistinguishable from a quiet failure (ASHP answers `[]` with no auth key).
+  ashpShortageConnector: { source: "ashp_shortage", fetch: async () => [], normalize: () => null },
+  openFdaDrugRecallConnector: {
+    source: "openfda_drug_recall",
+    fetch: async () => [],
+    normalize: () => null,
+  },
+  openFdaDeviceRecallConnector: {
+    source: "openfda_device_recall",
+    fetch: async () => [],
+    normalize: () => null,
+  },
+  mapOpenFdaResult: () => HEPARIN_RECORD,
+  mapAshpShortage: () => HEPARIN_RECORD,
   mergeRecords: (rows: unknown[]) => rows,
   contentHash: () => "hash",
 }));
 
-vi.mock("@stopgap/comms", () => ({ sendEmail: async () => ({ channel: "email", delivered: false }), sendEhrFlag: async () => ({ channel: "ehr", delivered: false }) }));
+vi.mock("@stopgap/comms", () => ({
+  sendEmail: async () => ({ channel: "email", delivered: false }),
+  sendEhrFlag: async () => ({ channel: "ehr", delivered: false }),
+}));
 vi.mock("@stopgap/observability", () => ({
   incrementCounter: (name: string) => {
     counters.push(name);
   },
 }));
-vi.mock("@stopgap/agents", () => ({ assessImpact: async () => ({}), researchAlternatives: async () => ({}) }));
+vi.mock("@stopgap/agents", () => ({
+  assessImpact: async () => ({}),
+  researchAlternatives: async () => ({}),
+}));
 
 vi.mock("./client.js", () => ({
   makeClient: async () => ({ client: {}, connection: { close: async () => undefined } }),
@@ -158,6 +251,9 @@ beforeEach(() => {
   unsignalableWorkflowIds.clear();
   signalledWorkflowIds.length = 0;
   counters.length = 0;
+  writtenSignals.length = 0;
+  missSweeps.length = 0;
+  writtenSnapshots.length = 0;
   openFdaCalls = 0;
 });
 
@@ -185,7 +281,11 @@ describe("a case activity scopes to the workflow's org", () => {
 
   it("persistStatus scopes to the org it is given, for the SAME key in two tenants", async () => {
     caseRows.set(`${ORG_A}:heparin`, { id: "case-a", workflowId: "case-heparin", key: "heparin" });
-    caseRows.set(`${ORG_B}:heparin`, { id: "case-b", workflowId: `org-${ORG_B}-case-heparin`, key: "heparin" });
+    caseRows.set(`${ORG_B}:heparin`, {
+      id: "case-b",
+      workflowId: `org-${ORG_B}-case-heparin`,
+      key: "heparin",
+    });
     await persistStatus(ORG_A, "heparin", "monitoring");
     await persistStatus(ORG_B, "heparin", "monitoring");
     expect(scopedOrgIds).toEqual([ORG_A, ORG_B]);
@@ -212,6 +312,56 @@ describe("the scheduled feed poll (no session, no case)", () => {
     // Every tenant transaction the poll opened named a real org from the registry — never a
     // default, and never one org's scope used for another org's work.
     expect(new Set(scopedOrgIds)).toEqual(new Set([ORG_A, ORG_B]));
+  });
+
+  /**
+   * Ticket 06 — a signal is the tenant's INTERPRETATION of a shared fact.
+   *
+   * One fetch, N normalizations: the dedupe key is org-scoped, so org A's heparin signal and
+   * org B's are different rows even though the openFDA payload behind them is byte-identical.
+   * A single shared normalization would give both hospitals one key and one row, which is the
+   * cross-tenant collision the whole contract exists to prevent.
+   */
+  it("writes each tenant its OWN signal from the one deployment-wide fetch", async () => {
+    await pollAndOpenCases();
+    expect(openFdaCalls).toBe(1);
+    expect(writtenSignals.map((w) => w.orgId)).toEqual([ORG_A, ORG_B]);
+    expect(writtenSignals[0]?.dedupeKeys).toEqual([`${ORG_A}:openfda_shortage:s1`]);
+    expect(writtenSignals[1]?.dedupeKeys).toEqual([`${ORG_B}:openfda_shortage:s1`]);
+  });
+
+  /**
+   * A feed OUTAGE is not a feed saying the hazard ended.
+   *
+   * The miss sweep is scoped to the feeds this poll can VOUCH for — the ones that returned at
+   * least one row. ASHP answers `[]` with no auth key and openFDA answers 404 for an empty result
+   * set exactly as it does for a bad path, so "returned nothing" cannot be told apart from
+   * "failed quietly", and treating it as absence would retire live signals on a key expiry.
+   */
+  /**
+   * Ticket 07 — scores are produced BY THE POLL, not by a second orchestrator.
+   *
+   * The snapshot rides the same per-org transaction as the signal write, so it can never describe
+   * a row that failed to land, and every org in one poll shares an evaluation timestamp — which is
+   * what makes two tenants' scores comparable rather than merely both present.
+   */
+  it("writes a scored snapshot for each signal, in the same tenant transaction", async () => {
+    await pollAndOpenCases();
+    expect(writtenSnapshots.map((w) => w.orgId)).toEqual([ORG_A, ORG_B]);
+    expect(writtenSnapshots.every((w) => w.count === 1)).toBe(true);
+    // Version-pinned, so a score is reproducible after the weights move.
+    expect(writtenSnapshots[0]?.scorerVersion).toBe(SCORER_VERSION);
+  });
+
+  it("sweeps misses only for feeds that returned something, never for a silent one", async () => {
+    await pollAndOpenCases();
+    for (const sweep of missSweeps) {
+      // ONLY openFDA shortages returned a row, so it is the only source the poll can tell apart
+      // from a broken one. A feed that answered with nothing is left out rather than having its
+      // signals counted as missing.
+      expect(sweep.sources).toEqual(["openfda_shortage"]);
+    }
+    expect(missSweeps.map((s) => s.orgId)).toEqual([ORG_A, ORG_B]);
   });
 
   /**
