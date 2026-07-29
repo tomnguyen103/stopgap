@@ -6,9 +6,15 @@ export interface EvidenceEntry {
   id: string;
   type: string;
   source: string;
-  sourceId: string;
   originUrl: string;
   contentHash: string;
+  /**
+   * Already formatted by the server.
+   *
+   * NOT a Date formatted here: this component renders on the server and again in the browser, and
+   * `toLocaleString()` reads a locale and a time zone that differ between the two — which React
+   * reports as a hydration mismatch on a page whose whole point is that it agrees with itself.
+   */
   capturedAt: string;
 }
 
@@ -72,7 +78,7 @@ export function EvidenceDrawer({
                   </a>
                 </div>
                 <div className="sub">
-                  captured {new Date(entry.capturedAt).toLocaleString()} · sha256{" "}
+                  captured {entry.capturedAt} · sha256{" "}
                   <code>{entry.contentHash.slice(0, 12)}…</code>
                 </div>
               </li>

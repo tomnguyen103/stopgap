@@ -99,6 +99,7 @@ export default async function CaseQueuePage({
           )}
           <input type="hidden" name="sort" value={params.sort} />
           <input type="hidden" name="dir" value={params.dir} />
+          <input type="hidden" name="pageSize" value={String(params.pageSize)} />
           <button className="ds-button" type="submit">
             Search
           </button>
