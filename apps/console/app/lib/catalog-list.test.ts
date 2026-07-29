@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeRowError,
   isSoleSourced,
+  isUnsourced,
   parseCatalogListParams,
   CATALOG_LIST_SCHEMA,
   UPLOAD_KINDS,
@@ -26,6 +27,7 @@ describe("catalog list state", () => {
 
   it("carries a sourcing filter the query understands", () => {
     expect(parseCatalogListParams("sourcing=sole").filters.sourcing).toEqual(["sole"]);
+    expect(parseCatalogListParams("sourcing=unsourced").filters.sourcing).toEqual(["unsourced"]);
   });
 
   it("offers every catalog kind the importer accepts", () => {
@@ -37,10 +39,14 @@ describe("catalog list state", () => {
 });
 
 describe("what an administrator is told", () => {
-  it("calls a single-site item sole-sourced", () => {
+  it("calls a single-site item sole-sourced, and an unsupplied one unsourced", () => {
     expect(isSoleSourced(1)).toBe(true);
-    expect(isSoleSourced(0)).toBe(true);
     expect(isSoleSourced(2)).toBe(false);
+    // NOT sole-sourced. Nothing is known about how this item is supplied, which is a hole in the
+    // catalog rather than a single point of failure, and the two want different fixes.
+    expect(isSoleSourced(0)).toBe(false);
+    expect(isUnsourced(0)).toBe(true);
+    expect(isUnsourced(1)).toBe(false);
   });
 
   it("puts the line first, and the column when the plan identified one", () => {

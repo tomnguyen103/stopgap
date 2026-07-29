@@ -34,7 +34,13 @@ export default async function AdminIndexPage() {
   const isQuiet = (lastFetchedAt: Date | string) =>
     now - new Date(lastFetchedAt).getTime() > FEED_QUIET_HOURS * 3_600_000;
 
-  const checklist = [
+  const checklist: {
+    label: string;
+    done: boolean;
+    detail: string;
+    /** Where to go and fix it. Absent when the fix is not in the console. */
+    href?: string;
+  }[] = [
     {
       label: "Catalog items loaded",
       done: coverage.items > 0,
@@ -65,11 +71,13 @@ export default async function AdminIndexPage() {
     {
       label: "A feed has returned data",
       done: feeds.length > 0,
+      // `feed_records` is DEPLOYMENT-wide, not this tenant's: one openFDA snapshot is one physical
+      // fact about the drug supply, stored once. It sits on the checklist because a facility whose
+      // deployment has never polled is not set up — but it is labelled for what it is.
       detail:
         feeds.length > 0
-          ? `${String(feeds.length)} feed${feeds.length === 1 ? "" : "s"} with stored records`
-          : "No poll has stored a record yet.",
-      href: "/admin",
+          ? `${String(feeds.length)} feed${feeds.length === 1 ? "" : "s"} with stored records, deployment-wide`
+          : "No poll has stored a record yet, anywhere in this deployment.",
     },
     {
       label: "Model spend cap configured",
@@ -79,7 +87,7 @@ export default async function AdminIndexPage() {
       // lift a limit that binds the others.
       detail:
         env.LLM_DAILY_USD_CAP === undefined
-          ? "No cap set. `LLM_DAILY_USD_CAP` is deployment environment rather than a console setting, because the cap binds every process in the deployment, not one tenant."
+          ? "No cap set. LLM_DAILY_USD_CAP is deployment environment, not a console setting: the cap binds every process in the deployment, so a per-tenant control here would let one hospital lift a limit that binds the others."
           : `$${env.LLM_DAILY_USD_CAP.toFixed(2)} per day, deployment-wide — $${oversight.spend.usd.toFixed(2)} spent today.`,
       href: "/oversight",
     },
@@ -103,7 +111,7 @@ export default async function AdminIndexPage() {
                 {row.done ? <Badge tone="status">done</Badge> : <Badge severity="high">to do</Badge>}
               </td>
               <td>
-                <Link href={row.href}>{row.label}</Link>
+                {row.href === undefined ? row.label : <Link href={row.href}>{row.label}</Link>}
               </td>
               <td className="sub">{row.detail}</td>
             </tr>
@@ -111,6 +119,15 @@ export default async function AdminIndexPage() {
         </Table>
       </Card>
 
+      {/*
+        WHAT THIS CARD CAN SEE. `feed_records` is written by the shortage connectors; the recall
+        connectors normalize straight onto the signal contract and store no feed record, so they
+        cannot appear here yet. Naming that is the difference between "no recall feed is listed"
+        and "the recall feed is fine".
+
+        And `lastFetchedAt` moves on every poll that stores a record, including one that stored the
+        same content again — so this answers "did the poll run", not "did the source change".
+      */}
       <Card
         title="Feed health"
         sub={`A feed quiet for over ${String(FEED_QUIET_HOURS)} hours is flagged`}
@@ -140,6 +157,11 @@ export default async function AdminIndexPage() {
             ))}
           </Table>
         )}
+        <p className="sub sub-tight">
+          Only the shortage connectors store feed records, so the recall connectors do not appear
+          here. A last-stored time also moves on every poll that wrote a record — including one that
+          rewrote unchanged content — so it reports that the poll ran, not that the source changed.
+        </p>
       </Card>
 
       <Card title="Administration" sub="Catalog, users, keys, tenants and the audit chain">

@@ -53,14 +53,20 @@ export async function browseCatalog(
   orgId: string,
   options: CatalogBrowseOptions,
 ): Promise<{ rows: CatalogListItem[]; total: number; page: number }> {
+  // Both bounds, and a finite one: `pageSize: NaN` would otherwise reach LIMIT as NaN.
   const term = options.q?.trim();
   const escaped = term ? term.replace(/([\\%_])/g, "\\$1") : null;
   const like = escaped === null ? null : `%${escaped}%`;
   const sort = ["name", "sku", "suppliers"].includes(options.sort) ? options.sort : "name";
-  const pageSize = Math.max(1, Math.floor(options.pageSize));
+  const pageSize = Number.isFinite(options.pageSize)
+    ? Math.max(1, Math.min(Math.floor(options.pageSize), 500))
+    : 25;
 
   const base = sql`
     with sites as (
+      -- Distinct SITES: an item supplied from two sites of one supplier has two ways in, and one
+      -- supplier with no site recorded is still one way in, so coalescing onto the supplier id
+      -- counts that case once rather than dropping it.
       select item_id, count(distinct coalesce(site_id, supplier_id)) as site_count
         from ${itemSuppliers}
        where org_id = ${orgId}
@@ -84,9 +90,13 @@ export async function browseCatalog(
               or i.name ilike ${like} escape '\\'
               or i.sku ilike ${like} escape '\\'
               or i.generic_name ilike ${like} escape '\\')
+         -- EXACTLY one site is sole-sourced; zero is unsourced, which is a hole in the catalog
+         -- rather than a fact about the supply chain. The two are separate filters for that
+         -- reason, and catalogCoverage counts them the same way.
          and (${options.sourcing ?? null}::text is null
-              or (${options.sourcing ?? null} = 'sole' and coalesce(sites.site_count, 0) <= 1)
-              or (${options.sourcing ?? null} = 'multi' and coalesce(sites.site_count, 0) > 1))
+              or (${options.sourcing ?? null} = 'sole' and coalesce(sites.site_count, 0) = 1)
+              or (${options.sourcing ?? null} = 'multi' and coalesce(sites.site_count, 0) > 1)
+              or (${options.sourcing ?? null} = 'unsourced' and coalesce(sites.site_count, 0) = 0))
     )`;
 
   const [counted] = await db.execute<{ total: string }>(
@@ -130,6 +140,13 @@ export async function browseCatalog(
 /** One catalog item with everything the detail view shows. */
 export interface CatalogItemDetail {
   item: CatalogItemRow;
+  /**
+   * Distinct supplier sites, counted by the SAME expression the list uses.
+   *
+   * Recomputed in the page from supplier names, the detail view could badge an item sole-sourced
+   * while the list badged it multi — two same-named suppliers are one name and two ids.
+   */
+  supplierSiteCount: number;
   identifiers: { kind: string; value: string }[];
   suppliers: { name: string; code: string | null; preferred: boolean; site: string | null }[];
   inventory: { onHand: number; unit: string | null; capturedAt: Date }[];
@@ -161,6 +178,7 @@ export async function getCatalogItem(
       code: suppliers.code,
       preferred: itemSuppliers.preferred,
       siteId: itemSuppliers.siteId,
+      supplierId: itemSuppliers.supplierId,
     })
     .from(itemSuppliers)
     .innerJoin(
@@ -242,6 +260,7 @@ export async function getCatalogItem(
 
   return {
     item,
+    supplierSiteCount: new Set(supplierRows.map((row) => row.siteId ?? row.supplierId)).size,
     identifiers,
     suppliers: supplierRows.map((row) => ({
       name: row.name,
@@ -289,7 +308,9 @@ export async function catalogCoverage(db: Db, orgId: string): Promise<CatalogCov
            (select count(*) from sites)::text as items_with_supplier,
            (select count(distinct item_id) from ${inventorySnapshots}
              where org_id = ${orgId})::text as items_with_inventory,
-           (select count(*) from sites where site_count <= 1)::text as sole_sourced
+           -- Exactly one, matching the list's own filter. Counting one-or-fewer here while the
+           -- filter counted exactly one made the checklist disagree with the list it links to.
+           (select count(*) from sites where site_count = 1)::text as sole_sourced
   `);
   return {
     items: Number(row?.items ?? 0),
