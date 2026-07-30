@@ -221,3 +221,37 @@ Batch A's review. Last SPENT event was the 22:23:30Z refusal; 2h19m from a compl
 was not enough, so allow 3h+ from the refusal — roughly 01:30Z — before commenting
 `@coderabbitai review` ONCE on #15's head. Then the wait protocol, merge A, flip B ready,
 merge B, rebase and retarget C, flip C ready, merge C. Then ticket 21.
+
+## STATE 2026-07-30 05:00Z
+
+| PR | Batch | Head | Gate | CodeRabbit |
+| --- | --- | --- | --- | --- |
+| #15 | A | `422c53e` | green | 2 reviews done; round 3 owed |
+| #34 | B | `edec5f6` | green | none yet (draft) |
+| #35 | C | `cd8a703` | green | none yet (draft, base feat/batch-b) |
+
+### Batch A review history — the budget model, corrected by evidence
+
+- 01:30:46Z trigger accepted after a 3h07m gap from the 22:23:30Z refusal. Completed
+  01:44:32Z with NINE findings. All fixed in `b3e9f0b`.
+- 04:48:23Z re-review accepted after 3h04m from that COMPLETED review. Completed 04:57:07Z
+  with ONE finding: cross-row duplicate identifier claims (the half the first ambiguity fix
+  missed). Fixed in `422c53e`.
+- So the working rule is ~3h from the last SPENT event, whether that event was a refusal or
+  a completed review. 2h19m was refused; 3h04m and 3h07m were both accepted.
+- Next window for #15: ~07:57Z (3h from 04:57:07Z).
+
+### Local review found what CodeRabbit did not, and vice versa
+
+Both batches had defects only the OTHER reviewer caught. Worth keeping both gates:
+- Local review caught batch B's missing `requireGroup` on the moved `/brief` page — an
+  authorization hole opened by this session's own integration fix.
+- CodeRabbit caught that `NO_CATALOG_DATA`'s prose asserted absence facts on a failed read,
+  and both halves of the identifier-ambiguity problem.
+
+### Still open, not hidden
+
+The browser tier needs a seeded DRAFTED protocol version to satisfy `e2e/auth/landing.spec.ts`;
+nothing in batch B seeds one, so that suite is red on a fresh database. It is off the gate
+(`pnpm gate` is lint+typecheck+test+build and excludes `e2e/**`), so it blocks nothing, but
+it is a real gap. `e2e/` is now typechecked by `pnpm typecheck:e2e`.
