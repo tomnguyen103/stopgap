@@ -20,10 +20,12 @@ first and run against the schema as it stood:
   → promise resolved "[]" instead of rejecting
 ```
 
-Seven of eight failed that way — every cross-tenant insert LANDED — while the control
-("still accepts the same row when both sides are the caller's own") passed, which is what rules out
-a suite that merely refuses everything. After the migration: 9 passed. Whole tier `pnpm test:rls`
-228 passed; `pnpm gate` 618 passed.
+Every cross-tenant probe failed that way — the inserts LANDED — while the control ("still accepts
+the same row when both sides are the caller's own") passed, which is what rules out a suite that
+merely refuses everything. After the migration the suite is green at 17 tests: 14 probes, one per
+composite key, plus the control, the `SET NULL` behaviour, and a completeness check that asks
+`pg_constraint` which composite keys exist and fails if the probe list does not match it.
+Whole tier `pnpm test:rls` 236 passed; `pnpm gate` green.
 
 Pre-flight against this deployment's data found ZERO rows already violating any of the twelve pairs.
 
@@ -37,7 +39,10 @@ Pre-flight against this deployment's data found ZERO rows already violating any 
 
 ## What the ticket did not anticipate
 
-- The catalog children (bullet 4) are TEN keys, not a footnote: `item_identifiers`,
+- `protocol_versions` has TWO tenant-to-tenant keys the ticket does not mention — `protocol_id` and
+  `source_case_id`. The second is the exact shape bullet 4 describes, and it was missed on the first
+  pass; the local review's spec axis caught it. Fourteen keys in total, not two.
+- The catalog children (bullet 4) are ten of those, not a footnote: `item_identifiers`,
   `supplier_sites`, `item_suppliers` (three), `inventory_snapshots` (two) and
   `procurement_events` (three). Their parents needed the `(org_id, id)` constraint too.
 - Two of those keys are `ON DELETE SET NULL`, which on a composite nulls EVERY referencing

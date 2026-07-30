@@ -1,5 +1,5 @@
 {
-  "id": "0468b181-9863-4644-8d2e-113efb877b01",
+  "id": "a05e99ac-d691-4fb3-baf1-160d1d2576ef",
   "prevId": "d14ca6a7-e2bf-405b-80d1-43a267e81a4a",
   "version": "7",
   "dialect": "postgresql",
@@ -2063,6 +2063,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "item_suppliers_site_idx": {
+          "name": "item_suppliers_site_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "site_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2501,6 +2522,27 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "procurement_events_supplier_idx": {
+          "name": "procurement_events_supplier_idx",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "supplier_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2735,32 +2777,6 @@
           "onDelete": "no action",
           "onUpdate": "no action"
         },
-        "protocol_versions_protocol_id_protocols_id_fk": {
-          "name": "protocol_versions_protocol_id_protocols_id_fk",
-          "tableFrom": "protocol_versions",
-          "tableTo": "protocols",
-          "columnsFrom": [
-            "protocol_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "protocol_versions_source_case_id_cases_id_fk": {
-          "name": "protocol_versions_source_case_id_cases_id_fk",
-          "tableFrom": "protocol_versions",
-          "tableTo": "cases",
-          "columnsFrom": [
-            "source_case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "protocol_versions_authored_by_user_id_users_id_fk": {
           "name": "protocol_versions_authored_by_user_id_users_id_fk",
           "tableFrom": "protocol_versions",
@@ -2782,6 +2798,36 @@
             "approved_by_user_id"
           ],
           "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "protocol_versions_org_protocol_fk": {
+          "name": "protocol_versions_org_protocol_fk",
+          "tableFrom": "protocol_versions",
+          "tableTo": "protocols",
+          "columnsFrom": [
+            "org_id",
+            "protocol_id"
+          ],
+          "columnsTo": [
+            "org_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "protocol_versions_org_source_case_fk": {
+          "name": "protocol_versions_org_source_case_fk",
+          "tableFrom": "protocol_versions",
+          "tableTo": "cases",
+          "columnsFrom": [
+            "org_id",
+            "source_case_id"
+          ],
+          "columnsTo": [
+            "org_id",
             "id"
           ],
           "onDelete": "no action",
@@ -2883,6 +2929,27 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "protocols_org_id_uq": {
+          "name": "protocols_org_id_uq",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}

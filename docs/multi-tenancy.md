@@ -24,7 +24,24 @@ tenant. See "The feed poll" below.
 ## The model
 
 `organizations` is the tenant registry — `id`, `slug`, `name`. Every **tenant** table carries an
-`org_id` FK to it and an RLS policy keyed to it:
+`org_id` FK to it and an RLS policy keyed to it — and, where it points at another tenant table, a
+composite foreign key naming the `(org_id, id)` PAIR rather than the id alone (ticket 21). The two
+are not redundant. RLS decides which rows a session may SEE; the referential check runs with RLS
+bypassed and reads `org_id` as the calling function wrote it, so a row carrying the caller's own
+`org_id` and another tenant's parent id satisfied both the policy's `WITH CHECK` and a plain foreign
+key, and landed. Only the pair refuses it. Each such parent therefore also carries a
+`(org_id, id)` unique constraint — redundant as an index, required by Postgres before the pair can
+be a foreign-key target.
+
+The one exemption is a reference to `users`: the synthetic `system` and `agent` principals live in
+the seed org and are named from every tenant's rows by design, so those keys stay plain. It is
+recorded at `acknowledgments.userId` in `packages/db/src/schema.ts` so a reader can tell "considered
+and exempt" from "missed".
+
+ADDING A TENANT CHILD TABLE IS FOUR EDITS, not one: the parent's `(org_id, id)` unique index, the
+composite key on the child, a branch in the migration's pre-flight violation check, and a probe in
+`tenant-keys.e2e.test.ts`. That suite asks `pg_constraint` which composite keys exist and fails if
+its own list does not match, so the fourth is enforced rather than remembered.
 
 | Tenant tables (RLS enforced) | Global tables (no `org_id`) |
 | --- | --- |
@@ -459,6 +476,11 @@ DATABASE_URL_MAINTENANCE=postgres://stopgap:stopgap@localhost:5433/stopgap \
 
 Both urls are required, and they exercise different halves of the design — see the header of
 `rls.e2e.test.ts`.
+
+`packages/db/src/tenant-keys.e2e.test.ts` asserts the other half of the model: one probe per
+composite key, each writing a row whose `org_id` is the caller's own and whose parent belongs to
+another tenant, and each expected to be refused by the DATABASE with `23503` naming that specific
+constraint. Under the plain keys these replaced, every one of those writes succeeded.
 
 `packages/db/src/rls.e2e.test.ts` asserts, once per tenant table, that org A sees zero of org B's
 rows, that a cross-tenant **UPDATE and DELETE affect zero rows** (with org B's row still intact

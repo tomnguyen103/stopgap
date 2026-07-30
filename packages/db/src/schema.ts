@@ -269,6 +269,12 @@ export const acknowledgments = pgTable(
     // No plain `.references()`: the COMPOSITE key below is the referential check (ticket 21), and a
     // second one on `case_id` alone would be a weaker duplicate of it.
     caseId: uuid("case_id").notNull(),
+    // DELIBERATELY PLAIN, and the one exemption from ticket 21's rule. `users` carries an `org_id`
+    // like any tenant table, but the synthetic `system` and `agent` principals live in the seed org
+    // and are referenced from EVERY tenant's rows by design — a composite key here would refuse
+    // exactly the rows the synthetic users exist to carry. The same exemption covers
+    // `audit_log.actor_user_id`, `protocol_versions.authored_by_user_id` / `approved_by_user_id`
+    // and `api_keys.created_by_user_id`. Considered and exempt, not missed.
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id),
@@ -523,6 +529,9 @@ export const protocols = pgTable(
     // index. Org-leading, so it also serves as the org-filter index.
     uniqueIndex("protocols_key_uq").on(t.orgId, t.key),
     index("protocols_class_idx").on(t.orgId, t.drugClass),
+    // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
+    // target (ticket 21). Referenced by the composite key on `protocol_versions`.
+    uniqueIndex("protocols_org_id_uq").on(t.orgId, t.id),
   ],
 );
 
@@ -541,9 +550,8 @@ export const protocolVersions = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    protocolId: uuid("protocol_id")
-      .notNull()
-      .references(() => protocols.id),
+    // No plain `.references()`: the COMPOSITE keys below are the referential check (ticket 21).
+    protocolId: uuid("protocol_id").notNull(),
     /** Per-protocol version number (1, 2, 3...), assigned by the store, not a global sequence. */
     version: integer("version").notNull(),
     state: text("state").notNull().default("draft"),
@@ -554,7 +562,7 @@ export const protocolVersions = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     /** The case whose resolution produced this version — the provenance link. */
-    sourceCaseId: uuid("source_case_id").references(() => cases.id),
+    sourceCaseId: uuid("source_case_id"),
     /** "agent" for an agent-drafted version, a pharmacist id once a human edits/approves. */
     authoredBy: text("authored_by").notNull(),
     approvedBy: text("approved_by"),
@@ -585,6 +593,24 @@ export const protocolVersions = pgTable(
     // A plain org index here rather than an org-leading composite: unlike `cases`/`protocols`,
     // this table has no org-leading unique index to piggyback on.
     index("protocol_versions_org_idx").on(t.orgId),
+    // COMPOSITE (ticket 21). Both parents are tenant tables, and `source_case_id` is the exact
+    // shape the ticket names: a plain reference to `cases.id` from a table carrying its own
+    // `org_id`, which let a version claim provenance from another hospital's case.
+    //
+    // DELETE BEHAVIOUR, STATED RATHER THAN INHERITED: none on either, preserving what the plain
+    // keys had. A protocol cannot be deleted out from under its own version history — that history
+    // is the record of what guidance was in force and when — and a version must not lose the case
+    // it came from by having that case removed.
+    foreignKey({
+      columns: [t.orgId, t.protocolId],
+      foreignColumns: [protocols.orgId, protocols.id],
+      name: "protocol_versions_org_protocol_fk",
+    }),
+    foreignKey({
+      columns: [t.orgId, t.sourceCaseId],
+      foreignColumns: [cases.orgId, cases.id],
+      name: "protocol_versions_org_source_case_fk",
+    }),
   ],
 );
 
@@ -1257,7 +1283,8 @@ export const items = pgTable(
     uniqueIndex("items_sku_uq").on(t.orgId, t.sku),
     index("items_generic_idx").on(t.orgId, t.genericName),
     // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
-    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    // target (ticket 21). Referenced by the composite keys on `item_identifiers`,
+    // `item_suppliers`, `inventory_snapshots` and `procurement_events`.
     uniqueIndex("items_org_id_uq").on(t.orgId, t.id),
   ],
 );
@@ -1313,7 +1340,8 @@ export const suppliers = pgTable(
   (t) => [
     uniqueIndex("suppliers_code_uq").on(t.orgId, t.code),
     // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
-    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    // target (ticket 21). Referenced by the composite keys on `supplier_sites`, `item_suppliers`
+    // and `procurement_events`.
     uniqueIndex("suppliers_org_id_uq").on(t.orgId, t.id),
   ],
 );
@@ -1336,7 +1364,7 @@ export const supplierSites = pgTable(
   (t) => [
     uniqueIndex("supplier_sites_code_uq").on(t.orgId, t.supplierId, t.code),
     // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
-    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    // target (ticket 21). Referenced by the composite site key on `item_suppliers`.
     uniqueIndex("supplier_sites_org_id_uq").on(t.orgId, t.id),
     // COMPOSITE (ticket 21). Delete behaviour preserved from the plain key it replaces: cascade —
     // a supplier's sites are parts of that supplier, not records that outlive it.
@@ -1370,6 +1398,9 @@ export const itemSuppliers = pgTable(
     // with a site and once without, because NULL is never equal to itself in a unique index.
     uniqueIndex("item_suppliers_pair_uq").on(t.orgId, t.itemId, t.supplierId),
     index("item_suppliers_supplier_idx").on(t.orgId, t.supplierId),
+    // Leads with the pair the site key references. Without it, deleting a site sequentially scans
+    // this table to find the rows to null — while holding the lock the delete took.
+    index("item_suppliers_site_idx").on(t.orgId, t.siteId),
     // COMPOSITE (ticket 21), delete behaviour preserved from the plain keys these replace.
     foreignKey({
       columns: [t.orgId, t.itemId],
@@ -1409,7 +1440,8 @@ export const facilities = pgTable(
   (t) => [
     uniqueIndex("facilities_code_uq").on(t.orgId, t.code),
     // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
-    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    // target (ticket 21). Referenced by the composite keys on `inventory_snapshots` and
+    // `procurement_events`.
     uniqueIndex("facilities_org_id_uq").on(t.orgId, t.id),
   ],
 );
@@ -1493,6 +1525,9 @@ export const procurementEvents = pgTable(
       t.orderRef,
     ),
     index("procurement_events_item_idx").on(t.orgId, t.itemId, t.orderedAt),
+    // Same reason as `item_suppliers_site_idx`: the supplier key nulls rows on delete, and this is
+    // the pair it looks them up by. This is the largest table in the catalog.
+    index("procurement_events_supplier_idx").on(t.orgId, t.supplierId),
     // COMPOSITE (ticket 21), delete behaviour preserved from the plain keys these replace.
     foreignKey({
       columns: [t.orgId, t.facilityId],
