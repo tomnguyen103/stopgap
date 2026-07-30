@@ -83,3 +83,39 @@ export function summarizeDiff(diff: DiffLine[]): string {
   if (removed > 0) parts.push(`${removed} line${removed === 1 ? "" : "s"} removed`);
   return parts.join(", ");
 }
+
+/** The pair a comparison request resolves to, or null when it names nothing real. */
+export interface ResolvedComparison<V> {
+  from: V;
+  to: V;
+}
+
+/**
+ * Which two versions an address is asking to compare, for THIS protocol.
+ *
+ * TOTAL. Every input comes from the query string, so every one of them can be absent, malformed, or
+ * name a version that does not exist — and the honest response to all three is the same: no
+ * comparison, show the current text. Erroring would turn a hand-edited or stale link into a broken
+ * page, and falling back to some nearby version would show a diff nobody asked for and label it
+ * with the numbers they did.
+ *
+ * Returns null when the request names a DIFFERENT protocol, which is what keeps one card's
+ * comparison out of every other card on the page.
+ */
+export function resolveComparison<V extends { version: number }>(
+  versions: readonly V[],
+  protocolKey: string,
+  request: { compare: string | null; from: number | null; to: number | null },
+): ResolvedComparison<V> | null {
+  if (request.compare !== protocolKey) return null;
+  const from = versions.find((v) => v.version === request.from);
+  const to = versions.find((v) => v.version === request.to);
+  if (from === undefined || to === undefined) return null;
+  return { from, to };
+}
+
+/** A version number from the address, or null if it is not one. */
+export function parseVersionParam(raw: string | string[] | undefined): number | null {
+  const value = typeof raw === "string" ? Number(raw) : Number.NaN;
+  return Number.isSafeInteger(value) ? value : null;
+}
