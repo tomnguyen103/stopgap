@@ -40,8 +40,14 @@ and exempt" from "missed".
 
 ADDING A TENANT CHILD TABLE IS FOUR EDITS, not one: the parent's `(org_id, id)` unique index, the
 composite key on the child, a branch in the migration's pre-flight violation check, and a probe in
-`tenant-keys.e2e.test.ts`. That suite asks `pg_constraint` which composite keys exist and fails if
-its own list does not match, so the fourth is enforced rather than remembered.
+`tenant-keys.e2e.test.ts`.
+
+That suite asks `pg_constraint` which composite keys exist and fails if its own probe list does not
+match — but it asks about a FIXED SET OF TABLES, named in the query. So it catches a key added to a
+table it already knows about, and it does NOT catch a brand-new table nobody added to the query.
+The check is a guard on the tables in it, not a discovery mechanism, and the fourth edit is
+enforced only to that extent. Adding a table means adding it to the query too, which is the fifth
+edit hiding inside the fourth.
 
 | Tenant tables (RLS enforced) | Global tables (no `org_id`) |
 | --- | --- |

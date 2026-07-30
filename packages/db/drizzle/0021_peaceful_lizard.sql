@@ -12,8 +12,8 @@
 -- database built by `push` rather than by this migration gets the plain form and will throw 23502
 -- on the first such delete. Migrate; do not push.
 --
--- LOCKS. Twelve ADD CONSTRAINTs each take ACCESS EXCLUSIVE on the child and scan it to validate,
--- and five unique indexes block writes while they build — all inside one transaction, so the
+-- LOCKS. Fourteen ADD CONSTRAINTs each take ACCESS EXCLUSIVE on the child and scan it to validate,
+-- and six unique indexes block writes while they build — all inside one transaction, so the
 -- blocking is the SUM. On a large `procurement_events` this is real downtime, and it is why
 -- `lock_timeout` is set rather than left to queue behind a long reader and stall every writer
 -- behind it in turn. If it trips, run it in a maintenance window; do not raise the timeout.

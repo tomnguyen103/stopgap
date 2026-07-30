@@ -27,7 +27,7 @@ composite key, plus the control, the `SET NULL` behaviour, and a completeness ch
 `pg_constraint` which composite keys exist and fails if the probe list does not match it.
 Whole tier `pnpm test:rls` 236 passed; `pnpm gate` green.
 
-Pre-flight against this deployment's data found ZERO rows already violating any of the twelve pairs.
+Pre-flight against this deployment's data found ZERO rows already violating any of the fourteen pairs.
 
 - [x] `cases` gains a unique constraint over `(org_id, id)`, with the same note the one on `risk_signals` carries: redundant as an index, required by Postgres before the pair can be a foreign-key target
 - [x] `acknowledgments` and `audit_log` reference `cases (org_id, id)` as a composite foreign key, replacing the plain reference to `cases.id`
