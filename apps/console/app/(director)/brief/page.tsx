@@ -1,5 +1,6 @@
 import { DEGRADED_REASONS, type DegradedReason } from "@stopgap/db";
 import { getDailyBriefs } from "../../lib/data";
+import { requireGroup } from "../../lib/group-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,12 @@ function degradedLabel(reason: string): string {
 }
 
 export default async function BriefPage() {
+  // The page guards ITSELF, like every other page in every group. The group layout's guard is not
+  // the authorization boundary: a crafted router-state header makes React skip the layout and
+  // render this page alone, which is the bypass the route-group work verified and fixed on all
+  // thirteen pages that existed then. This page arrived in the group afterwards, by being moved
+  // here, so it has to state the same guard rather than inherit one.
+  await requireGroup("pharmacy_director");
   const briefs = await getDailyBriefs(30);
   const [latest, ...earlier] = briefs;
 

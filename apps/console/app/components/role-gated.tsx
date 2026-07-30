@@ -35,12 +35,17 @@ export function RoleGatedButton({
 }) {
   const allowed = rolesAllow(roles, requires);
   const reason = `Requires the ${requires.replace(/_/g, " ")} role`;
+  // Only a STRING child can go in the accessible name. `String(children)` on an element renders
+  // "[object Object]", which reads out as exactly that — worse than the label the button would
+  // have had from its own content. When the child is not a string the reason stands alone and the
+  // content still names the control.
+  const label = typeof children === "string" ? `${children} — ${reason}` : reason;
   return (
     <Button
       {...rest}
       aria-disabled={!allowed || undefined}
       title={allowed ? undefined : reason}
-      aria-label={allowed ? undefined : `${String(children)} — ${reason}`}
+      aria-label={allowed ? undefined : label}
       onClick={allowed ? onClick : undefined}
     >
       {children}

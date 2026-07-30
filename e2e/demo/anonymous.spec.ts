@@ -41,9 +41,17 @@ test.describe("the anonymous demo visitor", () => {
       data: { kind: "approve", reviewer: "anonymous" },
       failOnStatusCode: false,
     });
+    // PINNED, and honest about which door closed. A bare `>= 400` conflated two refusals; the
+    // route authenticates BEFORE `demoGateOr403`, so a caller with no API key is turned away at
+    // 401 and never reaches the demo gate at all. What this test proves is therefore the auth
+    // boundary — that a hand-rolled request from a demo visitor cannot mutate — and pinning the
+    // exact status is what makes it fail if that boundary ever softens to a redirect or a 200.
+    //
+    // The demo gate's own 403 is a DIFFERENT claim, reachable only with a valid key, and no test
+    // covers it yet: see the note on the batch B pull request.
     expect(
       response.status(),
-      "a demo deployment must refuse every mutation",
-    ).toBeGreaterThanOrEqual(400);
+      "an anonymous mutation must be refused by the API key check, before any other gate",
+    ).toBe(401);
   });
 });

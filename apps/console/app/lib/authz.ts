@@ -137,6 +137,15 @@ export type DashboardGroup = (typeof DASHBOARD_GROUPS)[number];
  * server action still calls its own guard, exactly as before. The two are deliberately separate —
  * a dashboard a role can see but only partly use is normal, and would be unrepresentable if this
  * function doubled as policy.
+ *
+ * IT ADMITS AT OR BELOW RANK, so "another role's route is refused server-side" holds UPWARD only:
+ * a viewer cannot reach the director's oversight, while a director can read the pharmacist queue.
+ * That direction is the intended one — a director asked to explain a decision needs to see the
+ * queue it came from — but it has a consequence worth naming, because it is not a bug someone
+ * should later "fix": the per-group navs list only their OWN group's routes, so a higher role can
+ * reach a lower group's page but has no link to it. The alternative, composing every visible
+ * group's links into one nav, rebuilds the undifferentiated header the route groups exist to
+ * replace. Typing the URL is the deliberate cost.
  */
 export function canViewGroup(roles: readonly Role[], group: DashboardGroup): boolean {
   let best = RANK.viewer;

@@ -39,6 +39,8 @@
   --surface-raised: var(--panel);
   --surface-sunken: var(--sunken);
   --surface-hover: var(--row-hover);
+  /* The dimming behind a modal surface. A colour, so it belongs to the token layer. */
+  --surface-scrim: rgb(0 0 0 / 0.55);
   --border-default: var(--line);
   --text-default: var(--text);
   --text-subtle: var(--muted);
@@ -276,7 +278,11 @@ h2 {
 /* Phase 4: HITL review panel. */
 .draft-input,
 .reason-input {
-  width: 100%;
+  /* `flex: 1 1 200px` with `width: auto` — a SECOND `.reason-input` block used to restate these
+     below and silently overrode the `width: 100%` this rule set, so the declared width was never
+     the one that applied. One rule now says what the input does. */
+  width: auto;
+  flex: 1 1 200px;
   background: var(--surface-sunken);
   color: var(--text);
   border: 1px solid var(--line);
@@ -285,10 +291,6 @@ h2 {
   font:
     13px/1.6 ui-monospace,
     monospace;
-}
-.reason-input {
-  width: auto;
-  flex: 1 1 200px;
 }
 .actions {
   display: flex;
@@ -714,7 +716,7 @@ button.danger {
   overflow-y: auto;
 }
 .ds-drawer::backdrop {
-  background: rgb(0 0 0 / 0.55);
+  background: var(--surface-scrim);
 }
 .ds-drawer__head {
   display: flex;
