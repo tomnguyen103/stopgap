@@ -31,7 +31,7 @@ import {
   assertMutationAllowed,
   isDemoMode,
   prepareDemoRun,
-  seedDemoData,
+  seedDemoOrg,
   type DemoRunResult,
 } from "@stopgap/demo";
 import {
@@ -286,7 +286,11 @@ export async function seedDemoWorkspaceAction(): Promise<{ cases: number; protoc
       "This deployment is not in demo mode. Seeding would put invented shortages beside real ones.",
     );
   }
-  const result = await seedDemoData();
+  // THE CALLER'S OWN TENANT. `seedDemoData` writes into both fixed demo orgs, which is correct for
+  // the nightly job and wrong here: `requireRole` authorized this administrator in the org they are
+  // acting in, and seeding two others regardless would make the authorization and the effect be
+  // about different hospitals.
+  const result = await seedDemoOrg(principal.orgId);
   await recordPrivilegedAudit(
     principal,
     "demo.workspace_seeded",

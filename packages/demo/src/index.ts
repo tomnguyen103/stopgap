@@ -7,7 +7,7 @@ export {
   type DemoRunRefusal,
   type DemoRunResult,
 } from "./scenario.js";
-export { seedDemoData, type SeedResult } from "./seed.js";
+export { seedDemoData, seedDemoOrg, type SeedResult } from "./seed.js";
 export {
   DemoReadOnlyError,
   assertMutationAllowed,

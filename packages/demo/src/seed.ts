@@ -138,6 +138,27 @@ export interface SeedResult {
   reseeded: boolean;
 }
 
+/**
+ * Seed ONE tenant — the console's entry point (ticket 17).
+ *
+ * `seedDemoData` writes into both fixed demo orgs, which is right for the nightly job and wrong
+ * for a console action: an administrator is authorized in the tenant they are ACTING IN, and a
+ * button that writes into two other organizations regardless is authorization and effect
+ * disagreeing about who they are about. This seeds the caller's own workspace and nothing else.
+ *
+ * Every case key, because the split across the two fixed orgs exists to demonstrate isolation
+ * BETWEEN them — a single tenant seeding a subset would just be missing data.
+ */
+export async function seedDemoOrg(orgId: string, now: Date = new Date()): Promise<SeedResult> {
+  const caseKeys = SEED_CASES.map((c) => c.key);
+  const result = await withOrgDb(orgId, (db) => seedOneOrg(db, orgId, caseKeys, now));
+  return {
+    cases: result.cases,
+    protocolsWritten: result.protocolsWritten,
+    reseeded: result.reseeded,
+  };
+}
+
 /** Idempotent: safe to run nightly (and safe to run twice in a row). */
 export async function seedDemoData(now: Date = new Date()): Promise<SeedResult> {
   let cases = 0;
