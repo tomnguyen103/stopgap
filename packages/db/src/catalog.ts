@@ -91,6 +91,38 @@ function clearable<T>(value: T | undefined): T | null {
 }
 
 async function writeItems(db: Db, orgId: string, plan: ImportPlan<"items">): Promise<void> {
+  // TWO ROWS MAY NOT CLAIM ONE IDENTIFIER, and this is checked BEFORE anything is written.
+  //
+  // The per-row ambiguity check further down catches one row whose identifiers point at two
+  // existing items. It cannot catch the other direction: two rows in THIS file carrying the same
+  // `(type, value)`. That case never looks ambiguous when the rows are processed in order — the
+  // first row writes the identifier into `byIdentifier`, so the second resolves cleanly to the
+  // item the first just created and overwrites its sku and name. One of the administrator's two
+  // rows silently disappears into the other, which is the same silent merge the per-row check
+  // exists to prevent, arriving by a different route.
+  //
+  // A pre-pass rather than a check inside the loop, because by the time the loop reaches the
+  // second row the first has already been written.
+  const claimedBy = new Map<string, number>();
+  const collisions: string[] = [];
+  for (const { line, row } of plan.rows) {
+    for (const identifier of identifiersOf(row)) {
+      const key = `${identifier.type}:${identifier.value}`;
+      const first = claimedBy.get(key);
+      if (first === undefined) {
+        claimedBy.set(key, line);
+      } else {
+        collisions.push(`${key} on lines ${first} and ${line}`);
+      }
+    }
+  }
+  if (collisions.length > 0) {
+    throw new Error(
+      `the file claims the same identifier on more than one row: ${collisions.join("; ")} — ` +
+        `each identifier names exactly one item, so the rows have to be merged or corrected first`,
+    );
+  }
+
   // Match on IDENTIFIERS first, in one query for the whole file rather than one per row.
   const wanted = plan.rows.flatMap(({ row }) =>
     identifiersOf(row).map((i) => ({ type: i.type, value: i.value })),
