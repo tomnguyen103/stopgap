@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 
 import { importCatalogAction } from "../../../lib/actions";
+import { MAX_UPLOAD_BYTES } from "../../../lib/catalog-list";
 
 /**
  * Upload a catalog file, and read back what was wrong with it (ticket 17).
@@ -13,8 +14,7 @@ import { importCatalogAction } from "../../../lib/actions";
  * Failures are listed in full, per row, with their line numbers. An importer that stops at the
  * first bad line turns a 4,000-row export into forty round trips.
  */
-/** What one upload may weigh. Enforced here and again at the server action. */
-const MAX_UPLOAD_BYTES = 8_000_000;
+
 
 export function ImportPanel({
   kinds,
@@ -105,7 +105,13 @@ export function ImportPanel({
           type="button"
           className="ds-button"
           aria-disabled={blocked || undefined}
+          // The reason belongs in the ACCESSIBLE NAME as well as the tooltip, the way
+          // `components/role-gated.tsx` composes them: browsers do not fire `title` for a screen
+          // reader, so a tooltip-only explanation reaches everyone except the people who most need
+          // it. Composed with the control's own name rather than replacing it — a bare reason
+          // announces why without saying which control it belongs to.
           title={unavailableReason ?? undefined}
+          aria-label={unavailableReason ? `Import — ${unavailableReason}` : undefined}
           disabled={pending || csv === null}
           onClick={() => {
             if (blocked || csv === null) return;

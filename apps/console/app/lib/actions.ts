@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 
 import { isRole } from "@stopgap/core";
 import { CATALOG_KINDS, planImport } from "@stopgap/catalog";
-import { describeRowError } from "./catalog-list";
+import { describeRowError, MAX_UPLOAD_BYTES } from "./catalog-list";
 import {
   appendAudit,
   importCatalog,
@@ -293,7 +293,7 @@ export async function importCatalogAction(
   const parsedKind = z.enum(CATALOG_KINDS).parse(kind);
   // Bounded before it is parsed: an unbounded upload is memory the request did not ask permission
   // for, and a catalog file that large is a mistake rather than a facility.
-  const text = z.string().max(8_000_000).parse(csv);
+  const text = z.string().max(MAX_UPLOAD_BYTES).parse(csv);
   const digest = createHash("sha256").update(text).digest("hex").slice(0, 32);
   const plan = planImport(parsedKind, text);
   // The SAME formatter the page uses. Two copies had already drifted on their quote characters,
