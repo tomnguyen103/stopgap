@@ -4,6 +4,7 @@ import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
 import { Badge, Card, Table } from "../../components/ui";
 import { DemoPanel } from "../../demo-panel";
 import { getCaseQueue, getFeedFreshness } from "../../lib/data";
+import { formatUtc } from "../../lib/format";
 import { requireGroup } from "../../lib/group-guard";
 import { isException, parseCaseQueueParams, CASE_QUEUE_SCHEMA } from "../../lib/case-queue";
 import { filterValue, listHref, pageCount, sortHref, toggleFilterHref } from "../../lib/list-href";
@@ -69,7 +70,7 @@ export default async function CaseQueuePage({
             {feeds.map((f) => (
               <span key={f.source} className="feed-line">
                 <b>{f.source}</b> · latest stored record{" "}
-                {new Date(f.lastFetchedAt).toLocaleString()} · {f.records} record
+                {formatUtc(f.lastFetchedAt)} · {f.records} record
                 {f.records === 1 ? "" : "s"}
               </span>
             ))}

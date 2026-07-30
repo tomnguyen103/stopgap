@@ -44,6 +44,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
     ? screenContent(live.alternatives.join("\n"))
     : undefined;
   const confidence = confidenceLabel(live?.researchConfidence);
+  // The action the review panel will actually SUBMIT: an exception case resolves through
+  // `resolveExceptionCase`, everything else reviews through `reviewCase`. Both require `pharmacist`
+  // today, so this changes no rendering — it stops the courtesy label going quietly stale the day
+  // the two minimums diverge, which is the failure mode the label exists to prevent.
+  const reviewAction = live?.status === "exception" ? "resolve_exception" : "review_case";
   // ONE decision, read everywhere the draft could reach the page. Screening at the review panel
   // and rendering the same text again in the protocol card below would be a guard that announces
   // itself and then hands over the text anyway.
@@ -118,8 +123,10 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               source: entry.source,
               originUrl: entry.originUrl,
               contentHash: entry.contentHash,
-              // ISO, formatted once on the server: see the note on `EvidenceEntry.capturedAt`.
-              capturedAt: entry.capturedAt.toISOString().replace("T", " ").slice(0, 19) + "Z",
+              // Formatted once on the server: see the note on `EvidenceEntry.capturedAt`. Through
+              // `formatUtc` rather than the same slicing written out again, so the drawer spells UTC
+              // the way the rest of the page does.
+              capturedAt: formatUtc(entry.capturedAt),
             }))}
           />
         </div>
@@ -154,18 +161,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           confidence={confidence}
           // Demo mode refuses every decision server-side. The controls RENDER, disabled, naming why
           // — a visitor should see the gate that exists rather than a page with no gate at all.
-          //
-          // The action asked about is the one this panel will actually SUBMIT: an exception case
-          // resolves through `resolveExceptionCase`, everything else reviews through `reviewCase`.
-          // Both require `pharmacist` today, so this changes no rendering — it stops the label from
-          // going quietly stale the day the two minimums diverge, which is the whole failure mode
-          // this courtesy label exists to prevent.
           unavailableReason={unavailableReason(
-            isActionAllowed(
-              principal.roles,
-              live.status === "exception" ? "resolve_exception" : "review_case",
-            ),
-            ACTION_MIN_ROLE[live.status === "exception" ? "resolve_exception" : "review_case"],
+            isActionAllowed(principal.roles, reviewAction),
+            ACTION_MIN_ROLE[reviewAction],
             isDemoMode(),
           )}
         />
@@ -226,7 +224,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         // page. The action still enforces this itself; the label is a courtesy, never the control.
         unavailableReason={unavailableReason(
           isActionAllowed(principal.roles, "review_case"),
-          "pharmacist",
+          // Derived, not written out: a literal here says `pharmacist` forever, including after the
+          // minimum moves.
+          ACTION_MIN_ROLE.review_case,
           isDemoMode(),
         )}
       />

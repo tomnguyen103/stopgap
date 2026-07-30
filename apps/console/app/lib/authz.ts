@@ -99,13 +99,18 @@ export const ROLE_LANDING_ROUTE: Record<Role, string> = {
  * multi-role user effectively holds.
  *
  * Total by construction — it always returns a route:
- *  - no roles at all (the anonymous visitor `STOPGAP_DEMO_MODE` resolves) lands on the viewer
- *    dashboard, which is what makes the public demo and the lowest-privilege surface one thing to
- *    build rather than two;
+ *  - the anonymous visitor `STOPGAP_DEMO_MODE` resolves holds the real `viewer` role, and lands on
+ *    the viewer dashboard, which is what makes the public demo and the lowest-privilege surface one
+ *    thing to build rather than two;
  *  - a role this build does not know is skipped rather than thrown on. Roles are unioned from IdP
  *    realm claims and local grants, so an IdP can legitimately present a realm role a given deploy
  *    has never heard of; a throw here would turn that into a failed sign-in redirect instead of a
  *    harmless degrade to `viewer`.
+ *
+ * TOTAL IS NOT THE SAME AS CORRECT FOR EVERY CALLER. This falls back to `viewer` for a caller with
+ * no recognized role, and `canViewGroup` refuses exactly that caller — so callers must ask
+ * `hasRecognizedRole` FIRST and divert to `ACCESS_DENIED_ROUTE`, or the two bounce the request
+ * between them. `app/page.tsx` and `group-guard.ts` are the two places that do.
  */
 export function roleLandingRoute(roles: readonly Role[]): string {
   let best: Role = "viewer";

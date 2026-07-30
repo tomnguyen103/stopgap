@@ -11,6 +11,26 @@ import {
 import type { Db } from "./client.js";
 
 /**
+ * The page number an OFFSET can safely be built from.
+ *
+ * FLOOR, CEILING, AND SHAPE. The console's own parser (`list-params.ts`) already guarantees a
+ * positive safe integer, but every paginator here is exported from `@stopgap/db`, and a caller that
+ * is not that parser is the whole reason this exists: a zero or negative page reaches OFFSET
+ * negative, a fractional one reaches `OFFSET 12.5`, and `NaN` reaches `OFFSET NaN` — all three are
+ * errors from Postgres rather than an empty page. A page past the end clamps to the last one, which
+ * is what stops `?page=500` on a three-page list rendering an empty table headed "Page 500 of 3".
+ *
+ * Shared by `listSignalsPage` and `listCaseQueue`, which had the same clamp written out twice.
+ */
+export function clampPage(page: number, total: number, pageSize: number): number {
+  const lastPage = Math.max(1, Math.ceil(total / pageSize));
+  // NaN is the one value the min/max sandwich cannot rescue — it propagates through both and reaches
+  // OFFSET intact. An infinity needs no special case: it clamps to the last page like any overshoot.
+  if (Number.isNaN(page)) return 1;
+  return Math.max(1, Math.min(Math.trunc(page), lastPage));
+}
+
+/**
  * The shape this module needs from a normalized signal.
  *
  * Declared structurally rather than imported from `@stopgap/ingest`, so the persistence layer does
@@ -295,15 +315,9 @@ export async function listSignalsPage(
     .from(riskSignals)
     .where(where);
   const total = Number(counted?.total ?? 0);
-  // The count comes FIRST so the page can be clamped to it. `?page=500` on a three-page list is
-  // in range as far as the parser is concerned — it bounds the offset, and only the count knows
-  // where the rows stop. Unclamped it renders an empty table headed "Page 500 of 3".
-  // Floor as well as ceiling, for the reason `listCaseQueue` spells out: this function is exported,
-  // and a zero or negative page reaches OFFSET as a negative number and throws.
-  const page = Math.max(
-    1,
-    Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize))),
-  );
+  // The count comes FIRST so the page can be clamped to it: only the count knows where the rows
+  // stop. See `clampPage` for what else it defends against.
+  const page = clampPage(options.page, total, options.pageSize);
   const rows = await db
     .select()
     .from(riskSignals)
@@ -498,12 +512,7 @@ export async function listCaseQueue(
     sql`${scored} select count(*)::text as total from queue`,
   );
   const total = Number(counted?.total ?? 0);
-  // Floor AND ceiling. The console's parser already guarantees `page >= 1`, but this function is
-  // exported and a zero or negative page would reach OFFSET as a negative number and throw.
-  const page = Math.max(
-    1,
-    Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize))),
-  );
+  const page = clampPage(options.page, total, options.pageSize);
 
   // ORDER BY assembled from the allow-listed key, never from the raw parameter. `id` last, so two
   // cases with equal scores hold their order between pages instead of swapping.

@@ -402,8 +402,11 @@ export async function getCaseEvidence(genericName: string): Promise<{
         desc(schema.riskScoreSnapshots.id),
       )
       .as("latest_snapshot");
-    // The signal the RANK came from — highest latest score first, newest publication only as the
-    // tiebreak.
+    // The signal the RANK came from — highest latest score first, then the SAME tiebreak the queue
+    // uses (`rankedOpenCases` breaks a fraction tie on `dedupe_key`). Two signals for one product can
+    // hold the same fraction, and breaking that tie differently here would name a different signal
+    // than the queue ranked the case on — the contradiction this ordering exists to prevent. `id`
+    // last so the pick is stable across renders even when every other key ties.
     const [signal] = await db
       .select({ signal: schema.riskSignals })
       .from(schema.riskSignals)
@@ -416,7 +419,9 @@ export async function getCaseEvidence(genericName: string): Promise<{
       )
       .orderBy(
         sql`${latestSnapshot.score} / nullif(${latestSnapshot.reachableMax}, 0) desc nulls last`,
+        schema.riskSignals.dedupeKey,
         desc(schema.riskSignals.publishedAt),
+        desc(schema.riskSignals.id),
       )
       .limit(1)
       .then((rows) => rows.map((row) => row.signal));

@@ -1,7 +1,5 @@
 import { Card } from "../components/ui";
 
-export const dynamic = "force-dynamic";
-
 /**
  * Where a caller the IdP authenticated but granted no recognized Stopgap role lands.
  *
@@ -11,11 +9,13 @@ export const dynamic = "force-dynamic";
  *
  * READS NOTHING. No principal, no org, no tenant query — the one situation this page exists for is
  * the one where we cannot say which tenant the caller belongs to, so it says only what is true for
- * everyone who reaches it, and names the fix in the terms an administrator can act on.
+ * everyone who reaches it, and names the fix in the terms an administrator can act on. Reading
+ * nothing is also why it carries no `force-dynamic`: there is nothing per-request to opt out of.
  */
 export default function AccessDeniedPage() {
   return (
     <main>
+      <h1>Access denied</h1>
       <Card title="No Stopgap role is assigned to this account">
         <p>
           You are signed in, but this account carries no role that Stopgap recognizes, so there is no
