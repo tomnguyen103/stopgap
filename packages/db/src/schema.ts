@@ -136,6 +136,13 @@ export const cases = pgTable(
     // index rather than adding an `ORDER BY` for that reason: the constraint states the invariant
     // the code already relies on instead of making a non-deterministic read merely deterministic.
     uniqueIndex("cases_key_uq").on(t.orgId, t.key),
+    // REDUNDANT AS AN INDEX, REQUIRED AS A TARGET — the same note `risk_signals_org_id_uq` carries.
+    // `id` is already the primary key, so this proves nothing new about the data; Postgres simply
+    // will not accept `(org_id, id)` as a foreign-key target without a unique constraint over
+    // exactly that pair. It exists so `acknowledgments` and `audit_log` can name the PAIR (ticket
+    // 21) instead of the id alone, which is what makes a row filed under one hospital pointing at
+    // another hospital's case unrepresentable rather than merely undone by convention.
+    uniqueIndex("cases_org_id_uq").on(t.orgId, t.id),
   ],
 );
 
@@ -259,9 +266,9 @@ export const acknowledgments = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    caseId: uuid("case_id")
-      .notNull()
-      .references(() => cases.id),
+    // No plain `.references()`: the COMPOSITE key below is the referential check (ticket 21), and a
+    // second one on `case_id` alone would be a weaker duplicate of it.
+    caseId: uuid("case_id").notNull(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id),
@@ -276,6 +283,20 @@ export const acknowledgments = pgTable(
     uniqueIndex("acknowledgments_case_step_uq").on(t.caseId, t.step),
     index("acknowledgments_case_idx").on(t.caseId),
     index("acknowledgments_org_idx").on(t.orgId),
+    // COMPOSITE, for the reason ticket 21 gives: a plain key proves the case exists, not that it
+    // belongs to this tenant. The referential check runs with RLS bypassed and `org_id` is written
+    // by the calling function, so an ack naming another tenant's case satisfied both the old key and
+    // the policy's `WITH CHECK` and landed.
+    //
+    // DELETE BEHAVIOUR, STATED RATHER THAN INHERITED: none — a case referenced by an ack cannot be
+    // deleted. Nothing in the codebase deletes a case (retention sweeps signals, snapshots, alert
+    // events and catalog rows, never cases), so this forbids an operation that does not happen, and
+    // would make it loud rather than silently discarding who acknowledged what.
+    foreignKey({
+      columns: [t.orgId, t.caseId],
+      foreignColumns: [cases.orgId, cases.id],
+      name: "acknowledgments_org_case_fk",
+    }),
   ],
 );
 
@@ -297,7 +318,9 @@ export const auditLog = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    caseId: uuid("case_id").references(() => cases.id),
+    // No plain `.references()`: the COMPOSITE key at the bottom of this table is the referential
+    // check (ticket 21). Still nullable — a console-level entry names no case.
+    caseId: uuid("case_id"),
     ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
     actor: text("actor").notNull(),
     /**
@@ -362,6 +385,22 @@ export const auditLog = pgTable(
     // here so the index LEADS with the column every query now filters on, which is also what
     // makes a separate `audit_log_org_idx` unnecessary.
     uniqueIndex("audit_case_action_uq").on(t.orgId, t.caseId, t.eventKey, t.runId),
+    // COMPOSITE (ticket 21). The comment on the unique index above says a cross-org insert is
+    // refused by the policy's `WITH CHECK` — that is true of the ROW'S OWN `org_id` and was never
+    // true of the case it names. `WITH CHECK` reads the row being written, so an entry carrying the
+    // caller's own org and another tenant's `case_id` passed it, and the plain key passed too
+    // because the case genuinely exists. This is the check that was actually missing.
+    //
+    // DELETE BEHAVIOUR, STATED RATHER THAN INHERITED: none, and here it is load-bearing rather than
+    // theoretical — an audit entry must not disappear because a case did. `on delete cascade` would
+    // make deleting a case silently truncate the hash chain that exists to prove nothing was
+    // removed; `set null` would keep the row and lose what it was about. Refusing the delete is the
+    // only one of the three that an append-only, hash-chained log can honestly offer.
+    foreignKey({
+      columns: [t.orgId, t.caseId],
+      foreignColumns: [cases.orgId, cases.id],
+      name: "audit_log_org_case_fk",
+    }),
   ],
 );
 
@@ -1217,6 +1256,9 @@ export const items = pgTable(
   (t) => [
     uniqueIndex("items_sku_uq").on(t.orgId, t.sku),
     index("items_generic_idx").on(t.orgId, t.genericName),
+    // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
+    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    uniqueIndex("items_org_id_uq").on(t.orgId, t.id),
   ],
 );
 
@@ -1235,9 +1277,8 @@ export const itemIdentifiers = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    itemId: uuid("item_id")
-      .notNull()
-      .references(() => items.id, { onDelete: "cascade" }),
+    // No plain `.references()`: the COMPOSITE key below is the referential check (ticket 21).
+    itemId: uuid("item_id").notNull(),
     /** `ndc` | `rxcui` | `gtin` | `hibc` | `sku` — the vocabulary in `@stopgap/catalog`. */
     type: text("type").notNull(),
     value: text("value").notNull(),
@@ -1247,6 +1288,13 @@ export const itemIdentifiers = pgTable(
     // re-upload matches on, which is why it is unique rather than merely indexed.
     uniqueIndex("item_identifiers_value_uq").on(t.orgId, t.type, t.value),
     index("item_identifiers_item_idx").on(t.orgId, t.itemId),
+    // COMPOSITE (ticket 21). Delete behaviour preserved from the plain key it replaces: cascade —
+    // an identifier is a name for an item and means nothing once the item is gone.
+    foreignKey({
+      columns: [t.orgId, t.itemId],
+      foreignColumns: [items.orgId, items.id],
+      name: "item_identifiers_org_item_fk",
+    }).onDelete("cascade"),
   ],
 );
 
@@ -1262,7 +1310,12 @@ export const suppliers = pgTable(
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("suppliers_code_uq").on(t.orgId, t.code)],
+  (t) => [
+    uniqueIndex("suppliers_code_uq").on(t.orgId, t.code),
+    // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
+    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    uniqueIndex("suppliers_org_id_uq").on(t.orgId, t.id),
+  ],
 );
 
 /** A vendor's individual site. Sole-source exposure is about SITES, not about companies. */
@@ -1273,15 +1326,26 @@ export const supplierSites = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    supplierId: uuid("supplier_id")
-      .notNull()
-      .references(() => suppliers.id, { onDelete: "cascade" }),
+    // No plain `.references()`: the COMPOSITE key below is the referential check (ticket 21).
+    supplierId: uuid("supplier_id").notNull(),
     code: text("code").notNull(),
     name: text("name"),
     country: text("country"),
     leadTimeDays: integer("lead_time_days"),
   },
-  (t) => [uniqueIndex("supplier_sites_code_uq").on(t.orgId, t.supplierId, t.code)],
+  (t) => [
+    uniqueIndex("supplier_sites_code_uq").on(t.orgId, t.supplierId, t.code),
+    // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
+    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    uniqueIndex("supplier_sites_org_id_uq").on(t.orgId, t.id),
+    // COMPOSITE (ticket 21). Delete behaviour preserved from the plain key it replaces: cascade —
+    // a supplier's sites are parts of that supplier, not records that outlive it.
+    foreignKey({
+      columns: [t.orgId, t.supplierId],
+      foreignColumns: [suppliers.orgId, suppliers.id],
+      name: "supplier_sites_org_supplier_fk",
+    }).onDelete("cascade"),
+  ],
 );
 
 /** Which suppliers can supply which item, and on what terms. */
@@ -1292,14 +1356,11 @@ export const itemSuppliers = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    itemId: uuid("item_id")
-      .notNull()
-      .references(() => items.id, { onDelete: "cascade" }),
-    supplierId: uuid("supplier_id")
-      .notNull()
-      .references(() => suppliers.id, { onDelete: "cascade" }),
+    // No plain `.references()`: the COMPOSITE key below is the referential check (ticket 21).
+    itemId: uuid("item_id").notNull(),
+    supplierId: uuid("supplier_id").notNull(),
     /** The specific site, when the file named one. */
-    siteId: uuid("site_id").references(() => supplierSites.id, { onDelete: "set null" }),
+    siteId: uuid("site_id"),
     contractPrice: numeric("contract_price", { precision: 14, scale: 4 }),
     preferred: boolean("preferred").notNull().default(false),
   },
@@ -1309,6 +1370,28 @@ export const itemSuppliers = pgTable(
     // with a site and once without, because NULL is never equal to itself in a unique index.
     uniqueIndex("item_suppliers_pair_uq").on(t.orgId, t.itemId, t.supplierId),
     index("item_suppliers_supplier_idx").on(t.orgId, t.supplierId),
+    // COMPOSITE (ticket 21), delete behaviour preserved from the plain keys these replace.
+    foreignKey({
+      columns: [t.orgId, t.itemId],
+      foreignColumns: [items.orgId, items.id],
+      name: "item_suppliers_org_item_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.orgId, t.supplierId],
+      foreignColumns: [suppliers.orgId, suppliers.id],
+      name: "item_suppliers_org_supplier_fk",
+    }).onDelete("cascade"),
+    // SET NULL ON ONE COLUMN, not on the pair. `org_id` is NOT NULL, so a plain composite
+    // `ON DELETE SET NULL` would try to null it too and throw at delete time rather than at
+    // creation — a failure that only appears the first time somebody removes a site. Postgres 15+
+    // takes an explicit column list; drizzle cannot express that, so migration 0021 hand-writes
+    // `ON DELETE SET NULL (site_id)` over the generated DDL, the same way the RLS policies are
+    // re-applied. The link survives the site, which is the behaviour the plain key had.
+    foreignKey({
+      columns: [t.orgId, t.siteId],
+      foreignColumns: [supplierSites.orgId, supplierSites.id],
+      name: "item_suppliers_org_site_fk",
+    }).onDelete("set null"),
   ],
 );
 
@@ -1323,7 +1406,12 @@ export const facilities = pgTable(
     code: text("code").notNull(),
     name: text("name"),
   },
-  (t) => [uniqueIndex("facilities_code_uq").on(t.orgId, t.code)],
+  (t) => [
+    uniqueIndex("facilities_code_uq").on(t.orgId, t.code),
+    // Redundant as an index, required by Postgres before `(org_id, id)` can be a foreign-key
+    // target — the same note `risk_signals_org_id_uq` carries (ticket 21).
+    uniqueIndex("facilities_org_id_uq").on(t.orgId, t.id),
+  ],
 );
 
 /**
@@ -1340,12 +1428,9 @@ export const inventorySnapshots = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    facilityId: uuid("facility_id")
-      .notNull()
-      .references(() => facilities.id, { onDelete: "cascade" }),
-    itemId: uuid("item_id")
-      .notNull()
-      .references(() => items.id, { onDelete: "cascade" }),
+    // No plain `.references()`: the COMPOSITE keys below are the referential check (ticket 21).
+    facilityId: uuid("facility_id").notNull(),
+    itemId: uuid("item_id").notNull(),
     onHand: numeric("on_hand", { precision: 14, scale: 3 }).notNull(),
     unit: text("unit"),
     capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
@@ -1355,6 +1440,18 @@ export const inventorySnapshots = pgTable(
     // rather than add a second one — the natural key of a snapshot is when it was taken.
     uniqueIndex("inventory_snapshots_point_uq").on(t.orgId, t.facilityId, t.itemId, t.capturedAt),
     index("inventory_snapshots_item_idx").on(t.orgId, t.itemId, t.capturedAt),
+    // COMPOSITE (ticket 21), delete behaviour preserved from the plain keys these replace: a
+    // snapshot is a count of one item at one facility, and means nothing once either is gone.
+    foreignKey({
+      columns: [t.orgId, t.facilityId],
+      foreignColumns: [facilities.orgId, facilities.id],
+      name: "inventory_snapshots_org_facility_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.orgId, t.itemId],
+      foreignColumns: [items.orgId, items.id],
+      name: "inventory_snapshots_org_item_fk",
+    }).onDelete("cascade"),
   ],
 );
 
@@ -1366,13 +1463,10 @@ export const procurementEvents = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id),
-    facilityId: uuid("facility_id")
-      .notNull()
-      .references(() => facilities.id, { onDelete: "cascade" }),
-    itemId: uuid("item_id")
-      .notNull()
-      .references(() => items.id, { onDelete: "cascade" }),
-    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    // No plain `.references()`: the COMPOSITE keys below are the referential check (ticket 21).
+    facilityId: uuid("facility_id").notNull(),
+    itemId: uuid("item_id").notNull(),
+    supplierId: uuid("supplier_id"),
     /**
      * The purchase-order reference, `''` when the file carried none.
      *
@@ -1399,6 +1493,24 @@ export const procurementEvents = pgTable(
       t.orderRef,
     ),
     index("procurement_events_item_idx").on(t.orgId, t.itemId, t.orderedAt),
+    // COMPOSITE (ticket 21), delete behaviour preserved from the plain keys these replace.
+    foreignKey({
+      columns: [t.orgId, t.facilityId],
+      foreignColumns: [facilities.orgId, facilities.id],
+      name: "procurement_events_org_facility_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [t.orgId, t.itemId],
+      foreignColumns: [items.orgId, items.id],
+      name: "procurement_events_org_item_fk",
+    }).onDelete("cascade"),
+    // SET NULL ON ONE COLUMN — see the note on `item_suppliers_org_site_fk`. What was ordered
+    // survives the vendor record being removed; only the attribution goes.
+    foreignKey({
+      columns: [t.orgId, t.supplierId],
+      foreignColumns: [suppliers.orgId, suppliers.id],
+      name: "procurement_events_org_supplier_fk",
+    }).onDelete("set null"),
   ],
 );
 

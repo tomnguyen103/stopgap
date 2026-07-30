@@ -148,6 +148,13 @@
       "when": 1785358295964,
       "tag": "0020_closed_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785424414162,
+      "tag": "0021_yielding_impossible_man",
+      "breakpoints": true
     }
   ]
 }
