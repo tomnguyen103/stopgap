@@ -70,6 +70,7 @@ describe("isActionAllowed matrix (role × action)", () => {
       manage_catalog: false,
       manage_users: false,
       manage_api_keys: false,
+      manage_demo_config: false,
     },
     pharmacist: {
       review_case: true,
@@ -79,6 +80,7 @@ describe("isActionAllowed matrix (role × action)", () => {
       manage_catalog: false,
       manage_users: false,
       manage_api_keys: false,
+      manage_demo_config: false,
     },
     pharmacy_director: {
       review_case: true,
@@ -88,6 +90,7 @@ describe("isActionAllowed matrix (role × action)", () => {
       manage_catalog: false,
       manage_users: false,
       manage_api_keys: false,
+      manage_demo_config: false,
     },
     admin: {
       review_case: true,
@@ -97,6 +100,7 @@ describe("isActionAllowed matrix (role × action)", () => {
       manage_catalog: true,
       manage_users: true,
       manage_api_keys: true,
+      manage_demo_config: true,
     },
   };
 

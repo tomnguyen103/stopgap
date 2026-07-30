@@ -5,6 +5,7 @@ import { isDemoMode } from "@stopgap/demo";
 import { Badge, Card, Table } from "../../components/ui";
 import { getCatalogCoverage, getFeedFreshness, getOversight } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
+import { SeedDemoPanel } from "./seed-demo-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ const FEED_QUIET_HOURS = 36;
  * ever moved out of one — and the rule is that reaching a route grants nothing.
  */
 export default async function AdminIndexPage() {
-  await requireGroup("admin");
+  const principal = await requireGroup("admin");
   const [coverage, feeds, oversight] = await Promise.all([
     getCatalogCoverage(),
     getFeedFreshness(),
@@ -162,6 +163,13 @@ export default async function AdminIndexPage() {
           here. A last-stored time also moves on every poll that wrote a record — including one that
           rewrote unchanged content — so it reports that the poll ran, not that the source changed.
         </p>
+      </Card>
+
+      <Card
+        title="Demo workspace"
+        sub="Invented shortages for a walkthrough, never mixed with real ones"
+      >
+        <SeedDemoPanel roles={principal.roles} demoMode={isDemoMode()} />
       </Card>
 
       <Card title="Administration" sub="Catalog, users, keys, tenants and the audit chain">

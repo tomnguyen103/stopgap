@@ -21,6 +21,7 @@ viewer  <  pharmacist  <  pharmacy_director  <  admin
 | `approve_protocol_version` | `pharmacy_director`| Approve / supersede a protocol version directly         |
 | `manage_alert_rules`       | `pharmacy_director`| Create and tune alert rules (who is paged, how often)   |
 | `manage_catalog`           | `admin`            | Import items, suppliers, facilities, inventory          |
+| `manage_demo_config`       | `admin`            | Seed the demo workspace (demo mode only)                |
 | `manage_users`             | `admin`            | Grant/revoke roles, disable accounts                    |
 | `manage_spend_caps`        | `admin`            | Spend-cap configuration                                 |
 | `manage_demo_config`       | `admin`            | Demo configuration                                      |

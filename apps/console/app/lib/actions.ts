@@ -31,6 +31,7 @@ import {
   assertMutationAllowed,
   isDemoMode,
   prepareDemoRun,
+  seedDemoData,
   type DemoRunResult,
 } from "@stopgap/demo";
 import {
@@ -261,6 +262,44 @@ const alertRuleSchema = z.object({
  * clinical guidance is at least as consequential as publishing it, so it is not a lesser
  * permission.
  */
+/**
+ * Seed the demo workspace (ticket 17).
+ *
+ * DELIBERATELY NOT BEHIND `assertMutationAllowed`, and it is the only action here that is not.
+ * That guard refuses every mutation while demo mode is ON, because a public visitor must not be
+ * able to change anything. This action inverts it: seeding is only legal WHEN demo mode is on,
+ * because what it writes is fiction — three invented shortages with a `demo-seed-` key — and
+ * fiction sitting beside real shortages in a pharmacist's queue is the hazard the demo seeder has
+ * always refused outside demo mode to avoid.
+ *
+ * So the check is stated here rather than inherited, with the reason a reader needs: not "you may
+ * not do that", but "this deployment is a real one, and this would put invented shortages in front
+ * of somebody making clinical decisions".
+ *
+ * Admin-gated on top of that. The seed is recognizable as fiction only to someone who knows it was
+ * seeded, so the person who put it there has to have known.
+ */
+export async function seedDemoWorkspaceAction(): Promise<{ cases: number; protocols: number }> {
+  const principal = await requireRole("manage_demo_config");
+  if (!isDemoMode()) {
+    throw new Error(
+      "This deployment is not in demo mode. Seeding would put invented shortages beside real ones.",
+    );
+  }
+  const result = await seedDemoData();
+  await recordPrivilegedAudit(
+    principal,
+    "demo.workspace_seeded",
+    { cases: result.cases, protocolsWritten: result.protocolsWritten, reseeded: result.reseeded },
+    // Keyed by DAY, not by clock: a re-seed is idempotent and re-running it twice in an afternoon
+    // is one fact about that afternoon, not two.
+    `demo.workspace_seeded.${new Date().toISOString().slice(0, 10)}`,
+  );
+  revalidatePath("/admin");
+  revalidatePath("/queue");
+  return { cases: result.cases, protocols: result.protocolsWritten };
+}
+
 export async function supersedeProtocolVersionAction(versionId: unknown): Promise<void> {
   assertMutationAllowed("Withdrawing a protocol version");
   const principal = await requireRole("approve_protocol_version");

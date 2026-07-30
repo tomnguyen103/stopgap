@@ -32,6 +32,7 @@ export const CONSOLE_ACTIONS = [
   "manage_catalog",
   "manage_users",
   "manage_api_keys",
+  "manage_demo_config",
 ] as const;
 export type ConsoleAction = (typeof CONSOLE_ACTIONS)[number];
 
@@ -62,6 +63,10 @@ export const ACTION_MIN_ROLE: Record<ConsoleAction, Role> = {
   manage_catalog: "admin",
   manage_users: "admin",
   manage_api_keys: "admin",
+  // Seeding the demo workspace writes fiction into a tenant. Admin, and never lower: the whole
+  // point of the seed is that it is obviously not real data, which only holds if the person who
+  // put it there knew that.
+  manage_demo_config: "admin",
 };
 
 /** Does `have` meet or exceed `min` in the role rank? */
