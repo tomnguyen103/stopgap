@@ -30,9 +30,9 @@ export default async function OversightPage() {
    * Says so plainly when no ladder is configured for `critical`, rather than leaving a cell that
    * reads as "nothing is owed yet" — the opposite of what an unconfigured policy means.
    */
-  const ladderFor = (hoursOpen: number) => {
+  const ladderFor = (minutesOpen: number) => {
     if (oversight.criticalLadder.length === 0) return "no ladder configured for critical";
-    const { reached, next } = ladderPosition(oversight.criticalLadder, hoursOpen * 60);
+    const { reached, next } = ladderPosition(oversight.criticalLadder, minutesOpen);
     const owed =
       reached.length === 0
         ? "no rung due yet"
@@ -117,7 +117,7 @@ export default async function OversightPage() {
                       `acknowledgments` would read "not yet escalated" for all of them however long
                       they had burned — the one reading that cannot tell the case nobody has seen
                       for ten minutes from the one nobody has seen for ten hours. */}
-                  {ladderFor(row.hoursOpen)}
+                  {ladderFor(row.minutesOpen)}
                 </td>
               </tr>
             ))}

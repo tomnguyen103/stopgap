@@ -79,6 +79,14 @@ export interface UnacknowledgedCase {
   openedAt: Date;
   /** Hours since the case opened — how long the ladder has been running with no answer. */
   hoursOpen: number;
+  /**
+   * The same span in MINUTES, because the ladder's first rungs are measured in them.
+   *
+   * Carried separately rather than derived from `hoursOpen`, which is floored for display: a case
+   * twenty minutes old is "0 hours", and a ladder reading that would report nothing owed at the
+   * moment its first rung came due.
+   */
+  minutesOpen: number;
 }
 
 /**
@@ -105,6 +113,7 @@ export async function unacknowledgedCritical(
       severity: cases.severity,
       openedAt: cases.openedAt,
       hoursOpen: sql<number>`extract(epoch from (now() - ${cases.openedAt})) / 3600`,
+      minutesOpen: sql<number>`extract(epoch from (now() - ${cases.openedAt})) / 60`,
     })
     .from(cases)
     .leftJoin(
@@ -124,7 +133,15 @@ export async function unacknowledgedCritical(
     // Oldest first: the case nobody has answered for three days is the one that matters.
     .orderBy(cases.openedAt)
     .limit(limit);
-  return rows.map((row) => ({ ...row, hoursOpen: Math.floor(Number(row.hoursOpen)) }));
+  // MINUTES ALONGSIDE HOURS, and only the hours are floored. The escalation ladder's first rungs
+  // are measured in minutes, so a case twenty minutes old floored to "0 hours" reads as nothing
+  // being owed at the exact point the first rung came due — the ladder would go quiet for the whole
+  // first hour of every critical case, which is the hour it exists for.
+  return rows.map((row) => ({
+    ...row,
+    hoursOpen: Math.floor(Number(row.hoursOpen)),
+    minutesOpen: Math.floor(Number(row.minutesOpen)),
+  }));
 }
 
 /** One page of alert history, with the rule that produced each event. */

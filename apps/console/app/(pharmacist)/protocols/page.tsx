@@ -150,9 +150,19 @@ export default async function ProtocolsPage({
                   v{comparison.from.version} → v{comparison.to.version} ·{" "}
                   {summarizeDiff(comparison.diff)}
                 </p>
-                <Table label={`Changes between v${String(comparison.from.version)} and v${String(comparison.to.version)}`} head={["Line"]}>
+                <Table
+                  label={`Changes between v${String(comparison.from.version)} and v${String(comparison.to.version)}`}
+                  head={["", "Line"]}
+                >
                   {comparison.diff.map((line, i) => (
                     <tr key={`${String(i)}:${line.text}`}>
+                      <td className="sub">
+                        {/* A symbol AND a colour, the same pair the approvals diff uses: a diff
+                            that separates added from removed by colour alone is unreadable to a
+                            reader who cannot see the difference — and this one is read to decide
+                            whether guidance changed. */}
+                        {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : ""}
+                      </td>
                       <td className={`ds-diff ds-diff--${line.kind}`}>{line.text}</td>
                     </tr>
                   ))}

@@ -27,11 +27,17 @@ function fakeDb(existing: Record<string, unknown>[]) {
   const writes: Record<string, unknown>[] = [];
   /** Every predicate handed to `.where()`, so a test can assert the pre-read is org-scoped. */
   const wheres: unknown[] = [];
+  /** Every `.for()` mode, so a test can assert the pre-read actually takes a row lock. */
+  const locks: unknown[] = [];
   const chain = (result: unknown[]) => {
     const self: Record<string, unknown> = {};
     for (const method of ["from", "returning"]) self[method] = () => self;
     self.where = (predicate: unknown) => {
       wheres.push(predicate);
+      return self;
+    };
+    self.for = (mode: unknown) => {
+      locks.push(mode);
       return self;
     };
     self.set = (values: Record<string, unknown>) => {
@@ -54,7 +60,7 @@ function fakeDb(existing: Record<string, unknown>[]) {
   // `updateAlertRule` reads and writes inside one transaction, so the fake has to offer one. It
   // hands back the same object: there is no isolation to model here, only the call shape.
   db.transaction = (fn: (tx: unknown) => unknown) => fn(db);
-  return { db: db as never, writes, wheres };
+  return { db: db as never, writes, wheres, locks };
 }
 
 /**
@@ -141,5 +147,23 @@ describe("the pre-read is scoped to the caller's tenant", () => {
     expect(wheres.length).toBeGreaterThan(0);
     expect(mentions(wheres[0], ORG)).toBe(true);
     expect(mentions(wheres[0], RULE_ID)).toBe(true);
+  });
+});
+
+describe("the pre-read locks the row it validates against", () => {
+  it("selects FOR UPDATE, so a concurrent clear cannot land between read and write", () => {
+    // Wrapping the two statements in a transaction is NOT enough on its own: under READ COMMITTED
+    // another writer can clear the webhook after this read commits its snapshot and before the
+    // update runs, and the guard would then have validated against a value that no longer exists —
+    // leaving a chat rule with no destination, which pages nobody and reports nothing.
+    const { db, locks } = fakeDb([STORED]);
+    return updateAlertRule(db, ORG, RULE_ID, {
+      name: "r",
+      minSeverity: "high",
+      cooldownMinutes: 60,
+      channels: ["chat"],
+    }).then(() => {
+      expect(locks).toContain("update");
+    });
   });
 });

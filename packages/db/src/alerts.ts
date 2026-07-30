@@ -151,7 +151,12 @@ export async function updateAlertRule(
     const [existing] = await tx
       .select({ chatWebhookUrl: alertRules.chatWebhookUrl })
       .from(alertRules)
-      .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)));
+      .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
+      // FOR UPDATE, because the transaction alone does not close the race. Under READ COMMITTED a
+      // concurrent edit can clear the webhook between this read and the write below, and the guard
+      // would then have validated against a value that no longer exists — leaving a chat rule with
+      // no destination, which pages nobody and says nothing. The lock makes the other writer wait.
+      .for("update");
     if (!existing) return undefined;
     assertRuleVocabulary(
       input,

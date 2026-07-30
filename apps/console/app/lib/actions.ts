@@ -294,12 +294,35 @@ export async function importCatalogAction(
   const parsedKind = z.enum(CATALOG_KINDS).parse(kind);
   // Bounded before it is parsed: an unbounded upload is memory the request did not ask permission
   // for, and a catalog file that large is a mistake rather than a facility.
-  const text = z.string().max(MAX_UPLOAD_BYTES).parse(csv);
+  //
+  // BYTES, not characters. `z.string().max()` counts UTF-16 code units, and the panel that checks
+  // this first measures `File.size`, which is bytes — so the two limits disagreed on any file
+  // carrying non-ASCII, which a product list with accented supplier names routinely does. The
+  // server's limit is the one that binds, so it is the one that has to mean what it says.
+  const text = z
+    .string()
+    .refine(
+      (value) => Buffer.byteLength(value, "utf8") <= MAX_UPLOAD_BYTES,
+      `catalog upload exceeds ${String(MAX_UPLOAD_BYTES)} bytes`,
+    )
+    .parse(csv);
   const digest = createHash("sha256").update(text).digest("hex").slice(0, 32);
   const plan = planImport(parsedKind, text);
   // The SAME formatter the page uses. Two copies had already drifted on their quote characters,
   // which is how a message a person is meant to act on becomes two messages.
-  if (!plan.ok) return { ok: false, errors: plan.errors.map(describeRowError) };
+  if (!plan.ok) {
+    // A REFUSAL IS STILL AN ATTEMPT. Auditing only successful imports leaves an administrator able
+    // to probe the catalog parser repeatedly with nothing in the chain to show for it, and leaves
+    // the one question an incident asks — who tried to load what, and when — unanswerable. The
+    // shape only: how many rows failed and the digest of the file, never its contents.
+    await recordPrivilegedAudit(
+      principal,
+      "catalog.import_refused",
+      { kind: parsedKind, errors: plan.errors.length, contentSha256: digest },
+      `catalog.import_refused.${parsedKind}.${digest}`,
+    );
+    return { ok: false, errors: plan.errors.map(describeRowError) };
+  }
   const result = await importCatalog(principal.orgId, plan);
   await recordPrivilegedAudit(
     principal,
