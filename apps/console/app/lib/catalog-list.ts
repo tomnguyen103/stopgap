@@ -66,13 +66,3 @@ export function describeRowError(error: {
     ? `Line ${String(error.line)}: ${error.reason}`
     : `Line ${String(error.line)}, column “${error.column}”: ${error.reason}`;
 }
-
-/**
- * What one catalog upload may weigh.
- *
- * SHARED, because it is enforced twice — in the panel so a mistake is caught before a multi-megabyte
- * round trip, and again in the server action, which is the one that actually binds. Written out in
- * both places it was one edit away from disagreeing, and the disagreement is silent: the panel would
- * accept a file the action then refuses, with the reason arriving as a zod error.
- */
-export const MAX_UPLOAD_BYTES = 8_000_000;

@@ -7,7 +7,8 @@ import { createHash } from "node:crypto";
 
 import { isRole } from "@stopgap/core";
 import { CATALOG_KINDS, planImport } from "@stopgap/catalog";
-import { describeRowError, MAX_UPLOAD_BYTES } from "./catalog-list";
+import { describeRowError } from "./catalog-list";
+import { MAX_UPLOAD_BYTES } from "./upload-limit";
 import {
   appendAudit,
   importCatalog,
