@@ -44,9 +44,15 @@ importers:
       '@stopgap/demo':
         specifier: workspace:*
         version: link:../../packages/demo
+      '@stopgap/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
       '@stopgap/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@stopgap/scorer':
+        specifier: workspace:*
+        version: link:../../packages/scorer
       '@stopgap/shadow':
         specifier: workspace:*
         version: link:../../packages/shadow
@@ -107,6 +113,19 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/node@22.20.1)(terser@5.49.0)(tsx@4.23.1)
 
+  packages/catalog:
+    dependencies:
+      '@stopgap/ingest':
+        specifier: workspace:*
+        version: link:../ingest
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@22.20.1)(terser@5.49.0)(tsx@4.23.1)
+
   packages/comms:
     dependencies:
       '@stopgap/compliance':
@@ -137,6 +156,9 @@ importers:
       '@stopgap/alerts':
         specifier: workspace:*
         version: link:../alerts
+      '@stopgap/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@stopgap/core':
         specifier: workspace:*
         version: link:../core
@@ -295,6 +317,9 @@ importers:
       '@stopgap/alerts':
         specifier: workspace:*
         version: link:../alerts
+      '@stopgap/catalog':
+        specifier: workspace:*
+        version: link:../catalog
       '@stopgap/comms':
         specifier: workspace:*
         version: link:../comms

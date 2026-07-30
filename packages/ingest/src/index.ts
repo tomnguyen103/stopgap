@@ -61,3 +61,4 @@ export {
   parseCompactDate,
   contentHash,
 } from "./normalize.js";
+export { matchHintsForRecord } from "./signal.js";

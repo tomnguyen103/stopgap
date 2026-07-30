@@ -1,5 +1,7 @@
 # 18 — Retention schedule
 
+PR batch: A
+
 **What to build:** The database stops growing without limit. Signals, snapshots and alert events accumulate on every poll; a scheduled job removes what is past its retention window, so a long-running deployment does not slowly degrade.
 
 **Blocked by:** 06, 15

@@ -38,7 +38,8 @@ const NOT_CONFIGURED_MESSAGE =
   "This MCP server is not configured. It now reaches Stopgap through the public REST API and " +
   "requires an API key: set STOPGAP_API_KEY (and STOPGAP_API_BASE_URL if the console is not at " +
   "http://localhost:3000). Issue a key from the console's /admin/api-keys page as an admin, " +
-  "ticking the scopes each tool needs — cases:read, protocols:read, protocols:write, shadow:read. " +
+  "ticking the scopes each tool needs — the page lists them, and each tool's error names the one " +
+  "it was refused for. " +
   "The key's plaintext is shown once at issue time. No key means no access: there is deliberately " +
   "no direct-database fallback.";
 

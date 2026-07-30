@@ -1,5 +1,7 @@
 # 19 — Expose signals, scores and catalog on the public API
 
+PR batch: A
+
 **What to build:** An integrator can pull risk signals, scores and catalog data out of the platform programmatically, under the same scoped-key authorization that already governs cases and protocols, and generate a client from the published description. No second authentication mechanism is introduced.
 
 **Blocked by:** 07, 15

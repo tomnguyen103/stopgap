@@ -20,6 +20,13 @@ import {
   recordAcknowledgment,
   syntheticUserIdForLabel,
   listOpenMonitoringCases,
+  matchSignalToCatalog,
+  matchSignalsToCatalog,
+  exposureFacts,
+  summarizeExposure,
+  type ExposureFacts,
+  type Db,
+  catalogExposure,
   listRoleRecipients,
   recordFeedRecords,
   dedupeByKey,
@@ -32,6 +39,11 @@ import {
   type EvidenceInput,
   type ScoreSnapshotInput,
   resetFeedMiss,
+  sweepOrgRetention,
+  totalRemoved,
+  RETAINED_FOREVER,
+  type RetentionWindows,
+  type RetentionSweepResult,
   upsertSignals,
   updateCaseStatus,
   upsertCaseForRecord,
@@ -42,6 +54,7 @@ import {
 } from "@stopgap/db";
 import { sendChat, sendEhrFlag, sendEmail } from "@stopgap/comms";
 import { incrementCounter } from "@stopgap/observability";
+import type { SignalMatch } from "@stopgap/catalog";
 import { componentsToRecord, scoreSignals, type ScorableSignal } from "@stopgap/scorer";
 import {
   evaluateAlerts,
@@ -63,6 +76,7 @@ import {
   type AshpEntry,
   type NormalizedSignal,
   type OpenFdaResult,
+  matchHintsForRecord,
 } from "@stopgap/ingest";
 import * as agents from "@stopgap/agents";
 import { makeClient, markResolved, startCase } from "./client.js";
@@ -172,7 +186,53 @@ export async function persistStatus(
 /** Impact assessment via the Zod-validated AI SDK agent (Gemini/Ollama, health-routed). */
 export async function assessImpact(input: CaseInput): Promise<ImpactResult> {
   try {
-    return await agents.assessImpact(input.record);
+    // Ticket 16 — the assessment reads THIS facility's catalog rather than a simulated formulary.
+    // Scoped to the case's own org, like every other read on this path: a shortage means something
+    // different to a hospital that stocks four presentations of the drug than to one that stocks
+    // none, and that difference is exactly what the model was previously left to guess at.
+    //
+    // A CATALOG FAILURE DEGRADES THE ASSESSMENT, IT DOES NOT LOSE THE CASE — the same stance
+    // `scoreForPoll` takes on the same read. The catalog is an enrichment: without it the model
+    // assesses the shortage on the record alone, which is exactly what it did before ticket 16.
+    // Letting the read escape would instead fail the activity, count a task failure, retry into
+    // the same unavailable table and finally park a real shortage case mid-assessment — a
+    // strictly worse outcome than an assessment that knows less about this facility's stock.
+    const catalog = await withOrgDb(input.orgId, async (db) => {
+      const matches = await matchSignalToCatalog(
+        db,
+        input.orgId,
+        matchHintsForRecord(input.record),
+      );
+      const exposure = await catalogExposure(
+        db,
+        input.orgId,
+        matches.map((m) => m.itemId),
+        new Date(),
+      );
+      return {
+        matchedItems: matches.length,
+        daysOnHand: exposure.daysOnHand,
+        supplierSiteCount: exposure.supplierSiteCount,
+        soleSourcedItems: exposure.soleSourcedItemIds.length,
+      };
+    }).catch((err: unknown) => {
+      incrementCounter("stopgap_catalog_read_failures_total", { activity: "assessImpact" });
+      console.warn(`[workflows] catalog read failed for org ${input.orgId}; assessing without it`, err);
+      // NULL, never a zeroed reading: "0 items matched" is a claim about the facility, and the
+      // model reasons from it. A read that failed knows nothing — it did not measure zero. The
+      // same reasoning then keeps `affectedFormularyItems` off the result entirely rather than
+      // publishing a fabricated 0 as a counted one.
+      //
+      // It becomes `CATALOG_UNAVAILABLE`, not `NO_CATALOG_DATA`: the latter says there is no
+      // facility behind the assessment at all, which is true of the eval corpus and false here.
+      // A failed read must not be reported to the model as "this hospital records no suppliers".
+      return null;
+    });
+    const assessment = await agents.assessImpact(input.record, catalog ?? agents.CATALOG_UNAVAILABLE);
+    return {
+      ...assessment,
+      ...(catalog === null ? {} : { affectedFormularyItems: catalog.matchedItems }),
+    };
   } catch (err) {
     // Count the throw before it propagates to Temporal's retry (PHASE6 §6.4 task-failure metric).
     // A provider outage is the common cause and is exactly what the ops dashboard should surface.
@@ -411,18 +471,57 @@ function normalizeForOrg(
 /**
  * Score each signal this poll wrote, one snapshot apiece.
  *
- * PER SIGNAL rather than per facility, deliberately and temporarily: until ticket 16 matches
- * signals to catalog items there is no item to aggregate onto, and inventing one would mean
- * guessing which signals belong together — the exact judgement the matching layer exists to make.
- * The catalog components therefore go unsupplied here, which is why every snapshot this poll
- * writes reports them as UNAVAILABLE rather than as zero.
+ * PER SIGNAL rather than per facility: each signal is matched against THIS tenant's catalog
+ * (ticket 16), and the exposure that match unlocks — days on hand, supplier sites — is what
+ * switches on the two components that were dark while the catalog slice was outstanding.
+ *
+ * A signal that matches NOTHING still scores. Its catalog components stay UNAVAILABLE rather than
+ * becoming zero, because "this facility does not stock the affected product" and "we have no
+ * catalog data" are different facts and only one of them means there is no exposure. The scorer
+ * reports the total against `reachableMax`, so a partially-scored signal is still comparable.
  */
-function scoreForPoll(
+async function scoreForPoll(
+  db: Db,
+  orgId: string,
   signals: NormalizedSignal[],
   persisted: { id: string; dedupeKey: string }[],
   evaluatedAt: string,
 ) {
   const idByKey = new Map(persisted.map((row) => [row.dedupeKey, row.id]));
+
+  // ONE match pass and ONE fact fetch for the whole batch, not one per signal. A poll writes tens
+  // of signals per tenant inside a single transaction, and a per-signal round trip would hold that
+  // transaction — and its pooled connection — open across an N+1 for work that is one query either
+  // way.
+  //
+  // A CATALOG FAILURE DEGRADES THE SCORE, IT DOES NOT LOSE THE SIGNAL. This runs inside the same
+  // transaction as `upsertSignals`, so letting the error escape would roll back signals that were
+  // written perfectly well. Scoring falls back to the no-catalog reading — components unavailable,
+  // exactly as before the catalog landed — and says so.
+  let matchesBySignal = new Map<string, SignalMatch[]>();
+  let facts: ExposureFacts = { stock: [], burn: [], links: [] };
+  try {
+    const matched = await matchSignalsToCatalog(
+      db,
+      orgId,
+      signals.map((s) => s.matchHints),
+    );
+    matchesBySignal = new Map(signals.map((s, i) => [s.dedupeKey, matched[i] ?? []]));
+    facts = await exposureFacts(
+      db,
+      orgId,
+      [...new Set(matched.flat().map((m) => m.itemId))],
+      new Date(evaluatedAt),
+    );
+  } catch (err) {
+    incrementCounter("stopgap_catalog_match_failures_total");
+    console.error(
+      `[poll] catalog matching failed for org ${orgId}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        "Signals are still written and scored; their catalog components stay unavailable.",
+    );
+  }
+
   const snapshots: ScoreSnapshotInput[] = [];
   // Collapsed again here, even though the poll now collapses its list at the source: this is an
   // exported pure function, and its correctness must not depend on a caller having done it.
@@ -441,7 +540,19 @@ function scoreForPoll(
       publishedAt: signal.publishedAt,
       sourceResolved: signal.sourceResolved,
     };
-    const result = scoreSignals({ signals: [scorable], evaluatedAt });
+    const exposure = summarizeExposure(
+      facts,
+      (matchesBySignal.get(signal.dedupeKey) ?? []).map((m) => m.itemId),
+    );
+    const result = scoreSignals({
+      signals: [scorable],
+      catalog: {
+        daysOnHand: exposure.daysOnHand,
+        supplierSiteCount: exposure.supplierSiteCount,
+        soleSourcedItemIds: exposure.soleSourcedItemIds,
+      },
+      evaluatedAt,
+    });
     snapshots.push({
       signalId,
       score: result.score,
@@ -739,7 +850,11 @@ export async function pollAndOpenCases(): Promise<{
           // ONE scoring pass, whose result is written and then handed to the alert evaluation.
           // The union of two branches had scored twice and written twice — the same snapshots,
           // in the same transaction, which the unique index would eventually have refused.
-          const snapshots = scoreForPoll(signals, persisted, pollTimestamp);
+          //
+          // Ticket 16 gives the pass the connection and the org: scoring now matches each signal
+          // against this tenant's catalog before weighting it, so it reads inside the transaction
+          // that just wrote the signals rather than being handed a pure array.
+          const snapshots = await scoreForPoll(db, org.id, signals, persisted, pollTimestamp);
           await recordScoreSnapshots(db, org.id, snapshots);
           // Ticket 09 — the durable trail behind each signal. A pointer and a fingerprint, never
           // the payload: see the table's own doc block for why a long-retention table stays free
@@ -1032,6 +1147,87 @@ export async function anchorAuditChain(): Promise<
     sink: row.sink,
   }));
 }
+
+/**
+ * Read the configured windows, translating the "never sweep this" sentinel.
+ *
+ * A NEGATIVE env value means keep forever; `retentionPlan` refuses a negative window outright, so
+ * the sentinel is converted here rather than being allowed anywhere near the cutoff arithmetic.
+ * Zero is left alone and means what it says: sweep everything older than this instant.
+ */
+function retentionWindowsFromEnv(env: ReturnType<typeof getEnv>): RetentionWindows {
+  const window = (days: number) => (days < 0 ? RETAINED_FOREVER : days);
+  return {
+    riskSignals: window(env.RETENTION_SIGNAL_DAYS),
+    riskScoreSnapshots: window(env.RETENTION_SCORE_SNAPSHOT_DAYS),
+    alertEvents: window(env.RETENTION_ALERT_EVENT_DAYS),
+    inventorySnapshots: window(env.RETENTION_INVENTORY_SNAPSHOT_DAYS),
+    procurementEvents: window(env.RETENTION_PROCUREMENT_EVENT_DAYS),
+  };
+}
+
+/**
+ * The retention sweep (ticket 18) — one run removes every organization's expired records.
+ *
+ * On the DURABLE runtime, as an activity of a scheduled workflow, because a second scheduler is a
+ * second thing that can silently stop: Temporal already reports a schedule that has not fired, and
+ * a cron entry on one host does not.
+ *
+ * ONE TENANT'S FAILURE MUST NOT STOP THE SWEEP, the same containment the poll applies. A sweep
+ * that abandoned every later organization because one hit a lock would quietly leave most of the
+ * deployment ungoverned while reporting a single error.
+ */
+export async function sweepRetention(): Promise<RetentionSweepResult[]> {
+  const env = getEnv();
+  const windows = retentionWindowsFromEnv(env);
+  const orgs = await withBypassDb(() => listOrganizations());
+  // ONE instant for the whole run, not one per org: cutoffs computed from a moving clock would
+  // make two tenants' sweeps incomparable and the run irreproducible from its own audit entries.
+  const now = new Date();
+  // Stable across retries of this activity's execution, so a retried sweep's audit entries name
+  // the same run rather than looking like a second cleanup.
+  const runToken = currentRunId() ?? now.toISOString();
+  const results: RetentionSweepResult[] = [];
+  for (const org of orgs) {
+    // One beat per tenant, for the same reason the brief activity beats per tenant: this
+    // activity's runtime scales with the organization registry, so without a heartbeat a worker
+    // that dies mid-sweep is only detected at the start-to-close bound.
+    // Guarded for the same reason `reportProgress` in `brief.ts` is: this function is also called
+    // outside a worker by its own unit tests, and `Context.current()` THROWS rather than
+    // returning undefined when no activity is running. The catch means "there is nobody to report
+    // progress to", never a swallowed heartbeat failure — a heartbeat inside a real activity does
+    // not throw.
+    try {
+      Context.current().heartbeat({ org: org.id, done: results.length, of: orgs.length });
+    } catch {
+      // Not running as a Temporal activity — no heartbeat sink exists.
+    }
+    try {
+      const result = await sweepOrgRetention(org.id, now, windows, runToken, (kind, removedSoFar) => {
+        // Per BATCH, not per tenant. One tenant's first sweep can delete for many minutes, which
+        // under a five-minute heartbeat timeout is indistinguishable from a dead worker.
+        try {
+          Context.current().heartbeat({ org: org.id, kind, removedSoFar });
+        } catch {
+          // Not running as a Temporal activity — no heartbeat sink exists.
+        }
+      });
+      results.push(result);
+      const removed = totalRemoved(result.counts);
+      if (removed > 0) console.log(`[retention] org ${org.id}: removed ${removed} rows`, result.counts);
+      incrementCounter("stopgap_retention_success_total");
+    } catch (err) {
+      incrementCounter("stopgap_retention_failures_total");
+      console.error(
+        `[retention] sweep failed for org ${org.id}: ${err instanceof Error ? err.message : String(err)}. ` +
+          "That tenant keeps its expired rows and the next scheduled run retries it; every other " +
+          "organization in this run continues.",
+      );
+    }
+  }
+  return results;
+}
+
 
 /**
  * Look up the approved protocol for this shortage key — the organizational-memory read

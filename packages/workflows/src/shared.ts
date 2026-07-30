@@ -14,6 +14,7 @@ export const SHORTAGE_CASE_WORKFLOW = "shortageCaseWorkflow";
 export const POLL_FEEDS_WORKFLOW = "pollFeedsWorkflow";
 export const ANCHOR_AUDIT_WORKFLOW = "anchorAuditWorkflow";
 export const DAILY_BRIEF_WORKFLOW = "dailyBriefWorkflow";
+export const RETENTION_SWEEP_WORKFLOW = "retentionSweepWorkflow";
 
 /** Input to a shortage case workflow: the (possibly merged) detected shortage. */
 export interface CaseInput {
@@ -91,8 +92,20 @@ export function resolveCaseOrgId(input: CaseInput, isPatched: boolean): string {
   return (input.orgId as string | undefined) ?? SEED_ORG_ID;
 }
 
-/** Result of the impact assessment activity (Zod-validated, schema owned by @stopgap/agents). */
-export type ImpactResult = ImpactAssessment;
+/**
+ * Result of the impact assessment activity (Zod-validated, schema owned by @stopgap/agents), plus
+ * the one figure the model no longer produces.
+ *
+ * `affectedFormularyItems` is COUNTED FROM THE CATALOG (ticket 16), not estimated. It sits beside
+ * the model's output rather than inside the schema so the boundary is visible in the type: what
+ * the model judged, and what the database measured.
+ *
+ * It is OPTIONAL because the catalog read can fail, and a failed read has not measured zero. The
+ * same distinction `NO_CATALOG_DATA` draws on the prompt side is drawn here on the result side:
+ * absent means "not counted", and a consumer that wants a number has to decide what to do about
+ * not knowing rather than being handed a fabricated 0 it cannot tell from a real one.
+ */
+export type ImpactResult = ImpactAssessment & { affectedFormularyItems?: number };
 
 /** Result of the alternatives research activity (Zod-validated, schema owned by @stopgap/agents). */
 export type ResearchResult = AlternativesResearch;

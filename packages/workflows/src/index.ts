@@ -14,6 +14,7 @@ export {
   pollFeedsWorkflow,
   anchorAuditWorkflow,
   dailyBriefWorkflow,
+  retentionSweepWorkflow,
   reviewSignal,
   resolvedSignal,
   exceptionResolvedSignal,
@@ -24,6 +25,7 @@ export { diffResolutions, type FeedResolutionDiff, type ResolutionEvidence } fro
 export {
   ANCHOR_AUDIT_WORKFLOW,
   DAILY_BRIEF_WORKFLOW,
+  RETENTION_SWEEP_WORKFLOW,
   POLL_FEEDS_WORKFLOW,
   SHORTAGE_CASE_WORKFLOW,
   type CaseAcknowledgment,

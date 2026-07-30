@@ -1,5 +1,7 @@
 # 04 — Browser smoke tier
 
+PR batch: B
+
 **What to build:** The behaviours that genuinely cannot be proven below a browser — signing in, landing on the right dashboard, and seeing an above-role control refused — get automated coverage. This tier is deliberately narrow: everything expressible as a pure function stays in the offline gate, because a broad browser suite that breaks on a class-name change gets disabled within a month.
 
 **Blocked by:** 03

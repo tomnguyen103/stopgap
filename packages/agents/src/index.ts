@@ -1,4 +1,4 @@
-export { assessImpact } from "./impact.js";
+export { assessImpact, NO_CATALOG_DATA, CATALOG_UNAVAILABLE, type CatalogFacts } from "./impact.js";
 export { researchAlternatives } from "./alternatives.js";
 export { draftDailyBrief, LISTED_REVIEW_CASES, type BriefInput } from "./brief.js";
 export {

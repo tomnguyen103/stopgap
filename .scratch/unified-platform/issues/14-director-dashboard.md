@@ -1,5 +1,7 @@
 # 14 — Pharmacy director dashboard
 
+PR batch: C
+
 **What to build:** The director's oversight surface. They land on governance rather than on individual cases: what is waiting for their approval, how the facility is trending, and whether the system's judgement is good enough to trust with more autonomy. Protocol versions can be approved or superseded directly. Shadow-mode agreement is shown per cohort, with promotion gates stating which criteria are met and which are not — so widening automation is a decision made from measured agreement rather than from a demonstration that went well.
 
 **Blocked by:** 03, 12, 13

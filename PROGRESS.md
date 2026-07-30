@@ -349,3 +349,44 @@ Recorded as they are made, so the reasoning survives the pull request that carri
   (#13). A false positive is only fixable if somebody can see the line that tripped it; a `reason`
   string travels into logs and metric labels, a wider audience than suspected protected information
   should reach.
+- **The public API's list endpoints speak the console's vocabulary, and therefore have no 400**
+  (#19 / ticket 19). `q/sort/dir/page/pageSize` plus declared filters, parsed through the same pure
+  module the dashboards use, so a link copied out of a dashboard means the same thing to a client.
+  That parser is TOTAL — an unusable value degrades to a default — so these operations cannot
+  refuse a query string, while the older `?limit=` endpoints validate one number and answer 400.
+  The divergence is deliberate: a filter allow-list has no honest 400 for a value from a newer
+  server's vocabulary, and refusing a forward-compatible client is worse than answering with the
+  rows it can already see. Both dialects are published in the OpenAPI document rather than left for
+  an integrator to discover.
+- **Three read scopes, not one `platform:read`** (#19). A supply-planning integration needs the
+  catalog and nothing about clinical risk; a monitoring one needs scores and never the facility's
+  stock levels. Splitting `signals:read`, `scores:read` and `catalog:read` lets a key hold the
+  narrowest scope that does its job, which is the only thing that makes a leaked key's blast radius
+  smaller than "everything the platform knows".
+- **The catalog list publishes identity and units, never quantities, suppliers or prices** (#19).
+  Those are the exposure calculation's inputs; putting them on the resource every integration reads
+  would make the narrowest scope the most sensitive one.
+- **Retention is per record KIND, and the audit chain is not a kind** (#18 / ticket 18). The kinds
+  age differently — an alert event is operational noise a week later, a procurement history is what
+  next year's burn-rate arithmetic reads — so one deployment-wide window would force the shortest
+  requirement onto the longest-lived data. The hash-chained audit log has no window at all: removing
+  an entry reclaims little and makes every later entry unverifiable while the next anchor comparison
+  reports tampering that never happened. It is absent from `RETENTION_KINDS` rather than defaulted
+  off, so no configuration can switch it on.
+- **"Keep forever" is a sentinel, never `0` days** (#18). Zero reads to the cutoff arithmetic as
+  "delete everything older than now", which is the whole table. A negative env value means keep
+  forever and is translated before it reaches the arithmetic, so the two opposite intentions are
+  never one keystroke apart.
+- **The sweep batches, one transaction per kind** (#18). A killed sweep has removed some expired
+  rows and no live ones, with nothing to resume and nothing to roll back — which is what makes
+  "an interrupted cleanup leaves the database consistent" a property rather than a hope.
+- **Signals age out on `updated_at`, not on the source's `published_at`** (#18, from local review).
+  Every poll that still lists a shortage refreshes the row, so a two-year-old shortage that is
+  still live is not swept while one the feeds stopped mentioning ages out. Sweeping on the source's
+  publication date would delete live signals and the next poll would recreate them with their miss
+  counters reset — churn that looks like retention working.
+- **Inventory and procurement rows are swept too, though the ticket names only signals, snapshots
+  and alert events** (#18). They are the other unbounded-growth tables — an inventory feed writes a
+  snapshot per item per capture — and their windows default to a year, long enough that the
+  burn-rate window (90 days) is never starved. Stated here because it is more than the ticket asked
+  for.

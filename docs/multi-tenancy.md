@@ -28,13 +28,16 @@ tenant. See "The feed poll" below.
 
 | Tenant tables (RLS enforced) | Global tables (no `org_id`) |
 | --- | --- |
-| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
+| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs`, `alert_rules`, `alert_events`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events`, `audit_anchors` (asymmetric: SELECT only — see below) | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
 
 `risk_signals` and `risk_score_snapshots` (ticket 06) are the sharpest illustration of the test.
 `feed_records` beside them is GLOBAL: one openFDA snapshot is a single physical fact about the drug
 supply, byte-identical for every hospital. A risk signal is that fact interpreted for one facility —
 its own org-scoped dedupe key, its own resolution state, its own weighting — so two hospitals
 reading the same recall genuinely disagree about the row, and it is tenant data.
+The eight catalog tables (ticket 15, migration 0020) are tenant data by the same test as the rest:
+two hospitals stocking the same drug hold different items, different suppliers, different contract
+prices and different shelves. Nothing about a facility's catalog is a shared external fact.
 
 `audit_anchors` sits between the two: migration 0014 gives it an `org_id` (so an anchor says WHOSE
 chain it pins) and RLS with a deliberately **asymmetric** policy — SELECT scoped to the tenant, and
@@ -476,17 +479,23 @@ that matters: `v1` hashes a frozen payload with no `org_id`, which is the only r
 cannot invalidate a historical entry — if it ever goes red, every deployment's history has become
 permanently unverifiable and the chain is reporting tampering that never happened.
 
+A further live suite, `packages/db/src/public-lists.e2e.test.ts` (ticket 19), covers the public API's
+read queries: two tenants holding deliberately similar signals, snapshots and items, so a missing
+`org_id` predicate surfaces as another hospital's row rather than as an empty result that reads like
+a pass. It needs the same application role as `rls.e2e.test.ts` and refuses to run under the owner.
+
 **`pnpm gate` still runs offline and still proves none of this.** Nothing in it can show that
 Postgres refuses a cross-tenant row or that `0013`/`0014` apply cleanly; the SQL was hand-verified
-and the two suites above are how you check it, against a live server, yourself.
+and the live suites in `vitest.rls.config.ts` are how you check it, against a live server, yourself.
 
 What the zero-config gate DOES prove is the layer above the database — that the application never
 ASKS for a cross-tenant row. With `withOrgDb` stubbed to record the org it was opened for:
 
 - `apps/console/app/lib/actions.test.ts` — a console action scopes its DB work and its audit append
   to the session's org;
-- `apps/console/app/api/v1/cases/route.test.ts` and `apps/console/app/lib/api-auth.test.ts` — a REST
-  route scopes to the KEY's org and ignores every org-shaped query parameter and header;
+- `apps/console/app/api/v1/cases/route.test.ts`, `apps/console/app/api/v1/signals/route.test.ts` and
+  `apps/console/app/lib/api-auth.test.ts` — a REST route scopes to the KEY's org and ignores every
+  org-shaped query parameter and header;
 - `packages/workflows/src/activities.tenancy.test.ts` — a workflow activity scopes to
   `CaseInput.orgId`, and the feed poll fetches once and opens one case per organization;
 - `apps/console/app/lib/principal.test.ts` — the four tenant-resolution outcomes (own org, cookie

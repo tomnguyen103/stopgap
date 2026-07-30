@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessImpact } from "./impact.js";
+import { assessImpact, NO_CATALOG_DATA } from "./impact.js";
 import { researchAlternatives } from "./alternatives.js";
 import { GOLDEN_DATASET, evalSubset, severityMeetsFloor, severityWithinCeiling } from "./golden-dataset.js";
 
@@ -35,7 +35,7 @@ describe(`golden dataset eval (live Ollama, ${CASES.length}/${GOLDEN_DATASET.len
   for (const goldenCase of CASES) {
     it(`${goldenCase.id}: severity >= ${goldenCase.expected.severityAtLeast}, alternative expected = ${goldenCase.expected.hasAlternative}`, async () => {
       const severityOk = await majorityVote(3, async () => {
-        const impact = await assessImpact(goldenCase.record);
+        const impact = await assessImpact(goldenCase.record, NO_CATALOG_DATA);
         const floorOk = severityMeetsFloor(impact.severity, goldenCase.expected.severityAtLeast);
         const ceilingOk = goldenCase.expected.severityAtMost
           ? severityWithinCeiling(impact.severity, goldenCase.expected.severityAtMost)

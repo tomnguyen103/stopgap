@@ -152,6 +152,30 @@ export {
   type ScoreSnapshotInput,
   type EvidenceInput,
 } from "./signals.js";
+export { importCatalog, RefusedImportError, type ImportResult } from "./catalog.js";
+export {
+  listSignalsPageForApi,
+  getSignalForApi,
+  listScoresPage,
+  listCatalogItemsPage,
+  type Page,
+  type PagedListOptions,
+  type SignalListRow,
+  type ScoreListRow,
+  type CatalogItemListRow,
+} from "./public-lists.js";
+export {
+  retentionPlan,
+  sweepOrgRetention,
+  totalRemoved,
+  RETENTION_KINDS,
+  RETENTION_BATCH_SIZE,
+  RETAINED_FOREVER,
+  type RetentionKind,
+  type RetentionWindows,
+  type RetentionCounts,
+  type RetentionSweepResult,
+} from "./retention.js";
 export type {
   OrganizationRow,
   NewOrganizationRow,
@@ -178,3 +202,13 @@ export type {
   NewShadowRunRow,
   DailyBriefRow,
 } from "./schema.js";
+export {
+  BURN_WINDOW_DAYS,
+  catalogExposure,
+  exposureFacts,
+  matchSignalToCatalog,
+  matchSignalsToCatalog,
+  summarizeExposure,
+  type CatalogExposureReading,
+  type ExposureFacts,
+} from "./matching.js";

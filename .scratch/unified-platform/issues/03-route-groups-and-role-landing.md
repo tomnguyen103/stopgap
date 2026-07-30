@@ -1,5 +1,7 @@
 # 03 — Route groups and per-role landing
 
+PR batch: B
+
 **What to build:** Each role gets its own dashboard. After signing in, a pharmacist lands on the pharmacist surface, a director on theirs, an admin on theirs — each with its own navigation — rather than everyone arriving at the same list. The anonymous demo visitor reaches the viewer surface, which makes the public demo and the lowest-privilege dashboard one thing to maintain rather than two.
 
 The pure role-to-landing-route resolution and the pure list-state module already exist and are unit-tested; this ticket consumes them rather than reimplementing either.
