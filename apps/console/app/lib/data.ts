@@ -1,4 +1,5 @@
 import "server-only";
+import type { EscalationStep } from "@stopgap/workflows";
 import {
   feedFreshness,
   browseCatalog,
@@ -11,6 +12,7 @@ import {
   lastFiredByRule,
   listAlertRules,
   unacknowledgedCritical,
+  getEscalationPolicy,
   getDb,
   getKpis,
   getSignalByKey,
@@ -436,6 +438,12 @@ export interface OversightData {
   kpis: Kpis;
   trend: DailyCount[];
   unacknowledged: UnacknowledgedCase[];
+  /**
+   * The critical severity's escalation ladder, so the unacknowledged list can say who the policy
+   * has already called for. Empty when no ladder is configured, which the page states rather than
+   * rendering an implied one.
+   */
+  criticalLadder: EscalationStep[];
   spend: DailySpend;
   pendingVersions: {
     protocol: ProtocolRow;
@@ -448,11 +456,13 @@ export interface OversightData {
 export async function getOversight(): Promise<OversightData> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, async (db) => {
-    const [kpis, trend, unacknowledged, spend] = await Promise.all([
+    const [kpis, trend, unacknowledged, spend, criticalPolicy] = await Promise.all([
       getKpis(orgId, db),
       dailyCounts(db, orgId),
       unacknowledgedCritical(db, orgId),
       getLlmSpend(db),
+      // One read for the whole list: the ladder is per SEVERITY, and every row here is critical.
+      getEscalationPolicy(db, "critical"),
     ]);
     // Drafted versions waiting on a director, each paired with the approved text it would replace
     // — which is what makes "what changed" answerable without a second round trip per row.
@@ -493,6 +503,7 @@ export async function getOversight(): Promise<OversightData> {
       trend,
       unacknowledged,
       spend,
+      criticalLadder: criticalPolicy?.steps ?? [],
       pendingVersions: rows.map((row) => {
         const previous = approvedByProtocol.get(row.protocol.id);
         return {

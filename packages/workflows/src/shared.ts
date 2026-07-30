@@ -193,6 +193,36 @@ export interface EscalationStep {
   notify: string;
 }
 
+/** Where a case sits on its severity's escalation ladder, by elapsed time alone. */
+export interface LadderPosition {
+  /** Every rung whose delay has already passed — who the policy says should have been told. */
+  reached: EscalationStep[];
+  /** The next rung not yet due, or null once the ladder is exhausted. */
+  next: EscalationStep | null;
+}
+
+/**
+ * How far up the ladder a case has climbed after `minutesOpen`.
+ *
+ * TIME, NOT ACKNOWLEDGMENTS. The director's unacknowledged-critical list is an anti-join — every
+ * row on it has no acknowledgment by construction — so a tier read from `acknowledgments` would say
+ * "not yet escalated" for every case however long it had been burning. What the ladder can honestly
+ * say is who the POLICY has already called for, which is the number that makes an unanswered case
+ * actionable: not merely "nobody has acknowledged", but "nobody has acknowledged and this should
+ * have reached the medical director two hours ago".
+ *
+ * Steps are sorted here rather than trusted: `escalation_policies.steps` is jsonb, so nothing in
+ * the database enforces their order, and an out-of-order rung would silently truncate `reached`.
+ */
+export function ladderPosition(
+  steps: readonly EscalationStep[],
+  minutesOpen: number,
+): LadderPosition {
+  const ordered = [...steps].sort((a, b) => a.afterMinutes - b.afterMinutes);
+  const reached = ordered.filter((step) => minutesOpen >= step.afterMinutes);
+  return { reached, next: ordered[reached.length] ?? null };
+}
+
 /** Max time a case may sit unresolved before it auto-escalates to the exception queue. */
 export const MAX_MONITORING = "90 days";
 export const MAX_MONITORING_MS = 90 * 24 * 60 * 60 * 1000;

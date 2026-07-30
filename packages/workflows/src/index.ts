@@ -31,6 +31,8 @@ export {
   type CaseState,
   type EscalationEvent,
   type EscalationStep,
+  type LadderPosition,
+  ladderPosition,
   type ReviewDecision,
   type ExceptionResolution,
   type ImpactResult,
