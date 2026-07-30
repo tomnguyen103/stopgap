@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getEnv } from "@stopgap/core";
+import { ladderPosition } from "@stopgap/workflows";
 
 import { Badge, Card, Table } from "../../components/ui";
 import { TrendChart } from "../../components/trend-chart";
@@ -23,6 +24,21 @@ export const dynamic = "force-dynamic";
 export default async function OversightPage() {
   await requireGroup("pharmacy_director");
   const [oversight, shadow] = await Promise.all([getOversight(), getShadowDashboard()]);
+  /**
+   * The rungs elapsed time has already passed, as a sentence.
+   *
+   * Says so plainly when no ladder is configured for `critical`, rather than leaving a cell that
+   * reads as "nothing is owed yet" — the opposite of what an unconfigured policy means.
+   */
+  const ladderFor = (hoursOpen: number) => {
+    if (oversight.criticalLadder.length === 0) return "no ladder configured for critical";
+    const { reached, next } = ladderPosition(oversight.criticalLadder, hoursOpen * 60);
+    const owed =
+      reached.length === 0
+        ? "no rung due yet"
+        : `${reached.map((step) => step.notify).join(", ")} should know`;
+    return next === null ? `${owed} · ladder exhausted` : `${owed} · next ${next.notify}`;
+  };
   const cap = getEnv().LLM_DAILY_USD_CAP;
 
   return (
@@ -79,7 +95,7 @@ export default async function OversightPage() {
         ) : (
           <Table
             label="Critical cases with no acknowledgment"
-            head={["Case", "Opened", "Unanswered for"]}
+            head={["Case", "Opened", "Unanswered for", "Ladder reached"]}
           >
             {oversight.unacknowledged.map((row) => (
               <tr key={row.id}>
@@ -94,6 +110,14 @@ export default async function OversightPage() {
                   {row.hoursOpen < 24
                     ? `${String(row.hoursOpen)} hour${row.hoursOpen === 1 ? "" : "s"}`
                     : `${String(Math.floor(row.hoursOpen / 24))} day${row.hoursOpen < 48 ? "" : "s"}`}
+                </td>
+                <td className="sub">
+                  {/* WHO THE POLICY HAS ALREADY CALLED FOR, read from elapsed time. Every row here
+                      comes off an anti-join and has no acknowledgment at all, so a tier taken from
+                      `acknowledgments` would read "not yet escalated" for all of them however long
+                      they had burned — the one reading that cannot tell the case nobody has seen
+                      for ten minutes from the one nobody has seen for ten hours. */}
+                  {ladderFor(row.hoursOpen)}
                 </td>
               </tr>
             ))}
@@ -156,9 +180,25 @@ export default async function OversightPage() {
                   <Badge tone="status">{decision.stage}</Badge>
                 </td>
                 <td className="sub">
-                  {/* The criteria NOT met, named. "Not promoted" without the reason is a verdict a
-                      director cannot act on. */}
-                  {decision.blockedBy.length === 0 ? "every gate met" : decision.blockedBy.join("; ")}
+                  {/* EVERY gate for the stage this class is working towards, met and unmet alike,
+                      with the reading behind each. Naming only the failures answers "why not yet"
+                      and nothing else: a class one gate short reads the same as one that is four
+                      short, and a class that has just cleared its hardest gate looks no different
+                      from one that never had it. The two questions a director actually has are how
+                      close this is and which gate to work on, and both need the passes visible. */}
+                  {decision.criteria.length === 0 ? (
+                    "at the top stage — no further gates"
+                  ) : (
+                    <ul className="ds-gates">
+                      {decision.criteria.map((c) => (
+                        <li key={c.label} data-met={c.met ? "yes" : "no"}>
+                          <span aria-hidden="true">{c.met ? "✓" : "✗"}</span>{" "}
+                          <span className="ds-sr-only">{c.met ? "met:" : "not met:"}</span>
+                          {c.label} {c.actual} ({c.required})
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </td>
               </tr>
             ))}
