@@ -35,7 +35,8 @@ test.describe("an above-role control", () => {
     // fixture data changed, and the tier would still report green.
     await expect(
       approve,
-      "the auth tier needs at least one DRAFTED protocol version to gate — seed one",
+      "the auth tier needs at least one DRAFTED protocol version to gate — `pnpm test:browser` " +
+        "writes one first (`pnpm test:browser:seed`); running playwright directly skips that",
     ).not.toHaveCount(0);
     const first = approve.first();
 

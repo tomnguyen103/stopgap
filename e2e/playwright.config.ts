@@ -20,9 +20,15 @@ import { defineConfig, devices } from "@playwright/test";
  *
  *   pnpm infra:up && pnpm exec playwright install chromium
  *   pnpm console                                  # auth wired, demo off
- *   pnpm test:browser
+ *   pnpm test:browser                             # seeds its fixture first, then runs
  *   STOPGAP_DEMO_MODE=on pnpm console             # demo on
  *   pnpm test:browser:demo
+ *
+ * THE AUTH TIER SEEDS ITS OWN PRECONDITION. `pnpm test:browser` runs `test:browser:seed` before
+ * Playwright: the above-role assertion needs a DRAFTED protocol version to gate on, and the demo
+ * seeder cannot supply one because it refuses to run outside demo mode — which is exactly the mode
+ * this half of the tier does not use. Invoking `playwright test` directly skips the seed, and on a
+ * fresh database that spec then fails rather than skips, by design.
  */
 export default defineConfig({
   testDir: ".",

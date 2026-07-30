@@ -12,7 +12,8 @@
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "push": "drizzle-kit push",
-    "verify-audit": "tsx src/scripts/verify-audit.ts"
+    "verify-audit": "tsx src/scripts/verify-audit.ts",
+    "seed-browser-fixture": "tsx src/scripts/seed-browser-fixture.ts"
   },
   "dependencies": {
     "@stopgap/core": "workspace:*",
