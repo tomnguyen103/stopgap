@@ -161,11 +161,20 @@ async function recordPrivilegedAudit(
   action: string,
   detail: Record<string, unknown>,
   eventKey: string,
+  /**
+   * An OPEN tenant transaction to append inside, when the caller has one.
+   *
+   * Without it this opens its own, and the write it records has already committed — so an audit
+   * failure leaves the action done and unrecorded, which for withdrawing live clinical guidance is
+   * the one combination that must not happen. Passing the transaction makes the entry and the
+   * change succeed or fail together.
+   */
+  tx?: Parameters<Parameters<typeof withOrgDb>[1]>[0],
 ): Promise<void> {
   // The org the caller is ACTING IN, which for an admin using the active-org switch is the tenant
   // they switched to, not their home org. That is the point of recording it: the chain has to say
   // which hospital an action happened in, and for a deployment admin those two can differ.
-  await withOrgDb(principal.orgId, (db) =>
+  const append = (db: Parameters<Parameters<typeof withOrgDb>[1]>[0]) =>
     appendAudit(db, {
       orgId: principal.orgId,
       actor: principal.label,
@@ -173,8 +182,12 @@ async function recordPrivilegedAudit(
       action,
       detail: { ...detail, identitySource: "authenticated-session" },
       eventKey,
-    }),
-  );
+    });
+  if (tx) {
+    await append(tx);
+    return;
+  }
+  await withOrgDb(principal.orgId, append);
 }
 
 /**
@@ -188,21 +201,31 @@ export async function approveProtocolVersionAction(versionId: unknown): Promise<
   assertMutationAllowed("Approving a protocol version");
   const principal = await requireRole("approve_protocol_version");
   const id = z.string().uuid().parse(versionId);
-  const { row, changed } = await withOrgDb(principal.orgId, (db) =>
-    approveProtocolVersion(principal.orgId, id, principal.label, principal.userId ?? undefined, db),
-  );
-  // Skip the audit entry when the version was already approved (no-op): recording it would put a
-  // second "approved" claim into the chain for an approval that did not happen.
-  if (changed) {
-    await recordPrivilegedAudit(
-      principal,
-      "protocol.version_approved",
-      { versionId: id, version: row.version, via: "director-approval" },
-      // Keyed by version id so it never collides with the workflow's own
-      // `protocol.version_approved.v<n>` entries (which are keyed by case run + version).
-      `protocol.version_approved.direct.${id}`,
+  // ONE TRANSACTION over the change and its audit entry. Opened separately, the approval commits
+  // first and an audit failure leaves it recorded nowhere — the chain's job is to have no holes,
+  // and a hole exactly where a director approved clinical guidance is the worst one available.
+  await withOrgDb(principal.orgId, async (db) => {
+    const { row, changed } = await approveProtocolVersion(
+      principal.orgId,
+      id,
+      principal.label,
+      principal.userId ?? undefined,
+      db,
     );
-  }
+    // Skip the audit entry when the version was already approved (no-op): recording it would put a
+    // second "approved" claim into the chain for an approval that did not happen.
+    if (changed) {
+      await recordPrivilegedAudit(
+        principal,
+        "protocol.version_approved",
+        { versionId: id, version: row.version, via: "director-approval" },
+        // Keyed by version id so it never collides with the workflow's own
+        // `protocol.version_approved.v<n>` entries (which are keyed by case run + version).
+        `protocol.version_approved.direct.${id}`,
+        db,
+      );
+    }
+  });
   revalidatePath("/protocols");
 }
 
@@ -242,19 +265,29 @@ export async function supersedeProtocolVersionAction(versionId: unknown): Promis
   assertMutationAllowed("Withdrawing a protocol version");
   const principal = await requireRole("approve_protocol_version");
   const id = z.string().uuid().parse(versionId);
-  const { row, changed } = await withOrgDb(principal.orgId, (db) =>
-    supersedeProtocolVersion(principal.orgId, id, principal.label, principal.userId ?? undefined, db),
-  );
-  // Nothing to record when it was already withdrawn: a second entry would claim a withdrawal that
-  // did not happen, the same reason approval skips its own no-op.
-  if (changed) {
-    await recordPrivilegedAudit(
-      principal,
-      "protocol.version_withdrawn",
-      { versionId: id, version: row.version },
-      `protocol.version_withdrawn.${id}`,
+  // ONE TRANSACTION over the withdrawal and its audit entry, for the reason above and more sharply
+  // here: this takes live guidance off the floor, and a withdrawal nobody can account for is worse
+  // than one that failed outright.
+  await withOrgDb(principal.orgId, async (db) => {
+    const { row, changed } = await supersedeProtocolVersion(
+      principal.orgId,
+      id,
+      principal.label,
+      principal.userId ?? undefined,
+      db,
     );
-  }
+    // Nothing to record when it was already withdrawn: a second entry would claim a withdrawal that
+    // did not happen, the same reason approval skips its own no-op.
+    if (changed) {
+      await recordPrivilegedAudit(
+        principal,
+        "protocol.version_withdrawn",
+        { versionId: id, version: row.version },
+        `protocol.version_withdrawn.${id}`,
+        db,
+      );
+    }
+  });
   revalidatePath("/protocols");
   revalidatePath("/approvals");
   revalidatePath("/oversight");
