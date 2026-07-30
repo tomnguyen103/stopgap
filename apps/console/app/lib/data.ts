@@ -382,19 +382,32 @@ export async function getCaseEvidence(genericName: string): Promise<{
 }> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, async (db) => {
+    // ONE ROW PER SIGNAL, its LATEST snapshot — the same `distinct on` the queue's `rankedOpenCases`
+    // ranks by. Joining the snapshot table directly would put every historical score in the sort and
+    // let a signal's old peak outrank another signal's current one, so the evidence card would name
+    // a signal the queue did not rank the case on: the page contradicting itself, which is exactly
+    // what ordering by the ranked score is here to prevent.
+    const latestSnapshot = db
+      .selectDistinctOn([schema.riskScoreSnapshots.signalId], {
+        signalId: schema.riskScoreSnapshots.signalId,
+        score: schema.riskScoreSnapshots.score,
+        reachableMax: schema.riskScoreSnapshots.reachableMax,
+      })
+      .from(schema.riskScoreSnapshots)
+      .where(eq(schema.riskScoreSnapshots.orgId, orgId))
+      .orderBy(
+        schema.riskScoreSnapshots.signalId,
+        desc(schema.riskScoreSnapshots.computedAt),
+        // `id` last, so two snapshots computed in the same instant resolve to a stable one.
+        desc(schema.riskScoreSnapshots.id),
+      )
+      .as("latest_snapshot");
     // The signal the RANK came from — highest latest score first, newest publication only as the
-    // tiebreak. Picking the newest signal instead would let the evidence card name one signal
-    // while the queue ranked the case on another, which reads as the page contradicting itself.
+    // tiebreak.
     const [signal] = await db
       .select({ signal: schema.riskSignals })
       .from(schema.riskSignals)
-      .leftJoin(
-        schema.riskScoreSnapshots,
-        and(
-          eq(schema.riskScoreSnapshots.orgId, orgId),
-          eq(schema.riskScoreSnapshots.signalId, schema.riskSignals.id),
-        ),
-      )
+      .leftJoin(latestSnapshot, eq(latestSnapshot.signalId, schema.riskSignals.id))
       .where(
         and(
           eq(schema.riskSignals.orgId, orgId),
@@ -402,7 +415,7 @@ export async function getCaseEvidence(genericName: string): Promise<{
         ),
       )
       .orderBy(
-        sql`${schema.riskScoreSnapshots.score} / nullif(${schema.riskScoreSnapshots.reachableMax}, 0) desc nulls last`,
+        sql`${latestSnapshot.score} / nullif(${latestSnapshot.reachableMax}, 0) desc nulls last`,
         desc(schema.riskSignals.publishedAt),
       )
       .limit(1)

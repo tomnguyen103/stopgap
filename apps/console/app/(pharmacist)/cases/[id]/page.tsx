@@ -4,9 +4,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isDemoMode } from "@stopgap/demo";
 import { describeViolations, screenContent } from "@stopgap/compliance";
-import { isActionAllowed } from "../../../lib/authz";
+import { ACTION_MIN_ROLE, isActionAllowed } from "../../../lib/authz";
 import { confidenceLabel, unavailableReason } from "../../../lib/case-queue";
 import { getCaseDetail, getCaseEvidence, getWorkflowState } from "../../../lib/data";
+import { formatUtc } from "../../../lib/format";
 import { EvidenceDrawer } from "./evidence-drawer";
 import { resolvePrincipal } from "../../../lib/principal";
 import { EscalationPanel } from "./escalation-panel";
@@ -89,11 +90,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           <dt>Last note</dt>
           <dd>{c.lastNote ?? "—"}</dd>
           <dt>Opened</dt>
-          <dd>{new Date(c.openedAt).toLocaleString()}</dd>
+          <dd>{formatUtc(c.openedAt)}</dd>
           {c.closedAt ? (
             <>
               <dt>Closed</dt>
-              <dd>{new Date(c.closedAt).toLocaleString()}</dd>
+              <dd>{formatUtc(c.closedAt)}</dd>
             </>
           ) : null}
         </dl>
@@ -153,9 +154,18 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
           confidence={confidence}
           // Demo mode refuses every decision server-side. The controls RENDER, disabled, naming why
           // — a visitor should see the gate that exists rather than a page with no gate at all.
+          //
+          // The action asked about is the one this panel will actually SUBMIT: an exception case
+          // resolves through `resolveExceptionCase`, everything else reviews through `reviewCase`.
+          // Both require `pharmacist` today, so this changes no rendering — it stops the label from
+          // going quietly stale the day the two minimums diverge, which is the whole failure mode
+          // this courtesy label exists to prevent.
           unavailableReason={unavailableReason(
-            isActionAllowed(principal.roles, "review_case"),
-            "pharmacist",
+            isActionAllowed(
+              principal.roles,
+              live.status === "exception" ? "resolve_exception" : "review_case",
+            ),
+            ACTION_MIN_ROLE[live.status === "exception" ? "resolve_exception" : "review_case"],
             isDemoMode(),
           )}
         />
@@ -226,7 +236,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         <ol className="audit">
           {audit.map((a) => (
             <li key={a.id}>
-              <b>{a.action}</b> · {a.actor} · {new Date(a.ts).toLocaleString()} ·{" "}
+              <b>{a.action}</b> · {a.actor} · {formatUtc(a.ts)} ·{" "}
               <span title={a.hash}>{a.hash.slice(0, 10)}…</span>
             </li>
           ))}

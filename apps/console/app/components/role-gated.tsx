@@ -46,7 +46,19 @@ export function RoleGatedButton({
       aria-disabled={!allowed || undefined}
       title={allowed ? undefined : reason}
       aria-label={allowed ? undefined : label}
-      onClick={allowed ? onClick : undefined}
+      // Dropping the handler is not enough to refuse the control. `Button` renders a bare
+      // `<button>`, which inside a form is `type="submit"` by default, so a denied button still
+      // submits the form it sits in — by click and by Enter on focus. `aria-disabled` refuses it to
+      // assistive tech but, unlike `disabled`, does not stop the native action. Cancelling the
+      // event does, and keeps the control in the tab order where the reason can still be read.
+      onClick={
+        allowed
+          ? onClick
+          : (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+      }
     >
       {children}
       {allowed ? null : <span className="sub"> · {reason.toLowerCase()}</span>}

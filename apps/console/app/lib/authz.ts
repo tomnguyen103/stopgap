@@ -148,15 +148,35 @@ export type DashboardGroup = (typeof DASHBOARD_GROUPS)[number];
  * replace. Typing the URL is the deliberate cost.
  */
 export function canViewGroup(roles: readonly Role[], group: DashboardGroup): boolean {
-  let best = RANK.viewer;
+  let best: number | undefined;
   for (const role of roles) {
     const rank = RANK[role];
     // An unknown role is skipped rather than thrown on, for the reason `roleLandingRoute` gives:
     // an IdP may legitimately present a realm role this build has never heard of.
-    if (rank !== undefined && rank > best) best = rank;
+    if (rank !== undefined && (best === undefined || rank > best)) best = rank;
   }
+  // NO RECOGNIZED ROLE IS NOT THE LOWEST ROLE. Starting this at `viewer` admitted an empty role set
+  // — and an empty set is exactly what a realm whose Stopgap client mapper is missing produces, so
+  // the default was handing tenant viewer data to anyone the IdP would authenticate. The anonymous
+  // demo path is unaffected: `resolvePrincipal` gives that caller the real `viewer` role, not none.
+  if (best === undefined) return false;
   return best >= RANK[group];
 }
+
+/**
+ * Does this caller hold any role this build recognizes?
+ *
+ * The question `canViewGroup` cannot answer on its own: it returns false both for "your role is too
+ * low for THIS group" and for "you have no role at all", and those need different destinations. The
+ * first redirects to the caller's own dashboard; the second has no dashboard to go to, and sending
+ * it to one loops — the guard there refuses it again.
+ */
+export function hasRecognizedRole(roles: readonly Role[]): boolean {
+  return roles.some((role) => RANK[role] !== undefined);
+}
+
+/** Where a caller with no recognized role goes. Outside every dashboard group, so it cannot loop. */
+export const ACCESS_DENIED_ROUTE = "/access-denied";
 
 /** Thrown when a caller lacks the role an action requires. The server action surfaces it. */
 export class AuthorizationError extends Error {

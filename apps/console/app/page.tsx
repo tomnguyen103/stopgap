@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { roleLandingRoute } from "./lib/authz";
+import { ACCESS_DENIED_ROUTE, hasRecognizedRole, roleLandingRoute } from "./lib/authz";
 import { resolvePrincipal } from "./lib/principal";
 
 export const dynamic = "force-dynamic";
@@ -15,11 +15,16 @@ export const dynamic = "force-dynamic";
  * unit-tested — the HIGHEST role wins, mirroring `rolesAllow`'s "any role may satisfy" rule so
  * routing and permission cannot disagree about which role a multi-role user effectively holds.
  *
- * TOTAL, so this cannot loop: a caller with no roles at all — the anonymous demo visitor — resolves
- * to `viewer`, whose landing route is `/overview`, and the viewer group admits every role. So the
- * one redirect lands somewhere the guard will not bounce them out of again.
+ * TOTAL, so this cannot loop: the anonymous demo visitor holds the real `viewer` role, whose landing
+ * route is `/overview`, and the viewer group admits every role. So the one redirect lands somewhere
+ * the guard will not bounce them out of again.
+ *
+ * The exception is a caller the IdP authenticated but granted NO recognized role — a realm missing
+ * its Stopgap client mapper. They have no dashboard, so they get the access-denied route instead of
+ * a landing route the group guard would immediately refuse them, which is the loop.
  */
 export default async function RootPage() {
   const principal = await resolvePrincipal();
+  if (!hasRecognizedRole(principal.roles)) redirect(ACCESS_DENIED_ROUTE);
   redirect(roleLandingRoute(principal.roles));
 }

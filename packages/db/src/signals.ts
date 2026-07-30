@@ -298,7 +298,12 @@ export async function listSignalsPage(
   // The count comes FIRST so the page can be clamped to it. `?page=500` on a three-page list is
   // in range as far as the parser is concerned — it bounds the offset, and only the count knows
   // where the rows stop. Unclamped it renders an empty table headed "Page 500 of 3".
-  const page = Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize)));
+  // Floor as well as ceiling, for the reason `listCaseQueue` spells out: this function is exported,
+  // and a zero or negative page reaches OFFSET as a negative number and throws.
+  const page = Math.max(
+    1,
+    Math.min(options.page, Math.max(1, Math.ceil(total / options.pageSize))),
+  );
   const rows = await db
     .select()
     .from(riskSignals)

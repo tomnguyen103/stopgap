@@ -27,6 +27,8 @@ const {
   roleSatisfies,
   roleLandingRoute,
   canViewGroup,
+  hasRecognizedRole,
+  ACCESS_DENIED_ROUTE,
   DASHBOARD_GROUPS,
   ROLE_LANDING_ROUTE,
 } = await import("./authz");
@@ -251,8 +253,21 @@ describe("canViewGroup", () => {
   });
 
   it("lets the anonymous visitor reach the viewer surface, and nothing above it", () => {
-    expect(canViewGroup([], "viewer")).toBe(true);
-    expect(canViewGroup([], "pharmacist")).toBe(false);
+    // The anonymous visitor is not a caller with NO roles: `resolvePrincipal` hands them the real
+    // `viewer` role. That distinction is the whole of the next test.
+    expect(canViewGroup(["viewer"], "viewer")).toBe(true);
+    expect(canViewGroup(["viewer"], "pharmacist")).toBe(false);
+  });
+
+  it("refuses a caller with no recognized role, rather than treating them as a viewer", () => {
+    // An empty or unknown-only role set is what a realm missing its Stopgap client mapper produces.
+    // Admitting it to the viewer group would hand that tenant's data to anyone the IdP would
+    // authenticate, so "no recognized role" is refused everywhere — including the lowest group.
+    expect(canViewGroup([], "viewer")).toBe(false);
+    expect(canViewGroup(["not_a_role"] as unknown as Role[], "viewer")).toBe(false);
+    expect(hasRecognizedRole([])).toBe(false);
+    expect(hasRecognizedRole(["not_a_role"] as unknown as Role[])).toBe(false);
+    expect(hasRecognizedRole(["viewer"])).toBe(true);
   });
 
   it("skips a role this build does not know rather than throwing", () => {
@@ -277,6 +292,10 @@ describe("canViewGroup", () => {
       expect(owner).toBeDefined();
       expect(canViewGroup([group], owner!)).toBe(true);
     }
-    expect(canViewGroup([], "viewer")).toBe(true);
+    // A caller with no recognized role is the one case with no landing route that would hold: every
+    // group refuses them, so `/` and the group guard send them to `ACCESS_DENIED_ROUTE` instead.
+    // That route is outside every group, which is what makes the redirect terminate.
+    expect(hasRecognizedRole([])).toBe(false);
+    expect(DASHBOARD_GROUPS.some((g) => ROLE_LANDING_ROUTE[g] === ACCESS_DENIED_ROUTE)).toBe(false);
   });
 });

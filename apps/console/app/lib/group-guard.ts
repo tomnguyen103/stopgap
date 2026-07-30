@@ -1,6 +1,12 @@
 import "server-only";
 import { redirect } from "next/navigation";
-import { canViewGroup, roleLandingRoute, type DashboardGroup } from "./authz";
+import {
+  ACCESS_DENIED_ROUTE,
+  canViewGroup,
+  hasRecognizedRole,
+  roleLandingRoute,
+  type DashboardGroup,
+} from "./authz";
 import { resolvePrincipal } from "./principal";
 
 /**
@@ -22,6 +28,9 @@ export async function requireGroup(
   group: DashboardGroup,
 ): Promise<Awaited<ReturnType<typeof resolvePrincipal>>> {
   const principal = await resolvePrincipal();
+  // Checked BEFORE the group rule, because the two failures need different destinations: a caller
+  // with no recognized role has no landing route to be sent to, and sending them to one loops.
+  if (!hasRecognizedRole(principal.roles)) redirect(ACCESS_DENIED_ROUTE);
   if (!canViewGroup(principal.roles, group)) redirect(roleLandingRoute(principal.roles));
   return principal;
 }
