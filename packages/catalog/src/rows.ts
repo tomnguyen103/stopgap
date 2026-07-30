@@ -75,12 +75,46 @@ const optionalNumber = (label: string) =>
     .transform((v) => (v === "" ? undefined : Number(v)))
     .refine((n) => n === undefined || Number.isFinite(n), `${label} must be a number`);
 
-/** An ISO date or datetime. Kept as an ISO string; the write layer owns the timestamp column. */
+/**
+ * An ISO date or a TIMEZONE-QUALIFIED datetime. Kept as an ISO string; the write layer owns the
+ * timestamp column.
+ *
+ * The shape is checked before `Date.parse`, not left to it. `Date.parse` accepts far more than
+ * ISO-8601 — `07/01/2026` parses US-style, `Jan 5 2026` parses — so a European procurement export
+ * would land as a confidently wrong date rather than as a rejected cell. It also resolves a bare
+ * `2026-07-01T08:00:00` in the SERVER's zone, which makes the same file mean different instants on
+ * two deployments; a date-only value is unambiguous by convention (UTC midnight), but a datetime
+ * has to say which zone it is in.
+ */
+const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DATETIME_QUALIFIED = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/i;
+
 const isoDate = (label: string) =>
   z
     .string()
     .trim()
-    .refine((v) => v !== "" && !Number.isNaN(Date.parse(v)), `${label} must be an ISO date`)
+    .refine(
+      (v) => ISO_DATE_ONLY.test(v) || ISO_DATETIME_QUALIFIED.test(v),
+      `${label} must be an ISO date (YYYY-MM-DD) or a datetime carrying a timezone`,
+    )
+    // Still checked for REALITY after shape, and by ROUND TRIP rather than by `Date.parse` alone:
+    // `2026-02-30` matches the pattern and parses happily, because JS rolls it forward to March 2
+    // instead of rejecting it. A stock count silently attributed to the wrong day is exactly the
+    // kind of plausible wrong value this module refuses everywhere else, so the parsed instant has
+    // to render back to the calendar day the file named.
+    .refine((v) => {
+      if (Number.isNaN(Date.parse(v))) return false;
+      // The CALENDAR DAY is round-tripped on its own, at UTC midnight, rather than the whole
+      // value: a legitimate `2026-07-01T01:00:00+02:00` is `2026-06-30` in UTC, so comparing the
+      // parsed instant's date to the written one would reject exactly the timezone-qualified
+      // datetimes this validator just asked for.
+      const day = v.slice(0, 10);
+      const midnight = new Date(`${day}T00:00:00Z`);
+      // `toISOString` THROWS on an invalid date rather than returning something falsy, and a
+      // validator that throws turns a bad cell into a failed import instead of a reported row.
+      if (Number.isNaN(midnight.getTime())) return false;
+      return midnight.toISOString().startsWith(day);
+    }, `${label} is not a real date`)
     .transform((v) => new Date(v).toISOString());
 
 const booleanish = z

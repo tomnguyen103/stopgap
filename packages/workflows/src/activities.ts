@@ -218,14 +218,17 @@ export async function assessImpact(input: CaseInput): Promise<ImpactResult> {
     }).catch((err: unknown) => {
       incrementCounter("stopgap_catalog_read_failures_total", { activity: "assessImpact" });
       console.warn(`[workflows] catalog read failed for org ${input.orgId}; assessing without it`, err);
-      // NULL, never a zeroed reading. `NO_CATALOG_DATA` exists in `impact.ts` for exactly this
-      // case and says why: "0 items matched" is a claim about the facility, and the model reasons
-      // from it. A read that failed knows nothing — it did not measure zero. The same reasoning
-      // then keeps `affectedFormularyItems` off the result entirely rather than publishing a
-      // fabricated 0 as a counted one.
+      // NULL, never a zeroed reading: "0 items matched" is a claim about the facility, and the
+      // model reasons from it. A read that failed knows nothing — it did not measure zero. The
+      // same reasoning then keeps `affectedFormularyItems` off the result entirely rather than
+      // publishing a fabricated 0 as a counted one.
+      //
+      // It becomes `CATALOG_UNAVAILABLE`, not `NO_CATALOG_DATA`: the latter says there is no
+      // facility behind the assessment at all, which is true of the eval corpus and false here.
+      // A failed read must not be reported to the model as "this hospital records no suppliers".
       return null;
     });
-    const assessment = await agents.assessImpact(input.record, catalog ?? agents.NO_CATALOG_DATA);
+    const assessment = await agents.assessImpact(input.record, catalog ?? agents.CATALOG_UNAVAILABLE);
     return {
       ...assessment,
       ...(catalog === null ? {} : { affectedFormularyItems: catalog.matchedItems }),

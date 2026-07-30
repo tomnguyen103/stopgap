@@ -169,23 +169,34 @@ async function sweepKind(
         .from(columns.table)
         .where(and(eq(columns.org, orgId), lt(columns.at, cutoff)))
         .limit(RETENTION_BATCH_SIZE);
-      if (doomed.length === 0) return 0;
-      await db.delete(columns.table).where(
+      if (doomed.length === 0) return { selected: 0, deleted: 0 };
+      const gone = await db.delete(columns.table).where(
         and(
           eq(columns.org, orgId),
+          // The AGE PREDICATE IS RESTATED HERE, not just the ids the select returned. Between the
+          // two statements a row can be touched — a signal re-fetched, an alert event amended —
+          // and its age column moved forward past the cutoff. Deleting on ids alone would then
+          // remove a row that is no longer expired, which is the one thing a retention sweep must
+          // never do: it deletes on a fact it checked before that fact changed.
+          lt(columns.at, cutoff),
           inArray(
             columns.id,
             doomed.map((row) => row.id),
           ),
         ),
-      );
-      return doomed.length;
+      ).returning({ id: columns.id });
+      // Two numbers, deliberately. `deleted` is what was REMOVED and is what the audit entry and
+      // the counters report; `selected` is what the page held and is what decides whether the
+      // table is drained. They differ exactly when a row aged out from under the sweep, and
+      // conflating them would either over-report a deletion that did not happen or stop the loop
+      // early on a full page.
+      return { selected: doomed.length, deleted: gone.length };
     });
-    removed += batch;
-    if (batch > 0) onBatch(batch);
+    removed += batch.deleted;
+    if (batch.deleted > 0) onBatch(batch.deleted);
     // A short batch means the table is drained; the confirming round trip is skipped, which is the
     // common case where nothing at all has expired.
-    if (batch < RETENTION_BATCH_SIZE) return removed;
+    if (batch.selected < RETENTION_BATCH_SIZE) return removed;
   }
 }
 

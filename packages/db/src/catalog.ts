@@ -117,11 +117,27 @@ async function writeItems(db: Db, orgId: string, plan: ImportPlan<"items">): Pro
           );
   const byIdentifier = new Map(existing.map((e) => [`${e.type}:${e.value}`, e.itemId]));
 
-  for (const { row } of plan.rows) {
+  for (const { line, row } of plan.rows) {
     const identifiers = identifiersOf(row);
     // The FIRST identifier that already resolves wins. `identifiersOf` puts the facility's own sku
     // first, so a file that changed nothing matches on the sku and never touches the others.
-    const matched = identifiers.map((i) => byIdentifier.get(`${i.type}:${i.value}`)).find(Boolean);
+    const resolved = identifiers
+      .map((i) => byIdentifier.get(`${i.type}:${i.value}`))
+      .filter((id): id is string => id !== undefined);
+    // AMBIGUOUS OWNERSHIP IS REFUSED, not resolved by taking the first. When one row's identifiers
+    // point at two DIFFERENT existing items, the file is asserting that two things this facility
+    // already stocks separately are one thing. Taking the first and repointing the rest would
+    // silently fold a real catalog item into another — its identifiers moved, its row orphaned,
+    // and no error to say so. Which of the two survives is a decision only the administrator can
+    // make, so the import stops and names them.
+    const distinct = [...new Set(resolved)];
+    if (distinct.length > 1) {
+      throw new Error(
+        `line ${line}: identifiers on this row already belong to ${distinct.length} different items ` +
+          `(${distinct.join(", ")}) — merge them in the catalog first, or correct the row`,
+      );
+    }
+    const matched = distinct[0];
 
     let itemId: string;
     if (matched) {

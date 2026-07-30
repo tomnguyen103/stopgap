@@ -16,6 +16,17 @@ export interface CatalogFacts {
   supplierSiteCount?: number;
   /** Matched items with exactly one source of supply. */
   soleSourcedItems?: number;
+  /**
+   * Why EVERY field is absent, when the whole catalog is.
+   *
+   * Present only when the catalog as a whole could not contribute, and stated verbatim in the
+   * prompt — because the per-field reasons below ("no supplier links recorded") are claims about
+   * what the catalog CONTAINS, and they are false when the catalog was never read. "This hospital
+   * records no supplier links" and "we could not find out whether it does" call for different
+   * caution, and a model handed the first when the second is true reasons from a fabricated
+   * absence just as surely as it would from a fabricated zero.
+   */
+  absenceReason?: string;
 }
 
 /**
@@ -25,7 +36,20 @@ export interface CatalogFacts {
  * matched" would be a claim about a facility that does not exist, and the model would reason from
  * it. `unknown` is a thing it can be conservative about; a fabricated zero is not.
  */
-export const NO_CATALOG_DATA: CatalogFacts = {};
+export const NO_CATALOG_DATA: CatalogFacts = {
+  absenceReason: "there is no facility behind this assessment",
+};
+
+/**
+ * The facility HAS a catalog; this assessment could not read it.
+ *
+ * Distinct from `NO_CATALOG_DATA` because the two are different facts about the world, and the
+ * difference matters to whoever reads the assessment afterwards: one says the question does not
+ * apply, the other says the answer is unknown and a retry might produce one.
+ */
+export const CATALOG_UNAVAILABLE: CatalogFacts = {
+  absenceReason: "the facility catalog could not be read for this assessment",
+};
 
 /**
  * The catalog half of the prompt (ticket 16).
@@ -36,12 +60,20 @@ export const NO_CATALOG_DATA: CatalogFacts = {};
  * numbers stop being guesses.
  */
 function formatCatalogFacts(catalog: CatalogFacts): string[] {
+  // When the catalog as a whole is absent, ITS reason replaces every per-field one. The per-field
+  // reasons describe what the catalog contains, and a catalog nobody read contains nothing anyone
+  // can describe.
+  const whole = catalog.absenceReason;
+  const say = (value: number | undefined, fieldReason: string): string =>
+    value === undefined ? `unknown — ${whole ?? fieldReason}` : String(value);
   return [
-    "Facility catalog (measured from this hospital's own data, not estimated):",
-    `- items this facility stocks that the shortage matches: ${catalog.matchedItems === undefined ? "unknown — no facility catalog behind this assessment" : String(catalog.matchedItems)}`,
-    `- days of stock on hand: ${catalog.daysOnHand === undefined ? "unknown — no inventory or no purchasing history for these items" : String(catalog.daysOnHand)}`,
-    `- distinct supplier sites for those items: ${catalog.supplierSiteCount === undefined ? "unknown — no supplier links recorded" : String(catalog.supplierSiteCount)}`,
-    `- of those items, sole-sourced: ${catalog.soleSourcedItems === undefined ? "unknown" : String(catalog.soleSourcedItems)}`,
+    whole === undefined
+      ? "Facility catalog (measured from this hospital's own data, not estimated):"
+      : `Facility catalog: UNAVAILABLE — ${whole}. Every figure below is unknown, NOT zero.`,
+    `- items this facility stocks that the shortage matches: ${say(catalog.matchedItems, "no facility catalog behind this assessment")}`,
+    `- days of stock on hand: ${say(catalog.daysOnHand, "no inventory or no purchasing history for these items")}`,
+    `- distinct supplier sites for those items: ${say(catalog.supplierSiteCount, "no supplier links recorded")}`,
+    `- of those items, sole-sourced: ${say(catalog.soleSourcedItems, "not recorded")}`,
   ];
 }
 

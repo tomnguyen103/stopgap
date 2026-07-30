@@ -1,4 +1,4 @@
-import { CsvShapeError, parseCsv, toRecord } from "./csv.js";
+import { CsvDuplicateHeaderError, CsvShapeError, parseCsv, toRecord } from "./csv.js";
 import { REQUIRED_COLUMNS, coerceRow, type CatalogKind, type CatalogRow } from "./rows.js";
 
 /**
@@ -42,6 +42,11 @@ export function planImport<K extends CatalogKind>(kind: K, text: string): Import
   try {
     document = parseCsv(text);
   } catch (error) {
+    if (error instanceof CsvDuplicateHeaderError) {
+      // A FILE defect, reported once against line 1 — the same rule the missing-column check
+      // below follows. There is no row to blame: the header is wrong before any row is read.
+      return { kind, rows: [], errors: [{ line: 1, reason: error.message }], ok: false };
+    }
     if (error instanceof CsvShapeError) {
       return {
         kind,

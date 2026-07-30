@@ -28,7 +28,7 @@ tenant. See "The feed poll" below.
 
 | Tenant tables (RLS enforced) | Global tables (no `org_id`) |
 | --- | --- |
-| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs`, `alert_rules`, `alert_events`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events` | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
+| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs`, `alert_rules`, `alert_events`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events`, `audit_anchors` (asymmetric: SELECT only — see below) | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
 
 `risk_signals` and `risk_score_snapshots` (ticket 06) are the sharpest illustration of the test.
 `feed_records` beside them is GLOBAL: one openFDA snapshot is a single physical fact about the drug

@@ -188,7 +188,11 @@ describe("planning an import", () => {
     expect(plan.errors).toEqual([
       { line: 3, column: "sku", reason: "sku is required" },
       { line: 4, column: "on_hand", reason: "on_hand must be a number" },
-      { line: 5, column: "captured_at", reason: "captured_at must be an ISO date" },
+      {
+        line: 5,
+        column: "captured_at",
+        reason: "captured_at must be an ISO date (YYYY-MM-DD) or a datetime carrying a timezone",
+      },
     ]);
   });
 
@@ -207,6 +211,49 @@ describe("planning an import", () => {
 
   it("plans nothing to write when the file is empty", () => {
     expect(planImport("items", "")).toMatchObject({ rows: [], ok: false });
+  });
+
+  it("refuses a header that names the same column twice, once against the header", () => {
+    // `toRecord` keys by name, so a second `sku` column overwrites the first and the file imports
+    // as a plausible wrong value rather than as a reported defect.
+    const plan = planImport("items", ["sku,name,sku", "A-1,Widget,A-2"].join("\n") + "\n");
+    expect(plan.ok).toBe(false);
+    expect(plan.rows).toHaveLength(0);
+    expect(plan.errors).toEqual([
+      { line: 1, reason: "header names the same column more than once: sku" },
+    ]);
+  });
+
+  it("requires a datetime to carry a timezone, and accepts a date-only value", () => {
+    const inventory = (capturedAt: string) =>
+      planImport(
+        "inventory",
+        ["facility_code,sku,on_hand,captured_at", `F1,A-1,4,${capturedAt}`].join("\n") + "\n",
+      );
+    // A date-only value is unambiguous by convention; a bare datetime means a different instant on
+    // every deployment, because `Date.parse` resolves it in the SERVER's zone.
+    expect(inventory("2026-07-01").ok).toBe(true);
+    expect(inventory("2026-07-01T08:00:00Z").ok).toBe(true);
+    expect(inventory("2026-07-01T08:00:00+02:00").ok).toBe(true);
+    expect(inventory("2026-07-01T08:00:00").ok).toBe(false);
+    // Shape is checked BEFORE `Date.parse`, so a US-style date is refused rather than silently
+    // resolved month-first — the failure mode a European procurement export would hit.
+    expect(inventory("07/01/2026").ok).toBe(false);
+    // And a value that matches the shape but is not a real day is still refused — JS rolls
+    // `2026-02-30` forward to March 2 rather than rejecting it.
+    expect(inventory("2026-02-30").ok).toBe(false);
+    // A qualified datetime whose UTC instant falls on the PREVIOUS day is still valid: the
+    // calendar day is checked on its own, not against the parsed instant.
+    expect(inventory("2026-07-01T01:00:00+02:00").ok).toBe(true);
+  });
+
+  it("keeps a multi-line quoted cell free of carriage returns", () => {
+    // Excel writes an embedded newline as CRLF; appending the `\r` verbatim leaves a control
+    // character inside the note, invisible on screen and unequal to the same text typed by hand.
+    const text = 'sku,name,notes\r\nA-1,Widget,"line one\r\nline two"\r\n';
+    const plan = planImport("items", text);
+    expect(plan.ok).toBe(true);
+    expect(plan.rows[0]?.row.notes).toBe("line one\nline two");
   });
 
   it("is pure — planning the same text twice yields the same plan", () => {

@@ -6,7 +6,7 @@ import {
   type SignalMatch,
   type SignalMatchHints,
 } from "@stopgap/catalog";
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, or, sql } from "drizzle-orm";
 import type { Db } from "./client.js";
 import {
   inventorySnapshots,
@@ -77,7 +77,11 @@ async function candidatesFor(
           .where(
             and(
               eq(items.orgId, orgId),
-              sql`(${normalizedItemName} = any(${names}) or ${normalizedGenericName} = any(${names}))`,
+              // `inArray` on the normalized expressions, matching the identifier branch above,
+              // rather than `= any(${names})`. A JS array interpolated into a template is not a
+              // Postgres array parameter, so that form depended on the driver rendering it into
+              // something `any()` would accept — and it bound `names` twice besides.
+              or(inArray(normalizedItemName, names), inArray(normalizedGenericName, names)),
             ),
           )
       : Promise.resolve([] as { itemId: string }[]),

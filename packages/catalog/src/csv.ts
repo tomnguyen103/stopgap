@@ -38,6 +38,19 @@ export class CsvShapeError extends Error {
 }
 
 /**
+ * A header naming the same column twice.
+ *
+ * Its own error rather than a shape error, because the file is the right WIDTH — the defect is
+ * that two columns claim one name, and the message has to say which.
+ */
+export class CsvDuplicateHeaderError extends Error {
+  constructor(readonly duplicates: string[]) {
+    super(`header names the same column more than once: ${duplicates.join(", ")}`);
+    this.name = "CsvDuplicateHeaderError";
+  }
+}
+
+/**
  * Split a CSV document into cells.
  *
  * Ragged rows are NOT silently padded or truncated: a row whose width disagrees with the header
@@ -50,6 +63,17 @@ export function parseCsv(text: string): CsvDocument {
   const headerRow = rows[0];
   if (!headerRow) return { header: [], rows: [] };
   const header = headerRow.cells.map((c) => c.trim().toLowerCase());
+  // A DUPLICATED HEADER NAME IS REFUSED, not resolved. `toRecord` keys by name, so `sku,name,sku`
+  // maps both `sku` columns onto one key and the LAST cell silently wins — an administrator's
+  // duplicated column becomes a plausible wrong value rather than a reported defect, which is the
+  // failure this module refuses everywhere else (see the ragged-row rule above).
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const name of header) {
+    if (seen.has(name)) duplicates.add(name);
+    seen.add(name);
+  }
+  if (duplicates.size > 0) throw new CsvDuplicateHeaderError([...duplicates]);
   const body: CsvRow[] = [];
   for (const row of rows.slice(1)) {
     // A trailing newline yields one empty row; that is formatting, not a defect.
@@ -108,6 +132,18 @@ function splitRows(text: string): CsvRow[] {
         // line number reported for every later row is short by however many embedded newlines
         // came before it — and a wrong line number in an error report is worse than none, because
         // the administrator edits the row it names.
+        //
+        // CRLF is normalized here exactly as it is for an unquoted row below. Excel writes a
+        // multi-line quoted cell with `\r\n`, and appending the `\r` verbatim leaves a control
+        // character inside an item name or note — invisible in the console, and unequal to the
+        // same text typed by hand. A LONE `\r` is a line break too, and counting it is what stops
+        // every later line number drifting.
+        if (ch === "\r") {
+          if (input[i + 1] === "\n") i++;
+          line++;
+          cell += "\n";
+          continue;
+        }
         if (ch === "\n") line++;
         cell += ch;
       }
