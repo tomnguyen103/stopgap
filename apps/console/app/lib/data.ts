@@ -3,21 +3,37 @@ import {
   feedFreshness,
   getCaseByWorkflowId,
   getDb,
+  getKpis,
+  getSignalByKey,
+  latestScoresForSignals,
+  listCaseQueue,
+  listEvidenceForSignal,
+  listSignalsPage,
   listAcknowledgments,
   listApiKeys,
-  listCases,
   listDailyBriefs,
   listOrganizations,
   listShadowRuns,
   listUsers,
+  rankedOpenCases,
   schema,
   shadowStatsByClass,
   verifyAnchors,
   verifyAuditChain,
   withOrgDb,
 } from "@stopgap/db";
-import type { Role } from "@stopgap/core";
-import type { ApiKeyRow, UserRow } from "@stopgap/db";
+import type { CaseStatus, Role } from "@stopgap/core";
+import type {
+  ApiKeyRow,
+  Kpis,
+  CaseQueueOptions,
+  QueuedCase,
+  RankedCase,
+  RiskSignalRow,
+  SignalEvidenceRow,
+  SignalPageOptions,
+  UserRow,
+} from "@stopgap/db";
 import type {
   AnchorVerification,
   AuditRow,
@@ -33,7 +49,7 @@ import type {
 import type { OrganizationRow } from "@stopgap/db";
 import { evaluatePromotion, type PromotionDecision } from "@stopgap/shadow";
 import { getCaseState, withTemporalClient, type CaseState } from "@stopgap/workflows";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { resolvePrincipal } from "./principal";
 
 /**
@@ -61,12 +77,6 @@ async function currentOrgId(): Promise<string> {
  */
 export async function getFeedFreshness(): Promise<FeedFreshness[]> {
   return feedFreshness(getDb());
-}
-
-/** All cases in the caller's org, newest-touched first (list view). */
-export async function getCases(): Promise<CaseRow[]> {
-  const orgId = await currentOrgId();
-  return withOrgDb(orgId, (db) => listCases(db, orgId, 200));
 }
 
 /** An acknowledgment with the acking user's human label resolved, for the escalation timeline. */
@@ -100,7 +110,11 @@ export async function getCaseDetail(
     const userIds = [...new Set(ackRows.map((a) => a.userId))];
     const userRows = userIds.length
       ? await db
-          .select({ id: schema.users.id, email: schema.users.email, displayName: schema.users.displayName })
+          .select({
+            id: schema.users.id,
+            email: schema.users.email,
+            displayName: schema.users.displayName,
+          })
           .from(schema.users)
           .where(and(eq(schema.users.orgId, orgId), inArray(schema.users.id, userIds)))
       : [];
@@ -245,5 +259,173 @@ export async function getProtocols(): Promise<
       protocol,
       versions: versions.filter((version) => version.protocolId === protocol.id),
     }));
+  });
+}
+
+/**
+ * The viewer overview's three headline figures and its ranked queue, in one round trip's worth of
+ * scope (ticket 08).
+ *
+ * `awaitingReview` is counted here rather than added to `Kpis`: that type is the KPI board's
+ * contract and every consumer of it would otherwise gain a field it does not use.
+ */
+export interface ViewerOverview {
+  kpis: Kpis;
+  awaitingReview: number;
+  ranked: RankedCase[];
+  /**
+   * The component map of this tenant's most recent snapshot — what the dormant-score notice is
+   * read from.
+   *
+   * Deliberately the LATEST snapshot rather than one of the ranked rows: which components the
+   * scorer can currently fill is a property of the scorer's inputs, not of whichever case happens
+   * to rank first, and sampling a row means the notice disappears the moment that row is unscored.
+   */
+  latestComponents: Record<string, number> | null;
+}
+
+const AWAITING_REVIEW: CaseStatus = "awaiting_review";
+
+export async function getViewerOverview(q: string | null = null): Promise<ViewerOverview> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const kpis = await getKpis(orgId, db);
+    const [awaiting] = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.cases)
+      .where(and(eq(schema.cases.orgId, orgId), eq(schema.cases.status, AWAITING_REVIEW)));
+    const [newest] = await db
+      .select({ components: schema.riskScoreSnapshots.components })
+      .from(schema.riskScoreSnapshots)
+      .where(eq(schema.riskScoreSnapshots.orgId, orgId))
+      .orderBy(
+        desc(schema.riskScoreSnapshots.computedAt),
+        desc(schema.riskScoreSnapshots.id),
+      )
+      .limit(1);
+    return {
+      kpis,
+      awaitingReview: Number(awaiting?.count ?? 0),
+      ranked: await rankedOpenCases(db, orgId, q),
+      latestComponents: (newest?.components ?? null) as Record<string, number> | null,
+    };
+  });
+}
+
+/** One page of the tenant's signals, each carrying its latest score if the scorer has reached it. */
+export interface ScoredSignal {
+  signal: RiskSignalRow;
+  score: { score: number; band: string; scorerVersion: string } | undefined;
+}
+
+export async function getSignalsPage(
+  options: SignalPageOptions,
+): Promise<{ rows: ScoredSignal[]; total: number; page: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const { rows, total, page } = await listSignalsPage(db, orgId, options);
+    // ONE score lookup for the whole page. Per-row lookups turn a 100-row page into 100 round
+    // trips, which is the shape that makes paging pointless.
+    const scores = await latestScoresForSignals(
+      db,
+      orgId,
+      rows.map((row) => row.id),
+    );
+    return { rows: rows.map((signal) => ({ signal, score: scores.get(signal.id) })), total, page };
+  });
+}
+
+/** One signal with its evidence and its latest score snapshot, for the detail view. */
+export async function getSignalDetail(dedupeKey: string): Promise<
+  | {
+      signal: RiskSignalRow;
+      snapshot: schema.RiskScoreSnapshotRow | undefined;
+    }
+  | undefined
+> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const signal = await getSignalByKey(db, orgId, dedupeKey);
+    if (!signal) return undefined;
+    const [snapshot] = await db
+      .select()
+      .from(schema.riskScoreSnapshots)
+      .where(
+        and(
+          eq(schema.riskScoreSnapshots.orgId, orgId),
+          eq(schema.riskScoreSnapshots.signalId, signal.id),
+        ),
+      )
+      .orderBy(desc(schema.riskScoreSnapshots.computedAt), desc(schema.riskScoreSnapshots.id))
+      .limit(1);
+    return { signal, snapshot };
+  });
+}
+
+/** One page of the pharmacist's review queue, ranked by risk score (ticket 11). */
+export async function getCaseQueue(
+  options: CaseQueueOptions,
+): Promise<{ rows: QueuedCase[]; total: number; page: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => listCaseQueue(db, orgId, options));
+}
+
+/**
+ * The evidence trail behind a case, via the signal that names the same product.
+ *
+ * Returns an empty array rather than throwing when nothing matches: a case the feeds have not
+ * classified has no evidence yet, which is a thing the drawer says, not an error.
+ */
+export async function getCaseEvidence(genericName: string): Promise<{
+  signal: RiskSignalRow | undefined;
+  evidence: SignalEvidenceRow[];
+}> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    // ONE ROW PER SIGNAL, its LATEST snapshot — the same `distinct on` the queue's `rankedOpenCases`
+    // ranks by. Joining the snapshot table directly would put every historical score in the sort and
+    // let a signal's old peak outrank another signal's current one, so the evidence card would name
+    // a signal the queue did not rank the case on: the page contradicting itself, which is exactly
+    // what ordering by the ranked score is here to prevent.
+    const latestSnapshot = db
+      .selectDistinctOn([schema.riskScoreSnapshots.signalId], {
+        signalId: schema.riskScoreSnapshots.signalId,
+        score: schema.riskScoreSnapshots.score,
+        reachableMax: schema.riskScoreSnapshots.reachableMax,
+      })
+      .from(schema.riskScoreSnapshots)
+      .where(eq(schema.riskScoreSnapshots.orgId, orgId))
+      .orderBy(
+        schema.riskScoreSnapshots.signalId,
+        desc(schema.riskScoreSnapshots.computedAt),
+        // `id` last, so two snapshots computed in the same instant resolve to a stable one.
+        desc(schema.riskScoreSnapshots.id),
+      )
+      .as("latest_snapshot");
+    // The signal the RANK came from — highest latest score first, then the SAME tiebreak the queue
+    // uses (`rankedOpenCases` breaks a fraction tie on `dedupe_key`). Two signals for one product can
+    // hold the same fraction, and breaking that tie differently here would name a different signal
+    // than the queue ranked the case on — the contradiction this ordering exists to prevent. `id`
+    // last so the pick is stable across renders even when every other key ties.
+    const [signal] = await db
+      .select({ signal: schema.riskSignals })
+      .from(schema.riskSignals)
+      .leftJoin(latestSnapshot, eq(latestSnapshot.signalId, schema.riskSignals.id))
+      .where(
+        and(
+          eq(schema.riskSignals.orgId, orgId),
+          sql`lower(${schema.riskSignals.entityIdentifier}) = lower(${genericName})`,
+        ),
+      )
+      .orderBy(
+        sql`${latestSnapshot.score} / nullif(${latestSnapshot.reachableMax}, 0) desc nulls last`,
+        schema.riskSignals.dedupeKey,
+        desc(schema.riskSignals.publishedAt),
+        desc(schema.riskSignals.id),
+      )
+      .limit(1)
+      .then((rows) => rows.map((row) => row.signal));
+    if (!signal) return { signal: undefined, evidence: [] };
+    return { signal, evidence: await listEvidenceForSignal(db, orgId, signal.id) };
   });
 }

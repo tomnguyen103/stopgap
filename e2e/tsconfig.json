@@ -1,0 +1,12 @@
+{
+  "//": "Playwright's loader walks up for a tsconfig and chokes on the root project-references file. Its own here keeps the browser tier off that path entirely.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

@@ -12,7 +12,10 @@ import { ROLES, type Role } from "@stopgap/core";
  */
 
 /** viewer < pharmacist < pharmacy_director < admin — the index in `ROLES` is the rank. */
-const RANK: Record<Role, number> = Object.fromEntries(ROLES.map((r, i) => [r, i])) as Record<Role, number>;
+const RANK: Record<Role, number> = Object.fromEntries(ROLES.map((r, i) => [r, i])) as Record<
+  Role,
+  number
+>;
 
 /**
  * Mutating actions the console/API gates — one entry per action a server action actually
@@ -57,7 +60,7 @@ export function roleSatisfies(have: Role, min: Role): boolean {
 }
 
 /** Does any of the caller's roles meet the minimum? */
-export function rolesAllow(roles: Role[], min: Role): boolean {
+export function rolesAllow(roles: readonly Role[], min: Role): boolean {
   return roles.some((r) => roleSatisfies(r, min));
 }
 
@@ -96,13 +99,18 @@ export const ROLE_LANDING_ROUTE: Record<Role, string> = {
  * multi-role user effectively holds.
  *
  * Total by construction — it always returns a route:
- *  - no roles at all (the anonymous visitor `STOPGAP_DEMO_MODE` resolves) lands on the viewer
- *    dashboard, which is what makes the public demo and the lowest-privilege surface one thing to
- *    build rather than two;
+ *  - the anonymous visitor `STOPGAP_DEMO_MODE` resolves holds the real `viewer` role, and lands on
+ *    the viewer dashboard, which is what makes the public demo and the lowest-privilege surface one
+ *    thing to build rather than two;
  *  - a role this build does not know is skipped rather than thrown on. Roles are unioned from IdP
  *    realm claims and local grants, so an IdP can legitimately present a realm role a given deploy
  *    has never heard of; a throw here would turn that into a failed sign-in redirect instead of a
  *    harmless degrade to `viewer`.
+ *
+ * TOTAL IS NOT THE SAME AS CORRECT FOR EVERY CALLER. This falls back to `viewer` for a caller with
+ * no recognized role, and `canViewGroup` refuses exactly that caller — so callers must ask
+ * `hasRecognizedRole` FIRST and divert to `ACCESS_DENIED_ROUTE`, or the two bounce the request
+ * between them. `app/page.tsx` and `group-guard.ts` are the two places that do.
  */
 export function roleLandingRoute(roles: readonly Role[]): string {
   let best: Role = "viewer";
@@ -113,6 +121,67 @@ export function roleLandingRoute(roles: readonly Role[]): string {
   }
   return ROLE_LANDING_ROUTE[best];
 }
+
+/**
+ * The four dashboard groups (ticket 03), each one role's surface.
+ *
+ * Named the same as the role whose landing route it holds, because a group that did not map 1:1
+ * onto a role would need its own access rule, and a second rule is a second thing to get wrong.
+ */
+export const DASHBOARD_GROUPS = ["viewer", "pharmacist", "pharmacy_director", "admin"] as const;
+export type DashboardGroup = (typeof DASHBOARD_GROUPS)[number];
+
+/**
+ * May this caller see this group's surface?
+ *
+ * At or BELOW their own rank. A director looking at the viewer overview is reading a subset of
+ * what their own dashboard shows, so refusing it would be theatre; a viewer reaching the admin
+ * surface is not, and is refused.
+ *
+ * This is VISIBILITY, not permission. Reaching a route grants nothing: every page read and every
+ * server action still calls its own guard, exactly as before. The two are deliberately separate —
+ * a dashboard a role can see but only partly use is normal, and would be unrepresentable if this
+ * function doubled as policy.
+ *
+ * IT ADMITS AT OR BELOW RANK, so "another role's route is refused server-side" holds UPWARD only:
+ * a viewer cannot reach the director's oversight, while a director can read the pharmacist queue.
+ * That direction is the intended one — a director asked to explain a decision needs to see the
+ * queue it came from — but it has a consequence worth naming, because it is not a bug someone
+ * should later "fix": the per-group navs list only their OWN group's routes, so a higher role can
+ * reach a lower group's page but has no link to it. The alternative, composing every visible
+ * group's links into one nav, rebuilds the undifferentiated header the route groups exist to
+ * replace. Typing the URL is the deliberate cost.
+ */
+export function canViewGroup(roles: readonly Role[], group: DashboardGroup): boolean {
+  let best: number | undefined;
+  for (const role of roles) {
+    const rank = RANK[role];
+    // An unknown role is skipped rather than thrown on, for the reason `roleLandingRoute` gives:
+    // an IdP may legitimately present a realm role this build has never heard of.
+    if (rank !== undefined && (best === undefined || rank > best)) best = rank;
+  }
+  // NO RECOGNIZED ROLE IS NOT THE LOWEST ROLE. Starting this at `viewer` admitted an empty role set
+  // — and an empty set is exactly what a realm whose Stopgap client mapper is missing produces, so
+  // the default was handing tenant viewer data to anyone the IdP would authenticate. The anonymous
+  // demo path is unaffected: `resolvePrincipal` gives that caller the real `viewer` role, not none.
+  if (best === undefined) return false;
+  return best >= RANK[group];
+}
+
+/**
+ * Does this caller hold any role this build recognizes?
+ *
+ * The question `canViewGroup` cannot answer on its own: it returns false both for "your role is too
+ * low for THIS group" and for "you have no role at all", and those need different destinations. The
+ * first redirects to the caller's own dashboard; the second has no dashboard to go to, and sending
+ * it to one loops — the guard there refuses it again.
+ */
+export function hasRecognizedRole(roles: readonly Role[]): boolean {
+  return roles.some((role) => RANK[role] !== undefined);
+}
+
+/** Where a caller with no recognized role goes. Outside every dashboard group, so it cannot loop. */
+export const ACCESS_DENIED_ROUTE = "/access-denied";
 
 /** Thrown when a caller lacks the role an action requires. The server action surfaces it. */
 export class AuthorizationError extends Error {

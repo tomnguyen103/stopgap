@@ -26,7 +26,9 @@ vi.mock("../../auth", () => ({ auth: () => auth() }));
 
 let cookieValue: string | undefined;
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ get: (_name: string) => (cookieValue === undefined ? undefined : { value: cookieValue }) }),
+  cookies: async () => ({
+    get: (_name: string) => (cookieValue === undefined ? undefined : { value: cookieValue }),
+  }),
 }));
 
 const getOrganization = vi.fn(async (id: string) =>

@@ -23,6 +23,15 @@ viewer  <  pharmacist  <  pharmacy_director  <  admin
 | `manage_spend_caps`        | `admin`            | Spend-cap configuration                                 |
 | `manage_demo_config`       | `admin`            | Demo configuration                                      |
 
+`_(read pages)_` means the `viewer` ROLE, not "anything that got through sign-in". A caller the IdP
+authenticated but granted no role this build recognizes — an empty claim, or realm roles that all
+filter out — satisfies nothing, including the viewer group: `canViewGroup` refuses an unrecognized
+role set outright rather than ranking it as the lowest role. Such a caller has no dashboard to be
+sent to, so `/` and every group guard divert them to `/access-denied`, which sits outside all four
+groups and reads no principal, org or tenant data. The usual cause is a realm whose Stopgap client
+mapper is missing, and the page says so. The anonymous demo visitor is unaffected — it holds the
+real `viewer` role (see below), not an empty set.
+
 The matrix lives in one place — `apps/console/app/lib/authz.ts` (pure, no session/DB) — and is
 unit-tested exhaustively (`auth-guards.test.ts`). Every mutating server action calls
 `requireRole(action)` at its top; a caller who lacks the role gets an `AuthorizationError`
@@ -50,7 +59,8 @@ is a failed login for a legitimate user.
 ## Demo mode → anonymous viewer
 
 When `STOPGAP_DEMO_MODE=on`, the middleware lets requests through **without** authentication and
-they resolve to an anonymous `viewer`: the public demo stays fully functional read-only. Because
+they resolve to an anonymous `viewer` — the REAL role, held explicitly, which is what keeps the demo
+clear of the no-recognized-role diversion above: the public demo stays fully functional read-only. Because
 `viewer` holds no mutating role, every `requireRole` still refuses — the demo cannot approve,
 resolve, or manage anything. The single demo mutation ("Run a shortage") is gated separately in
 `@stopgap/demo`, not by a role.

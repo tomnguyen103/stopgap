@@ -76,7 +76,9 @@ export const protocolSummarySchema = z
       .number()
       .int()
       .nullable()
-      .openapi({ description: "The live version number, or null when every version is still a draft." }),
+      .openapi({
+        description: "The live version number, or null when every version is still a draft.",
+      }),
     updatedAt: isoDateTime,
   })
   .openapi({ ref: "ProtocolSummary", description: "A protocol as it appears in the index." });
@@ -184,13 +186,17 @@ export const approveVersionSchema = z
 
 export const acceptedSchema = z
   .object({ ok: z.literal(true), key: z.string() })
-  .openapi({ ref: "Accepted", description: "The write was accepted and recorded in the audit chain." });
+  .openapi({
+    ref: "Accepted",
+    description: "The write was accepted and recorded in the audit chain.",
+  });
 
 export const approvedSchema = z
   .object({ ok: z.literal(true), version: z.number().int(), changed: z.boolean() })
   .openapi({
     ref: "Approved",
-    description: "`changed` is false when the version was already approved — a no-op, not a new approval.",
+    description:
+      "`changed` is false when the version was already approved — a no-op, not a new approval.",
   });
 
 export const listQuerySchema = z.object({
@@ -384,13 +390,25 @@ const errorSchema = apiErrorSchema.openapi({ ref: "Error" });
 
 /** The three failure responses every authenticated operation can produce. */
 const authFailureResponses = {
-  "401": { description: "Missing, unknown, or revoked API key.", content: { "application/json": { schema: errorSchema } } },
-  "403": { description: "The key does not carry the scope this operation requires.", content: { "application/json": { schema: errorSchema } } },
-  "429": { description: "The key is over its hourly rate limit. See `Retry-After`.", content: { "application/json": { schema: errorSchema } } },
+  "401": {
+    description: "Missing, unknown, or revoked API key.",
+    content: { "application/json": { schema: errorSchema } },
+  },
+  "403": {
+    description: "The key does not carry the scope this operation requires.",
+    content: { "application/json": { schema: errorSchema } },
+  },
+  "429": {
+    description: "The key is over its hourly rate limit. See `Retry-After`.",
+    content: { "application/json": { schema: errorSchema } },
+  },
 };
 
 const notFoundResponse = {
-  "404": { description: "No such resource.", content: { "application/json": { schema: errorSchema } } },
+  "404": {
+    description: "No such resource.",
+    content: { "application/json": { schema: errorSchema } },
+  },
 };
 
 /**
@@ -401,7 +419,8 @@ const notFoundResponse = {
  */
 const writeConflictResponses = {
   "409": {
-    description: "The target's state no longer permits this operation (e.g. the version was superseded).",
+    description:
+      "The target's state no longer permits this operation (e.g. the version was superseded).",
     content: { "application/json": { schema: errorSchema } },
   },
 };
@@ -415,7 +434,10 @@ const temporalUnavailableResponse = {
 };
 
 const badRequestResponse = {
-  "400": { description: "The request failed schema validation; `issues` names the bad fields.", content: { "application/json": { schema: errorSchema } } },
+  "400": {
+    description: "The request failed schema validation; `issues` names the bad fields.",
+    content: { "application/json": { schema: errorSchema } },
+  },
 };
 
 /**
@@ -439,7 +461,10 @@ function withScope(scope: ApiScope, description: string): string {
 }
 
 const keyPathParam = z.object({
-  key: z.string().min(1).openapi({ description: "The normalized generic-name dedup key, e.g. `cefazolin`." }),
+  key: z
+    .string()
+    .min(1)
+    .openapi({ description: "The normalized generic-name dedup key, e.g. `cefazolin`." }),
 });
 
 /**
@@ -482,7 +507,10 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           ...scoped("cases:read"),
           requestParams: { query: listQuerySchema },
           responses: {
-            "200": { description: "Cases.", content: { "application/json": { schema: caseListSchema } } },
+            "200": {
+              description: "Cases.",
+              content: { "application/json": { schema: caseListSchema } },
+            },
             ...badRequestResponse,
             ...authFailureResponses,
           },
@@ -495,7 +523,10 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           ...scoped("cases:read"),
           requestParams: { path: keyPathParam },
           responses: {
-            "200": { description: "The case.", content: { "application/json": { schema: caseDetailSchema } } },
+            "200": {
+              description: "The case.",
+              content: { "application/json": { schema: caseDetailSchema } },
+            },
             ...notFoundResponse,
             ...authFailureResponses,
           },
@@ -513,7 +544,10 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           requestParams: { path: keyPathParam },
           requestBody: { content: { "application/json": { schema: resolveExceptionSchema } } },
           responses: {
-            "202": { description: "Signal accepted.", content: { "application/json": { schema: acceptedSchema } } },
+            "202": {
+              description: "Signal accepted.",
+              content: { "application/json": { schema: acceptedSchema } },
+            },
             ...badRequestResponse,
             ...notFoundResponse,
             ...authFailureResponses,
@@ -535,7 +569,10 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           requestParams: { path: keyPathParam },
           requestBody: { content: { "application/json": { schema: reviewDecisionSchema } } },
           responses: {
-            "202": { description: "Signal accepted.", content: { "application/json": { schema: acceptedSchema } } },
+            "202": {
+              description: "Signal accepted.",
+              content: { "application/json": { schema: acceptedSchema } },
+            },
             ...badRequestResponse,
             ...notFoundResponse,
             ...authFailureResponses,
@@ -554,7 +591,10 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           ...scoped("protocols:read"),
           requestParams: { query: listQuerySchema },
           responses: {
-            "200": { description: "Protocols.", content: { "application/json": { schema: protocolListSchema } } },
+            "200": {
+              description: "Protocols.",
+              content: { "application/json": { schema: protocolListSchema } },
+            },
             ...badRequestResponse,
             ...authFailureResponses,
           },
@@ -563,11 +603,17 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
       "/api/v1/protocols/{key}": {
         get: {
           summary: "Get a substitution protocol",
-          description: withScope("protocols:read", "The approved protocol for a drug plus its version history."),
+          description: withScope(
+            "protocols:read",
+            "The approved protocol for a drug plus its version history.",
+          ),
           ...scoped("protocols:read"),
           requestParams: { path: keyPathParam },
           responses: {
-            "200": { description: "The protocol.", content: { "application/json": { schema: protocolSchema } } },
+            "200": {
+              description: "The protocol.",
+              content: { "application/json": { schema: protocolSchema } },
+            },
             ...authFailureResponses,
           },
         },
@@ -583,12 +629,19 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           ...scoped("protocols:write"),
           requestParams: {
             path: keyPathParam.extend({
-              version: z.coerce.number().int().min(1).openapi({ description: "The per-protocol version number." }),
+              version: z.coerce
+                .number()
+                .int()
+                .min(1)
+                .openapi({ description: "The per-protocol version number." }),
             }),
           },
           requestBody: { content: { "application/json": { schema: approveVersionSchema } } },
           responses: {
-            "200": { description: "Approval result.", content: { "application/json": { schema: approvedSchema } } },
+            "200": {
+              description: "Approval result.",
+              content: { "application/json": { schema: approvedSchema } },
+            },
             ...badRequestResponse,
             ...notFoundResponse,
             ...writeConflictResponses,
@@ -665,10 +718,16 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
       "/api/v1/shadow/stats": {
         get: {
           summary: "Shadow-mode aggregates by drug class",
-          description: withScope("shadow:read", "Agreement, under-escalation, latency and cost per drug class."),
+          description: withScope(
+            "shadow:read",
+            "Agreement, under-escalation, latency and cost per drug class.",
+          ),
           ...scoped("shadow:read"),
           responses: {
-            "200": { description: "Aggregates.", content: { "application/json": { schema: shadowStatsSchema } } },
+            "200": {
+              description: "Aggregates.",
+              content: { "application/json": { schema: shadowStatsSchema } },
+            },
             ...authFailureResponses,
           },
         },

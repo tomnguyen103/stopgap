@@ -39,8 +39,8 @@ export function DemoPanel({ drugs }: { drugs: { key: string; genericName: string
     <div className="card">
       <h2 className="card-title">Run a shortage</h2>
       <p className="sub sub-tight">
-        Starts a real Temporal case against the live agent layer. Reviews stay disabled — this
-        is a read-only demo.
+        Starts a real Temporal case against the live agent layer. Reviews stay disabled — this is a
+        read-only demo.
       </p>
       <div className="actions">
         {drugs.map((d) => (

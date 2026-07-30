@@ -83,7 +83,10 @@ export async function parseJsonBodyOr400<T extends z.ZodTypeAny>(
   try {
     raw = await request.json();
   } catch {
-    return { ok: false, response: jsonError(400, "invalid_request", "request body is not valid JSON") };
+    return {
+      ok: false,
+      response: jsonError(400, "invalid_request", "request body is not valid JSON"),
+    };
   }
   return parseOr400(schema, raw);
 }
