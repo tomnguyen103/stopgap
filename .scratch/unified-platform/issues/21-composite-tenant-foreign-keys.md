@@ -10,12 +10,40 @@ What is still plain: `acknowledgments.case_id` and `audit_log.case_id` both refe
 
 **Blocked by:** nothing technically — but it adds a migration, and every branch in the ticket queue already carries one. Land it after tickets 01–20 have merged, so the numbering is settled and the schema merge is against a quiet main.
 
-**Status:** ready-for-agent, queued behind the ticket queue
+**Status:** DONE — `feat/ticket-21-composite-fks`, migration `0021_yielding_impossible_man.sql`.
 
-- [ ] `cases` gains a unique constraint over `(org_id, id)`, with the same note the one on `risk_signals` carries: redundant as an index, required by Postgres before the pair can be a foreign-key target
-- [ ] `acknowledgments` and `audit_log` reference `cases (org_id, id)` as a composite foreign key, replacing the plain reference to `cases.id`
-- [ ] The delete behaviour of each converted key is stated deliberately rather than inherited — an audit entry must not disappear because a case did
-- [ ] Any tenant table landing from the catalog and matching tickets follows the same rule, including rows that reference `risk_signals`
-- [ ] Isolation coverage proves the database REFUSES a row whose `org_id` and parent disagree, running as the application role the policies apply to — not as the owner, which bypasses them
-- [ ] The migration applies cleanly as the role a real deployment migrates as, and against existing data: check first whether any row already violates the pair, and say what was found
-- [ ] The reasoning is recorded beside each converted key, in the form the three existing composite keys already use
+**Verification receipt (red before green).** `packages/db/src/tenant-keys.e2e.test.ts` was written
+first and run against the schema as it stood:
+
+```
+× refuses an acknowledgment of another tenant's case
+  → promise resolved "[]" instead of rejecting
+```
+
+Seven of eight failed that way — every cross-tenant insert LANDED — while the control
+("still accepts the same row when both sides are the caller's own") passed, which is what rules out
+a suite that merely refuses everything. After the migration: 9 passed. Whole tier `pnpm test:rls`
+228 passed; `pnpm gate` 618 passed.
+
+Pre-flight against this deployment's data found ZERO rows already violating any of the twelve pairs.
+
+- [x] `cases` gains a unique constraint over `(org_id, id)`, with the same note the one on `risk_signals` carries: redundant as an index, required by Postgres before the pair can be a foreign-key target
+- [x] `acknowledgments` and `audit_log` reference `cases (org_id, id)` as a composite foreign key, replacing the plain reference to `cases.id`
+- [x] The delete behaviour of each converted key is stated deliberately rather than inherited — an audit entry must not disappear because a case did
+- [x] Any tenant table landing from the catalog and matching tickets follows the same rule, including rows that reference `risk_signals`
+- [x] Isolation coverage proves the database REFUSES a row whose `org_id` and parent disagree, running as the application role the policies apply to — not as the owner, which bypasses them
+- [x] The migration applies cleanly as the role a real deployment migrates as, and against existing data: check first whether any row already violates the pair, and say what was found
+- [x] The reasoning is recorded beside each converted key, in the form the three existing composite keys already use
+
+## What the ticket did not anticipate
+
+- The catalog children (bullet 4) are TEN keys, not a footnote: `item_identifiers`,
+  `supplier_sites`, `item_suppliers` (three), `inventory_snapshots` (two) and
+  `procurement_events` (three). Their parents needed the `(org_id, id)` constraint too.
+- Two of those keys are `ON DELETE SET NULL`, which on a composite nulls EVERY referencing
+  column — including `org_id`, which is NOT NULL. The generated DDL would have created
+  cleanly and thrown the first time somebody deleted a supplier or a site. Migration 0021
+  hand-writes Postgres 15+'s `SET NULL (column)` form, and a test deletes a site to pin it,
+  because nothing else would have caught it before production.
+- `drizzle-kit` emitted every `ADD CONSTRAINT` before the unique indexes they target, which
+  Postgres refuses outright. The migration is reordered by hand.
