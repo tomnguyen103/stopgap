@@ -23,6 +23,15 @@ import type { Db } from "./client.js";
  * Shared by `listSignalsPage` and `listCaseQueue`, which had the same clamp written out twice.
  */
 export function clampPage(page: number, total: number, pageSize: number): number {
+  // PAGE SIZE FIRST, and by throwing rather than clamping. A bad `page` has an obvious right
+  // answer — the nearest real page — but a `pageSize` of 0, -10 or NaN has none: it reaches
+  // `LIMIT` directly, where zero silently returns an empty page and the other two are errors from
+  // Postgres. Clamping it to an invented default would answer a question the caller did not ask.
+  // The console's parser allow-lists the sizes it offers, so anything else is a programming error
+  // in a caller, which is what this says.
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1) {
+    throw new RangeError(`pageSize must be a positive safe integer, got ${String(pageSize)}`);
+  }
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
   // NaN is the one value the min/max sandwich cannot rescue — it propagates through both and reaches
   // OFFSET intact. An infinity needs no special case: it clamps to the last page like any overshoot.
@@ -395,7 +404,12 @@ export async function rankedOpenCases(
              -- the tie so two equal scores do not swap places between renders.
              row_number() over (
                partition by lower(entity_identifier)
-               order by score / nullif(reachable_max, 0) desc, dedupe_key
+               -- NULLS LAST, explicitly. Postgres puts nulls FIRST for a descending sort, so a
+               -- signal whose reachable_max is 0 -- no score expressible at all -- outranked every
+               -- scored one and became the case's strongest signal. The evidence panel orders the
+               -- same fraction with nulls last, so the two disagreed about which signal a case was
+               -- ranked on: the contradiction both orderings exist to prevent.
+               order by score / nullif(reachable_max, 0) desc nulls last, dedupe_key
              ) as rank
         from latest
     )
@@ -489,7 +503,12 @@ export async function listCaseQueue(
              reachable_max, components,
              row_number() over (
                partition by lower(entity_identifier)
-               order by score / nullif(reachable_max, 0) desc, dedupe_key
+               -- NULLS LAST, explicitly. Postgres puts nulls FIRST for a descending sort, so a
+               -- signal whose reachable_max is 0 -- no score expressible at all -- outranked every
+               -- scored one and became the case's strongest signal. The evidence panel orders the
+               -- same fraction with nulls last, so the two disagreed about which signal a case was
+               -- ranked on: the contradiction both orderings exist to prevent.
+               order by score / nullif(reachable_max, 0) desc nulls last, dedupe_key
              ) as rank
         from latest
     ),

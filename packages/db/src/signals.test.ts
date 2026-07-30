@@ -78,4 +78,14 @@ describe("clampPage", () => {
   it("leaves a page already in range alone", () => {
     expect(clampPage(2, 100, 10)).toBe(2);
   });
+
+  it("refuses a page size that cannot produce a page at all", () => {
+    // Unlike `page`, a bad `pageSize` has no nearest-sensible answer: it reaches `LIMIT` directly,
+    // where 0 silently returns an empty page and the rest are errors from Postgres. Refusing names
+    // the caller's bug instead of inventing a default it never asked for.
+    for (const bad of [0, -10, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => clampPage(1, 100, bad)).toThrow(RangeError);
+    }
+    expect(() => clampPage(1, 100, 10)).not.toThrow();
+  });
 });
