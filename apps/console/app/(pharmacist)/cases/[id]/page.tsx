@@ -61,7 +61,12 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
   return (
     <>
       <p className="back">
-        <Link href="/">← all cases</Link>
+        {/*
+          `/queue`, not `/`. Since the route groups landed, `/` is a role redirect rather than a
+          case list — so this link cost a pharmacist an extra hop, and sent a director to their own
+          oversight surface instead of back to the list they came from.
+        */}
+        <Link href="/queue">← all cases</Link>
       </p>
       <h1>{c.genericName}</h1>
       <p className="sub">

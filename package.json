@@ -9,7 +9,8 @@
   },
   "scripts": {
     "lint": "eslint . --ignore-pattern apps/console/next-env.d.ts",
-    "typecheck": "pnpm -r --no-bail typecheck",
+    "typecheck": "pnpm -r --no-bail typecheck && pnpm typecheck:e2e",
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "playwright test --config e2e/playwright.config.ts --project=auth",
