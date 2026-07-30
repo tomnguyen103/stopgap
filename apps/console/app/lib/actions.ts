@@ -15,6 +15,7 @@ import {
   createAlertRule,
   updateAlertRule,
   approveProtocolVersion,
+  supersedeProtocolVersion,
   assignRole,
   getCaseByKey,
   getCaseByWorkflowId,
@@ -224,6 +225,41 @@ const alertRuleSchema = z.object({
 });
 
 /** Create an alert rule. Director-gated: a rule decides who gets paged and how often. */
+/**
+ * WITHDRAW the approved version of a protocol, putting nothing in its place (ticket 14).
+ *
+ * The other half of "approved or superseded", and a different act from approving. Approving
+ * supersedes the previous version on the way past — the protocol has live guidance throughout.
+ * This leaves it with NONE, deliberately: the guidance we published is wrong or overtaken, and no
+ * guidance is safer than misleading guidance while the replacement is written. Stale advice
+ * outliving its shortage is the failure this exists to prevent.
+ *
+ * Same gate as approval (`approve_protocol_version` → `pharmacy_director`): withdrawing live
+ * clinical guidance is at least as consequential as publishing it, so it is not a lesser
+ * permission.
+ */
+export async function supersedeProtocolVersionAction(versionId: unknown): Promise<void> {
+  assertMutationAllowed("Withdrawing a protocol version");
+  const principal = await requireRole("approve_protocol_version");
+  const id = z.string().uuid().parse(versionId);
+  const { row, changed } = await withOrgDb(principal.orgId, (db) =>
+    supersedeProtocolVersion(principal.orgId, id, principal.label, principal.userId ?? undefined, db),
+  );
+  // Nothing to record when it was already withdrawn: a second entry would claim a withdrawal that
+  // did not happen, the same reason approval skips its own no-op.
+  if (changed) {
+    await recordPrivilegedAudit(
+      principal,
+      "protocol.version_withdrawn",
+      { versionId: id, version: row.version },
+      `protocol.version_withdrawn.${id}`,
+    );
+  }
+  revalidatePath("/protocols");
+  revalidatePath("/approvals");
+  revalidatePath("/oversight");
+}
+
 export async function createAlertRuleAction(input: unknown): Promise<void> {
   assertMutationAllowed("Creating an alert rule");
   const principal = await requireRole("manage_alert_rules");

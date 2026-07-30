@@ -49,6 +49,7 @@ export {
 } from "./cases.js";
 export {
   approveProtocolVersion,
+  supersedeProtocolVersion,
   draftProtocolVersion,
   getApprovedProtocol,
   listProtocols,

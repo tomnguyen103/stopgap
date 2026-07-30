@@ -40,6 +40,7 @@ export default defineConfig({
       "packages/db/src/catalog.e2e.test.ts",
       "packages/db/src/public-lists.e2e.test.ts",
       "packages/db/src/retention.e2e.test.ts",
+      "packages/db/src/protocols.e2e.test.ts",
     ],
     fileParallelism: false,
     testTimeout: 60_000,

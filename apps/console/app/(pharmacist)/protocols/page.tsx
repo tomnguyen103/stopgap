@@ -3,6 +3,7 @@ import { Card, Table } from "../../components/ui";
 import { requireGroup } from "../../lib/group-guard";
 import { diffLines, parseVersionParam, resolveComparison, summarizeDiff } from "../../lib/version-diff";
 import { ApproveVersionButton } from "./approve-version";
+import { WithdrawVersionButton } from "./withdraw-version";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,15 @@ export default async function ProtocolsPage({
                   <td>
                     {version.state === "draft" ? (
                       <ApproveVersionButton versionId={version.id} roles={principal.roles} />
+                    ) : null}
+                    {/* Only the LIVE version can be withdrawn: a draft has never been guidance and
+                        a superseded one is already down. */}
+                    {version.state === "approved" ? (
+                      <WithdrawVersionButton
+                        versionId={version.id}
+                        version={version.version}
+                        roles={principal.roles}
+                      />
                     ) : null}
                   </td>
                 </tr>
