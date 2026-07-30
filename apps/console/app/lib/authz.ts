@@ -28,8 +28,11 @@ export const CONSOLE_ACTIONS = [
   "review_case",
   "resolve_exception",
   "approve_protocol_version",
+  "manage_alert_rules",
+  "manage_catalog",
   "manage_users",
   "manage_api_keys",
+  "manage_demo_config",
 ] as const;
 export type ConsoleAction = (typeof CONSOLE_ACTIONS)[number];
 
@@ -50,8 +53,20 @@ export const ACTION_MIN_ROLE: Record<ConsoleAction, Role> = {
   review_case: "pharmacist",
   resolve_exception: "pharmacist",
   approve_protocol_version: "pharmacy_director",
+  // An alert rule decides who is paged, how often, and about what. That is an oversight decision
+  // rather than a case decision, so it sits with the director: a pharmacist tuning a cooldown
+  // could silence the ladder that exists to escalate past them.
+  manage_alert_rules: "pharmacy_director",
+  // A catalog import rewrites the facts every score is computed from — what this facility stocks,
+  // from whom, and how much of it. Sharing `manage_users` would have made the matrix say something
+  // it does not mean, and left the two capabilities unable to move apart later.
+  manage_catalog: "admin",
   manage_users: "admin",
   manage_api_keys: "admin",
+  // Seeding the demo workspace writes fiction into a tenant. Admin, and never lower: the whole
+  // point of the seed is that it is obviously not real data, which only holds if the person who
+  // put it there knew that.
+  manage_demo_config: "admin",
 };
 
 /** Does `have` meet or exceed `min` in the role rank? */

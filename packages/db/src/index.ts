@@ -49,6 +49,7 @@ export {
 } from "./cases.js";
 export {
   approveProtocolVersion,
+  supersedeProtocolVersion,
   draftProtocolVersion,
   getApprovedProtocol,
   listProtocols,
@@ -118,6 +119,24 @@ export {
 } from "./api-keys.js";
 export { feedFreshness, recordFeedRecords, type FeedFreshness } from "./feeds.js";
 export {
+  browseCatalog,
+  catalogCoverage,
+  getCatalogItem,
+  type CatalogBrowseOptions,
+  type CatalogCoverage,
+  type CatalogItemDetail,
+  type CatalogListItem,
+} from "./catalog-browse.js";
+export {
+  dailyCounts,
+  listAlertHistory,
+  unacknowledgedCritical,
+  type AlertHistoryOptions,
+  type AlertHistoryRow,
+  type DailyCount,
+  type UnacknowledgedCase,
+} from "./oversight.js";
+export {
   listAlertRules,
   createAlertRule,
   updateAlertRule,
@@ -185,6 +204,8 @@ export {
   type RetentionSweepResult,
 } from "./retention.js";
 export type {
+  AlertRuleRow,
+  AlertEventRow,
   SignalEvidenceRow,
   RiskSignalRow,
   RiskScoreSnapshotRow,

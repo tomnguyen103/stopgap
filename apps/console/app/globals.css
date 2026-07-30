@@ -737,3 +737,99 @@ button.danger {
   /* A captured URL is one long unbreakable token; without this it widens the dialog. */
   overflow-wrap: anywhere;
 }
+
+/* ---- Ticket 14: the trend chart and the version diff --------------------------------------- */
+.ds-chart svg {
+  width: 100%;
+  height: 160px;
+  display: block;
+}
+.ds-chart figcaption {
+  margin-top: var(--space-5);
+}
+/* The legend key repeats the line's colour beside its NAME, so identity never rests on colour
+   alone — the same reason the diff below carries a + and a − as well as a tint. */
+.ds-chart__key {
+  display: inline-block;
+  width: 10px;
+  height: 2px;
+  vertical-align: middle;
+  margin-right: var(--space-4);
+}
+.ds-chart__key--cases {
+  background: var(--interactive);
+}
+.ds-chart__key--alerts {
+  background: var(--severity-high);
+}
+.ds-diff {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ds-diff--added {
+  color: var(--status-ok);
+}
+.ds-diff--removed {
+  color: var(--status-bad);
+}
+.ds-diff--unchanged {
+  color: var(--text-subtle);
+}
+
+/* ---- Ticket 17: per-row import failures ---------------------------------------------------- */
+/*
+  A list, not a paragraph: an administrator reads this while editing the file beside it, and forty
+  reasons run together are forty they have to re-find.
+*/
+.ds-errors {
+  list-style: none;
+  margin: var(--space-5) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--status-bad);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* ---- Ticket 14: promotion gates, met and unmet ---------------------------------------------- */
+/*
+  Both halves of the verdict, in one list. Naming only the failures leaves a class one gate short
+  reading exactly like one that is four short, so the passes carry a mark of their own.
+
+  Colour is NOT the signal — `--status-ok` and `--status-bad` sit either side of a red/green
+  confusion that roughly one man in twelve has. The glyph in the markup carries the meaning and the
+  colour reinforces it, which is why the tick and cross are real characters rather than a background.
+*/
+.ds-gates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+.ds-gates li[data-met="yes"] {
+  color: var(--status-ok);
+}
+.ds-gates li[data-met="no"] {
+  color: var(--status-bad);
+}
+
+/*
+  Available to a screen reader, absent from the page. `display: none` would take it from both, and
+  the tick beside each gate is decorative — the word is what carries "met" to anyone not seeing it.
+*/
+.ds-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

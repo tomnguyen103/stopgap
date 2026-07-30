@@ -3,10 +3,19 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { createHash } from "node:crypto";
+
 import { isRole } from "@stopgap/core";
+import { CATALOG_KINDS, planImport } from "@stopgap/catalog";
+import { describeRowError } from "./catalog-list";
+import { MAX_UPLOAD_BYTES } from "./upload-limit";
 import {
   appendAudit,
+  importCatalog,
+  createAlertRule,
+  updateAlertRule,
   approveProtocolVersion,
+  supersedeProtocolVersion,
   assignRole,
   getCaseByKey,
   getCaseByWorkflowId,
@@ -22,6 +31,7 @@ import {
   assertMutationAllowed,
   isDemoMode,
   prepareDemoRun,
+  seedDemoOrg,
   type DemoRunResult,
 } from "@stopgap/demo";
 import {
@@ -152,11 +162,20 @@ async function recordPrivilegedAudit(
   action: string,
   detail: Record<string, unknown>,
   eventKey: string,
+  /**
+   * An OPEN tenant transaction to append inside, when the caller has one.
+   *
+   * Without it this opens its own, and the write it records has already committed — so an audit
+   * failure leaves the action done and unrecorded, which for withdrawing live clinical guidance is
+   * the one combination that must not happen. Passing the transaction makes the entry and the
+   * change succeed or fail together.
+   */
+  tx?: Parameters<Parameters<typeof withOrgDb>[1]>[0],
 ): Promise<void> {
   // The org the caller is ACTING IN, which for an admin using the active-org switch is the tenant
   // they switched to, not their home org. That is the point of recording it: the chain has to say
   // which hospital an action happened in, and for a deployment admin those two can differ.
-  await withOrgDb(principal.orgId, (db) =>
+  const append = (db: Parameters<Parameters<typeof withOrgDb>[1]>[0]) =>
     appendAudit(db, {
       orgId: principal.orgId,
       actor: principal.label,
@@ -164,8 +183,12 @@ async function recordPrivilegedAudit(
       action,
       detail: { ...detail, identitySource: "authenticated-session" },
       eventKey,
-    }),
-  );
+    });
+  if (tx) {
+    await append(tx);
+    return;
+  }
+  await withOrgDb(principal.orgId, append);
 }
 
 /**
@@ -179,22 +202,253 @@ export async function approveProtocolVersionAction(versionId: unknown): Promise<
   assertMutationAllowed("Approving a protocol version");
   const principal = await requireRole("approve_protocol_version");
   const id = z.string().uuid().parse(versionId);
-  const { row, changed } = await withOrgDb(principal.orgId, (db) =>
-    approveProtocolVersion(principal.orgId, id, principal.label, principal.userId ?? undefined, db),
-  );
-  // Skip the audit entry when the version was already approved (no-op): recording it would put a
-  // second "approved" claim into the chain for an approval that did not happen.
-  if (changed) {
-    await recordPrivilegedAudit(
-      principal,
-      "protocol.version_approved",
-      { versionId: id, version: row.version, via: "director-approval" },
-      // Keyed by version id so it never collides with the workflow's own
-      // `protocol.version_approved.v<n>` entries (which are keyed by case run + version).
-      `protocol.version_approved.direct.${id}`,
+  // ONE TRANSACTION over the change and its audit entry. Opened separately, the approval commits
+  // first and an audit failure leaves it recorded nowhere — the chain's job is to have no holes,
+  // and a hole exactly where a director approved clinical guidance is the worst one available.
+  await withOrgDb(principal.orgId, async (db) => {
+    const { row, changed } = await approveProtocolVersion(
+      principal.orgId,
+      id,
+      principal.label,
+      principal.userId ?? undefined,
+      db,
+    );
+    // Skip the audit entry when the version was already approved (no-op): recording it would put a
+    // second "approved" claim into the chain for an approval that did not happen.
+    if (changed) {
+      await recordPrivilegedAudit(
+        principal,
+        "protocol.version_approved",
+        { versionId: id, version: row.version, via: "director-approval" },
+        // Keyed by version id so it never collides with the workflow's own
+        // `protocol.version_approved.v<n>` entries (which are keyed by case run + version).
+        `protocol.version_approved.direct.${id}`,
+        db,
+      );
+    }
+  });
+  revalidatePath("/protocols");
+}
+
+/**
+ * Alert-rule input, validated at the boundary (ticket 14).
+ *
+ * `cooldownMinutes` is bounded here AND refused by the database helper: this schema is what turns
+ * a form post into a typed value, and `createAlertRule` is what refuses a zero cooldown for the
+ * reason stated on it. Two checks, because a form is not the only caller.
+ */
+const alertRuleSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  minSeverity: z.enum(["low", "moderate", "high", "critical"]),
+  cooldownMinutes: z.coerce.number().int().min(1).max(10_080),
+  channels: z.array(z.enum(["email", "chat"])).min(1),
+  riskDomain: z.enum(["shortage", "recall"]).nullish(),
+  entityContains: z.string().trim().max(200).nullish(),
+  chatWebhookUrl: z.string().url().max(2_000).nullish(),
+  enabled: z.boolean().optional(),
+});
+
+/** Create an alert rule. Director-gated: a rule decides who gets paged and how often. */
+/**
+ * WITHDRAW the approved version of a protocol, putting nothing in its place (ticket 14).
+ *
+ * The other half of "approved or superseded", and a different act from approving. Approving
+ * supersedes the previous version on the way past — the protocol has live guidance throughout.
+ * This leaves it with NONE, deliberately: the guidance we published is wrong or overtaken, and no
+ * guidance is safer than misleading guidance while the replacement is written. Stale advice
+ * outliving its shortage is the failure this exists to prevent.
+ *
+ * Same gate as approval (`approve_protocol_version` → `pharmacy_director`): withdrawing live
+ * clinical guidance is at least as consequential as publishing it, so it is not a lesser
+ * permission.
+ */
+/**
+ * Seed the demo workspace (ticket 17).
+ *
+ * DELIBERATELY NOT BEHIND `assertMutationAllowed`, and it is the only action here that is not.
+ * That guard refuses every mutation while demo mode is ON, because a public visitor must not be
+ * able to change anything. This action inverts it: seeding is only legal WHEN demo mode is on,
+ * because what it writes is fiction — three invented shortages with a `demo-seed-` key — and
+ * fiction sitting beside real shortages in a pharmacist's queue is the hazard the demo seeder has
+ * always refused outside demo mode to avoid.
+ *
+ * So the check is stated here rather than inherited, with the reason a reader needs: not "you may
+ * not do that", but "this deployment is a real one, and this would put invented shortages in front
+ * of somebody making clinical decisions".
+ *
+ * Admin-gated on top of that. The seed is recognizable as fiction only to someone who knows it was
+ * seeded, so the person who put it there has to have known.
+ */
+export async function seedDemoWorkspaceAction(): Promise<{ cases: number; protocols: number }> {
+  const principal = await requireRole("manage_demo_config");
+  if (!isDemoMode()) {
+    throw new Error(
+      "This deployment is not in demo mode. Seeding would put invented shortages beside real ones.",
     );
   }
+  // THE CALLER'S OWN TENANT. `seedDemoData` writes into both fixed demo orgs, which is correct for
+  // the nightly job and wrong here: `requireRole` authorized this administrator in the org they are
+  // acting in, and seeding two others regardless would make the authorization and the effect be
+  // about different hospitals.
+  const result = await seedDemoOrg(principal.orgId);
+  await recordPrivilegedAudit(
+    principal,
+    "demo.workspace_seeded",
+    { cases: result.cases, protocolsWritten: result.protocolsWritten, reseeded: result.reseeded },
+    // Keyed by DAY, not by clock: a re-seed is idempotent and re-running it twice in an afternoon
+    // is one fact about that afternoon, not two.
+    `demo.workspace_seeded.${new Date().toISOString().slice(0, 10)}`,
+  );
+  revalidatePath("/admin");
+  revalidatePath("/queue");
+  return { cases: result.cases, protocols: result.protocolsWritten };
+}
+
+export async function supersedeProtocolVersionAction(versionId: unknown): Promise<void> {
+  assertMutationAllowed("Withdrawing a protocol version");
+  const principal = await requireRole("approve_protocol_version");
+  const id = z.string().uuid().parse(versionId);
+  // ONE TRANSACTION over the withdrawal and its audit entry, for the reason above and more sharply
+  // here: this takes live guidance off the floor, and a withdrawal nobody can account for is worse
+  // than one that failed outright.
+  await withOrgDb(principal.orgId, async (db) => {
+    const { row, changed } = await supersedeProtocolVersion(
+      principal.orgId,
+      id,
+      principal.label,
+      principal.userId ?? undefined,
+      db,
+    );
+    // Nothing to record when it was already withdrawn: a second entry would claim a withdrawal that
+    // did not happen, the same reason approval skips its own no-op.
+    if (changed) {
+      await recordPrivilegedAudit(
+        principal,
+        "protocol.version_withdrawn",
+        { versionId: id, version: row.version },
+        `protocol.version_withdrawn.${id}`,
+        db,
+      );
+    }
+  });
   revalidatePath("/protocols");
+  revalidatePath("/approvals");
+  revalidatePath("/oversight");
+}
+
+export async function createAlertRuleAction(input: unknown): Promise<void> {
+  assertMutationAllowed("Creating an alert rule");
+  const principal = await requireRole("manage_alert_rules");
+  const parsed = alertRuleSchema.parse(input);
+  const row = await withOrgDb(principal.orgId, (db) => createAlertRule(db, principal.orgId, parsed));
+  await recordPrivilegedAudit(
+    principal,
+    "alert_rule.created",
+    // The rule's SHAPE, not a webhook URL: a chat webhook is a credential, and the audit chain is
+    // read by more people than the settings page that set it.
+    {
+      ruleId: row.id,
+      name: row.name,
+      minSeverity: row.minSeverity,
+      cooldownMinutes: row.cooldownMinutes,
+    },
+    `alert_rule.created.${row.id}`,
+  );
+  revalidatePath("/alerts");
+}
+
+/** Tune an existing rule. Same gate, same reasoning — a cooldown change is a paging change. */
+export async function updateAlertRuleAction(ruleId: unknown, input: unknown): Promise<void> {
+  assertMutationAllowed("Updating an alert rule");
+  const principal = await requireRole("manage_alert_rules");
+  const id = z.string().uuid().parse(ruleId);
+  // The FULL shape, not a patch: `updateAlertRule` replaces the row's settable columns, so a
+  // partial parse here would quietly reset every field the form did not send.
+  const parsed = alertRuleSchema.parse(input);
+  const row = await withOrgDb(principal.orgId, (db) =>
+    updateAlertRule(db, principal.orgId, id, parsed),
+  );
+  // A rule belonging to another tenant is simply not found — the update matched nothing, and the
+  // audit chain must not record a change that did not happen.
+  if (!row) throw new Error("alert rule not found");
+  await recordPrivilegedAudit(
+    principal,
+    "alert_rule.updated",
+    {
+      ruleId: id,
+      enabled: row.enabled,
+      minSeverity: row.minSeverity,
+      cooldownMinutes: row.cooldownMinutes,
+    },
+    // Keyed on the rule AND the moment: a rule tuned twice is two entries, not one restated.
+    `alert_rule.updated.${id}.${String(row.updatedAt.getTime())}`,
+  );
+  revalidatePath("/alerts");
+}
+
+/**
+ * Import a catalog file (ticket 17).
+ *
+ * Gated on `manage_catalog`, its own capability at admin rank: a catalog upload rewrites the facts
+ * every score is computed from, and borrowing `manage_users` would have made the role matrix say
+ * something it does not mean.
+ *
+ * The plan is built and REFUSED as a whole when any row fails: a partially-applied catalog is a
+ * facility that believes it stocks things it does not. Every failing row comes back with its line
+ * so the file can be corrected, rather than one error at a time.
+ */
+export async function importCatalogAction(
+  kind: unknown,
+  csv: unknown,
+): Promise<{ ok: true; kind: string; rowsApplied: number } | { ok: false; errors: string[] }> {
+  assertMutationAllowed("Importing a catalog file");
+  const principal = await requireRole("manage_catalog");
+  const parsedKind = z.enum(CATALOG_KINDS).parse(kind);
+  // Bounded before it is parsed: an unbounded upload is memory the request did not ask permission
+  // for, and a catalog file that large is a mistake rather than a facility.
+  //
+  // BYTES, not characters. `z.string().max()` counts UTF-16 code units, and the panel that checks
+  // this first measures `File.size`, which is bytes — so the two limits disagreed on any file
+  // carrying non-ASCII, which a product list with accented supplier names routinely does. The
+  // server's limit is the one that binds, so it is the one that has to mean what it says.
+  const text = z
+    .string()
+    .refine(
+      (value) => Buffer.byteLength(value, "utf8") <= MAX_UPLOAD_BYTES,
+      `catalog upload exceeds ${String(MAX_UPLOAD_BYTES)} bytes`,
+    )
+    .parse(csv);
+  const digest = createHash("sha256").update(text).digest("hex").slice(0, 32);
+  const plan = planImport(parsedKind, text);
+  // The SAME formatter the page uses. Two copies had already drifted on their quote characters,
+  // which is how a message a person is meant to act on becomes two messages.
+  if (!plan.ok) {
+    // A REFUSAL IS STILL AN ATTEMPT. Auditing only successful imports leaves an administrator able
+    // to probe the catalog parser repeatedly with nothing in the chain to show for it, and leaves
+    // the one question an incident asks — who tried to load what, and when — unanswerable. The
+    // shape only: how many rows failed and the digest of the file, never its contents.
+    await recordPrivilegedAudit(
+      principal,
+      "catalog.import_refused",
+      { kind: parsedKind, errors: plan.errors.length, contentSha256: digest },
+      `catalog.import_refused.${parsedKind}.${digest}`,
+    );
+    return { ok: false, errors: plan.errors.map(describeRowError) };
+  }
+  const result = await importCatalog(principal.orgId, plan);
+  await recordPrivilegedAudit(
+    principal,
+    "catalog.imported",
+    // The SHAPE of the import, never its contents: the audit chain records that a catalog was
+    // replaced and how much of it, not the facility's product list.
+    { kind: result.kind, rowsApplied: result.rowsApplied, contentSha256: digest },
+    // Keyed on WHAT was imported, not on when. A clock-keyed event key makes a double-click two
+    // entries for one import; the digest also lets the chain answer "which file was this".
+    `catalog.imported.${result.kind}.${digest}`,
+  );
+  revalidatePath("/admin/catalog");
+  revalidatePath("/admin");
+  return { ok: true, kind: result.kind, rowsApplied: result.rowsApplied };
 }
 
 const roleSchema = z.string().refine(isRole, "unknown role");

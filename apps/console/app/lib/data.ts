@@ -1,7 +1,18 @@
 import "server-only";
+import type { EscalationStep } from "@stopgap/workflows";
 import {
   feedFreshness,
+  browseCatalog,
+  catalogCoverage,
+  dailyCounts,
+  getCatalogItem,
   getCaseByWorkflowId,
+  getLlmSpend,
+  listAlertHistory,
+  lastFiredByRule,
+  listAlertRules,
+  unacknowledgedCritical,
+  getEscalationPolicy,
   getDb,
   getKpis,
   getSignalByKey,
@@ -24,7 +35,17 @@ import {
 } from "@stopgap/db";
 import type { CaseStatus, Role } from "@stopgap/core";
 import type {
+  AlertHistoryOptions,
+  CatalogBrowseOptions,
+  CatalogCoverage,
+  CatalogItemDetail,
+  CatalogListItem,
+  AlertHistoryRow,
+  AlertRuleRow,
   ApiKeyRow,
+  DailyCount,
+  DailySpend,
+  UnacknowledgedCase,
   Kpis,
   CaseQueueOptions,
   QueuedCase,
@@ -428,4 +449,138 @@ export async function getCaseEvidence(genericName: string): Promise<{
     if (!signal) return { signal: undefined, evidence: [] };
     return { signal, evidence: await listEvidenceForSignal(db, orgId, signal.id) };
   });
+}
+
+/** The director's oversight figures (ticket 14). */
+export interface OversightData {
+  kpis: Kpis;
+  trend: DailyCount[];
+  unacknowledged: UnacknowledgedCase[];
+  /**
+   * The critical severity's escalation ladder, so the unacknowledged list can say who the policy
+   * has already called for. Empty when no ladder is configured, which the page states rather than
+   * rendering an implied one.
+   */
+  criticalLadder: EscalationStep[];
+  spend: DailySpend;
+  pendingVersions: {
+    protocol: ProtocolRow;
+    version: ProtocolVersionRow;
+    previousBody: string;
+    supersedes: number | null;
+  }[];
+}
+
+export async function getOversight(): Promise<OversightData> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const [kpis, trend, unacknowledged, spend, criticalPolicy] = await Promise.all([
+      getKpis(orgId, db),
+      dailyCounts(db, orgId),
+      unacknowledgedCritical(db, orgId),
+      getLlmSpend(db),
+      // One read for the whole list: the ladder is per SEVERITY, and every row here is critical.
+      getEscalationPolicy(db, "critical"),
+    ]);
+    // Drafted versions waiting on a director, each paired with the approved text it would replace
+    // — which is what makes "what changed" answerable without a second round trip per row.
+    const rows = await db
+      .select({ protocol: schema.protocols, version: schema.protocolVersions })
+      .from(schema.protocolVersions)
+      .innerJoin(
+        schema.protocols,
+        and(
+          eq(schema.protocols.orgId, orgId),
+          eq(schema.protocols.id, schema.protocolVersions.protocolId),
+        ),
+      )
+      .where(
+        and(eq(schema.protocolVersions.orgId, orgId), eq(schema.protocolVersions.state, "draft")),
+      )
+      .orderBy(desc(schema.protocolVersions.createdAt));
+    // The approved version each draft would replace. `DISTINCT ON` with an explicit order, not a
+    // bare filter: `approveProtocolVersion` supersedes the previous approval in the same
+    // transaction so there should be one per protocol, and "should be" is not an ordering — an
+    // unordered read would let the planner pick either row on any day the invariant slipped.
+    const approved = await db
+      .selectDistinctOn([schema.protocolVersions.protocolId], {
+        protocolId: schema.protocolVersions.protocolId,
+        version: schema.protocolVersions.version,
+        body: schema.protocolVersions.body,
+      })
+      .from(schema.protocolVersions)
+      .where(
+        and(eq(schema.protocolVersions.orgId, orgId), eq(schema.protocolVersions.state, "approved")),
+      )
+      .orderBy(schema.protocolVersions.protocolId, desc(schema.protocolVersions.version));
+    const approvedByProtocol = new Map(
+      approved.map((row) => [row.protocolId, { body: row.body, version: row.version }]),
+    );
+    return {
+      kpis,
+      trend,
+      unacknowledged,
+      spend,
+      criticalLadder: criticalPolicy?.steps ?? [],
+      pendingVersions: rows.map((row) => {
+        const previous = approvedByProtocol.get(row.protocol.id);
+        return {
+          ...row,
+          previousBody: previous?.body ?? "",
+          // The version this draft would SUPERSEDE, read from the approved row rather than guessed
+          // as "mine minus one" — with two drafts pending, that guess names another draft.
+          supersedes: previous?.version ?? null,
+        };
+      }),
+    };
+  });
+}
+
+/** This tenant's alert rules with when each last fired, for the director's rules panel. */
+export async function getAlertRules(): Promise<{
+  rules: AlertRuleRow[];
+  lastFired: Record<string, string>;
+}> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, async (db) => {
+    const rules = await listAlertRules(db, orgId);
+    return {
+      rules,
+      // ONE query for the whole list, not one per rule: `lastFiredByRule` is a DISTINCT ON over the
+      // events table and a per-row lookup would be a round trip per rule on every render.
+      lastFired: await lastFiredByRule(
+        db,
+        orgId,
+        rules.map((rule) => rule.id),
+      ),
+    };
+  });
+}
+
+/** One page of alert history, with the rule that produced each event. */
+export async function getAlertHistory(
+  options: AlertHistoryOptions,
+): Promise<{ rows: AlertHistoryRow[]; total: number; page: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => listAlertHistory(db, orgId, options));
+}
+
+/** One page of the facility catalog, for the administrator's browser (ticket 17). */
+export async function getCatalogPage(
+  options: CatalogBrowseOptions,
+): Promise<{ rows: CatalogListItem[]; total: number; page: number }> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => browseCatalog(db, orgId, options));
+}
+
+/** One catalog item, with its identifiers, suppliers, inventory and matched signals. */
+export async function getCatalogItemDetail(sku: string): Promise<CatalogItemDetail | undefined> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => getCatalogItem(db, orgId, sku));
+}
+
+/** How much of the catalog exists — the setup checklist's evidence. */
+export async function getCatalogCoverage(): Promise<CatalogCoverage> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => catalogCoverage(db, orgId));
 }

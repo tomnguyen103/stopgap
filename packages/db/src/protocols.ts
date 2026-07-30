@@ -188,6 +188,76 @@ export interface ApprovalResult {
   changed: boolean;
 }
 
+/**
+ * Withdraw the approved version of a protocol without putting another in its place (ticket 14).
+ *
+ * NOT THE SAME ACT AS APPROVING. Approving supersedes the previous version as a side effect —
+ * "this replaces that" — and leaves the protocol with live guidance throughout. This says
+ * something different and sometimes necessary: the guidance we published is wrong or overtaken,
+ * and until somebody writes the next one there should be NO approved version rather than a
+ * misleading one. A pharmacist reading the protocol then sees that it was withdrawn, which is the
+ * honest state; leaving stale guidance approved because no replacement exists yet is how a
+ * shortage protocol outlives the shortage.
+ *
+ * Takes the same per-protocol lock `approveProtocolVersion` takes, and for the same reason: without
+ * it a concurrent approval and withdrawal can interleave and commit a protocol that is both.
+ */
+export async function supersedeProtocolVersion(
+  orgId: string,
+  versionId: string,
+  supersededBy: string,
+  supersededByUserId?: string | null,
+  db: Db = getDb(),
+): Promise<ApprovalResult> {
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select()
+      .from(protocolVersions)
+      .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.id, versionId)))
+      .limit(1);
+    if (!target) throw new Error(`protocol version ${versionId} not found`);
+    await tx.execute(sql`select id from ${protocols} where id = ${target.protocolId} for update`);
+    // RE-READ UNDER THE LOCK. The state above was read BEFORE the lock existed, so a concurrent
+    // withdrawal or approval could have committed in between and this decision would be taken on a
+    // value that is already stale — two withdrawals of one version, or a withdrawal of something
+    // another director had just replaced. The lock is only worth taking if what it guards is read
+    // after it is held.
+    const [locked] = await tx
+      .select({ state: protocolVersions.state })
+      .from(protocolVersions)
+      .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.id, versionId)))
+      .limit(1);
+    const state = locked?.state ?? target.state;
+    // Already withdrawn: idempotent, the way approving an approved version is. A double-click must
+    // not read as a second withdrawal in the audit trail.
+    if (state === "superseded") return { row: { ...target, state }, changed: false };
+    // A DRAFT has never been guidance, so there is nothing to withdraw. Refusing names that
+    // rather than silently marking it superseded, which would hide an unreviewed draft from the
+    // approval queue by giving it the state of something that had once been approved.
+    if (state !== "approved") {
+      throw new Error(`protocol version ${versionId} is a ${state}, not approved guidance`);
+    }
+
+    const [superseded] = await tx
+      .update(protocolVersions)
+      .set({
+        state: "superseded",
+        // WHO WITHDREW IT, recorded in the same columns approval uses. A withdrawal with no
+        // attribution is the one decision here nobody could later be asked to explain.
+        approvedBy: supersededBy,
+        approvedByUserId: supersededByUserId ?? null,
+      })
+      .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.id, versionId)))
+      .returning();
+
+    await tx
+      .update(protocols)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(protocols.orgId, orgId), eq(protocols.id, target.protocolId)));
+    return { row: superseded!, changed: true };
+  });
+}
+
 export async function approveProtocolVersion(
   orgId: string,
   versionId: string,
@@ -207,8 +277,17 @@ export async function approveProtocolVersion(
     // commit, leaving two approved versions — the exact state this function promises can
     // never exist.
     await tx.execute(sql`select id from ${protocols} where id = ${target.protocolId} for update`);
-    if (target.state === "approved") return { row: target, changed: false };
-    if (target.state === "superseded") {
+    // RE-READ UNDER THE LOCK, for the reason spelled out on `supersedeProtocolVersion`: the state
+    // above predates the lock, so without this a concurrent approval commits between the two and
+    // this one approves a version that is already superseded.
+    const [locked] = await tx
+      .select({ state: protocolVersions.state })
+      .from(protocolVersions)
+      .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.id, versionId)))
+      .limit(1);
+    const state = locked?.state ?? target.state;
+    if (state === "approved") return { row: { ...target, state }, changed: false };
+    if (state === "superseded") {
       throw new Error(`protocol version ${versionId} is superseded and cannot be approved`);
     }
 

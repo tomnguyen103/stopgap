@@ -76,6 +76,82 @@ export interface PromotionDecision {
   stage: PromotionStage;
   /** Why the class did not advance further — shown in the dashboard, not just logged. */
   blockedBy: string[];
+  /**
+   * Every gate for the NEXT stage, met and unmet alike, with the numbers behind each.
+   *
+   * `blockedBy` alone answers "why not yet" and nothing else, which leaves the two questions a
+   * director actually has unanswerable: how close is this class, and which gate is the one to work
+   * on. A list of only the failures reads the same at one gate short as at four, and a class that
+   * has just cleared its hardest gate looks identical to one that never had it.
+   *
+   * Empty at `auto-draft`: there is no further stage, so there is nothing left to be measured
+   * against — which is different from every gate being met, and reads differently.
+   */
+  criteria: PromotionCriterion[];
+}
+
+/** One promotion gate, evaluated — the threshold, the reading, and whether it passes. */
+export interface PromotionCriterion {
+  /** The gate's name in the words the dashboard uses. */
+  label: string;
+  met: boolean;
+  /** What this class actually reads, already formatted. */
+  actual: string;
+  /** What it has to reach, already formatted, including the direction of the comparison. */
+  required: string;
+}
+
+/** The stage a class is working towards, or null once there is nothing above it. */
+function nextStage(stage: PromotionStage): Exclude<PromotionStage, "shadow"> | null {
+  if (stage === "shadow") return "suggest";
+  if (stage === "suggest") return "auto-draft";
+  return null;
+}
+
+const pct = (value: number) => `${(value * 100).toFixed(0)}%`;
+
+/**
+ * The gates for whatever stage this class is trying to reach, each with its reading.
+ *
+ * Evaluated against the NEXT stage rather than the current one: the current stage's gates are all
+ * met by definition — that is what being at that stage means — so showing them would answer a
+ * question nobody asked.
+ */
+export function promotionCriteria(
+  stats: ShadowClassStats,
+  stage: PromotionStage,
+): PromotionCriterion[] {
+  const target = nextStage(stage);
+  if (target === null) return [];
+  const gate = PROMOTION_GATES[target];
+  return [
+    {
+      label: "scored runs",
+      met: stats.runs >= gate.minRuns,
+      actual: String(stats.runs),
+      required: `at least ${String(gate.minRuns)}`,
+    },
+    {
+      label: "mean agreement",
+      met: stats.meanAgreement >= gate.minMeanAgreement,
+      actual: pct(stats.meanAgreement),
+      required: `at least ${pct(gate.minMeanAgreement)}`,
+    },
+    {
+      label: "severity agreement",
+      met: stats.severityAgreementRate >= gate.minSeverityAgreementRate,
+      actual: pct(stats.severityAgreementRate),
+      required: `at least ${pct(gate.minSeverityAgreementRate)}`,
+    },
+    {
+      // The one gate with a CEILING rather than a floor: under-escalating is the failure that
+      // matters clinically, so more of it is worse, and the comparison runs the other way.
+      label: "under-escalation rate",
+      met: stats.underEscalationRate <= gate.maxUnderEscalationRate,
+      actual: pct(stats.underEscalationRate),
+      required: `at most ${pct(gate.maxUnderEscalationRate)}`,
+    },
+  ];
 }
 
 /** The stage a drug class has earned from its shadow-ledger aggregates. */
@@ -87,8 +163,10 @@ export function evaluatePromotion(stats: ShadowClassStats): PromotionDecision {
     underCallRate: stats.underEscalationRate,
   };
   const decision = evaluateGates(cohort, LIB_GATES);
+  const stage = decision.stage === "autonomous" ? "auto-draft" : decision.stage;
   return {
-    stage: decision.stage === "autonomous" ? "auto-draft" : decision.stage,
+    stage,
+    criteria: promotionCriteria(stats, stage),
     // The library says "level"/"under-call"; the dashboard this feeds is read by pharmacists.
     blockedBy: decision.blockedBy.map((reason: string) =>
       reason.replace("level agreement", "severity agreement").replace("under-call rate", "under-escalation rate"),
