@@ -82,7 +82,12 @@ export default async function AlertsPage({
             channels: rule.channels,
             riskDomain: rule.riskDomain,
             entityContains: rule.entityContains,
-            chatWebhookUrl: rule.chatWebhookUrl,
+            // WHETHER, never WHICH. The webhook is a bearer credential: anything handed to a
+            // client component is serialized into the payload the browser receives, so sending the
+            // url would publish it in page source to every director — and the panel only ever
+            // needed to know whether a destination exists. `updateAlertRule` treats the field as
+            // unchanged when an edit omits it, so nothing has to carry it to keep it.
+            hasChatWebhook: rule.chatWebhookUrl !== null,
             // Formatted on the server: `toLocaleString()` in a client component reads a locale and
             // a time zone that differ between the render and the hydration.
             lastFired: lastFired[rule.id]?.replace("T", " ").slice(0, 16) ?? null,

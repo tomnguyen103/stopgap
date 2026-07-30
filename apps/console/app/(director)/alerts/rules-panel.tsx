@@ -14,14 +14,18 @@ export interface RuleView {
   riskDomain: string | null;
   entityContains: string | null;
   /**
-   * The rule's chat webhook, carried through every edit.
+   * WHETHER the rule has a chat webhook — never the webhook itself.
    *
-   * `updateAlertRule` REPLACES the row's settable columns, so a panel that omitted this field would
-   * silently delete the tenant's webhook the first time somebody toggled a rule off and on — and a
-   * chat rule with no destination fails quietly, which is the failure mode alerting exists to
-   * prevent.
+   * A chat webhook is a bearer token: whoever holds the url can post as the integration. Props of a
+   * client component are serialized into the payload the browser receives, so the url would sit in
+   * page source for anyone who opened this page. The panel never displayed it and never needed it;
+   * it needs only to say when a chat rule has no destination, because such a rule fails QUIETLY,
+   * which is the failure mode alerting exists to prevent.
+   *
+   * Edits therefore OMIT the field, and `updateAlertRule` treats omitted as unchanged (only an
+   * explicit null clears it) — so the value survives every edit without ever leaving the server.
    */
-  chatWebhookUrl: string | null;
+  hasChatWebhook: boolean;
   /** When this rule last fired, already formatted by the server. */
   lastFired: string | null;
 }
@@ -45,6 +49,16 @@ export function RulesPanel({
   unavailableReason: string | null;
 }) {
   const blocked = Boolean(unavailableReason);
+  /**
+   * The control's own name AND the reason it is refused, composed the way
+   * `components/role-gated.tsx` composes them.
+   *
+   * A bare reason would REPLACE the accessible name, so a screen reader would announce "Needs the
+   * pharmacy director role" without saying which control it belongs to — the reason arrives and the
+   * identity goes, which is not an improvement on the tooltip. Undefined when allowed, so the
+   * element keeps its own text.
+   */
+  const gatedLabel = (name: string) => (unavailableReason ? `${name} — ${unavailableReason}` : undefined);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
   // Cooldown edits are CONTROLLED, keyed by rule. With an uncontrolled input the toggle button
@@ -67,7 +81,8 @@ export function RulesPanel({
       channels: merged.channels,
       riskDomain: merged.riskDomain,
       entityContains: merged.entityContains,
-      chatWebhookUrl: merged.chatWebhookUrl,
+      // DELIBERATELY ABSENT. Omitted means unchanged, which is how the credential is preserved
+      // across an edit without this component ever having held it.
       enabled: merged.enabled,
     };
   }
@@ -134,6 +149,7 @@ export function RulesPanel({
                     disabled={pending}
                     aria-disabled={blocked || undefined}
                     title={unavailableReason ?? undefined}
+                    aria-label={gatedLabel(`cooldown minutes for ${rule.name}`)}
                     onChange={(event) => {
                       const next = Number(event.target.value);
                       setCooldowns((current) => ({ ...current, [rule.id]: next }));
@@ -147,7 +163,14 @@ export function RulesPanel({
                     }}
                   />
                 </td>
-                <td>{rule.channels.join(", ")}</td>
+                <td>
+                  {rule.channels.join(", ")}
+                  {/* A chat rule with no destination does not error — it silently pages nobody,
+                      which is the one failure alerting cannot afford to keep to itself. */}
+                  {rule.channels.includes("chat") && !rule.hasChatWebhook ? (
+                    <span className="sub"> · no webhook set — this rule pages nobody</span>
+                  ) : null}
+                </td>
                 <td className="sub">{rule.lastFired ?? "never"}</td>
                 <td>
                   <button
@@ -155,6 +178,7 @@ export function RulesPanel({
                     className="ds-button ds-button--quiet"
                     aria-disabled={blocked || undefined}
                     title={unavailableReason ?? undefined}
+                    aria-label={gatedLabel(rule.enabled ? "Enabled" : "Disabled")}
                     disabled={pending}
                     onClick={() => {
                       // The cooldown from the box, not from props: an unsaved edit sitting in the
@@ -254,6 +278,7 @@ export function RulesPanel({
           className="ds-button"
           aria-disabled={blocked || undefined}
           title={unavailableReason ?? undefined}
+          aria-label={gatedLabel("Create rule")}
           disabled={
             pending ||
             name.trim().length === 0 ||

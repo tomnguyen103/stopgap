@@ -13,10 +13,11 @@ import { withOrgDb } from "../org-context.js";
  * assertion covering that requirement vanish silently the day the fixture data changed, and the
  * tier would still report green.
  *
- * NOT THE DEMO SEEDER, and not part of it. That seeder refuses to run outside
- * `STOPGAP_DEMO_MODE=on` because its cases are fiction that must not appear beside real shortages —
- * but the auth half of the browser tier runs with demo mode OFF, against a console wired to a real
- * IdP, so it can never call it. This writes the one row that tier needs and nothing else.
+ * NOT THE DEMO SEEDER, and not part of it. That seeder (`pnpm --filter @stopgap/demo seed`) refuses
+ * to run outside `STOPGAP_DEMO_MODE=on`, because its cases are fiction that must not appear beside
+ * real shortages — but the auth half of the browser tier runs with demo mode OFF, against a console
+ * wired to a real IdP, so it can never call it. This writes the one row that tier needs, and
+ * nothing else.
  *
  * NO CASE, on purpose. `draftProtocolVersion` takes an optional `sourceCaseId`, so the fixture is a
  * protocol and a drafted version with no case attached: nothing fictional lands in a pharmacist's
@@ -56,10 +57,43 @@ export async function seedBrowserFixture(): Promise<{ written: boolean }> {
   });
 }
 
+/** Loopback only. A parse failure counts as NOT local — an unreadable url is not a reassuring one. */
+function isLocalDatabase(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
 async function main() {
-  // The opt-in is the SCRIPT, the way `pnpm demo:seed` is: running the browser tier against a
-  // database is already the deliberate act. The guard that matters is the content — a protocol with
-  // no case, plainly labelled a fixture — rather than an env var the same command would set anyway.
+  // GUARDS THE DATABASE, not the command. "The script is the opt-in" was the first version of this
+  // and it defended the wrong thing: the hazard is not somebody running the seeder by accident, it
+  // is running `pnpm test:browser` — a command they meant to run — with `DATABASE_URL` still
+  // pointing at production. `SEED_ORG_ID` is not a sandbox there; migration 0013 backfilled the
+  // deployment's real rows into it, so on a live install it is a hospital, and this would drop a
+  // drafted protocol version into that facility's director approval queue, one click from becoming
+  // approved clinical guidance.
+  //
+  // So the question asked is "is this database a local one", which is the question that actually
+  // separates the safe case from the dangerous one. A remote test stack is a real thing, so there
+  // is an override — but it has to be set deliberately, by someone who has just read this.
+  if (process.env.NODE_ENV === "production") {
+    console.error("[browser-fixture] NODE_ENV is production — refusing to write a test fixture");
+    process.exitCode = 1;
+    return;
+  }
+  const url = process.env.DATABASE_URL;
+  if (url && !isLocalDatabase(url) && process.env.STOPGAP_E2E_SEED_REMOTE !== "on") {
+    console.error(
+      `[browser-fixture] DATABASE_URL points at a non-local host — refusing. This writes into ` +
+        `the SEED org, which on a real deployment holds that hospital's own rows. If you genuinely ` +
+        `mean a remote TEST stack, set STOPGAP_E2E_SEED_REMOTE=on.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   const { written } = await seedBrowserFixture();
   console.log(
     written

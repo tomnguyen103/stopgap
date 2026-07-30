@@ -136,20 +136,28 @@ export async function updateAlertRule(
   ruleId: string,
   input: AlertRuleInput,
 ): Promise<AlertRuleRow | undefined> {
-  // Read the stored webhook BEFORE validating, because "omitted" means "keep what is there" and
-  // the guard has to know what that is. A rule that does not exist returns undefined here rather
-  // than reaching the guard — otherwise editing a deleted rule reports a missing webhook, which
-  // sends whoever reads it looking for the wrong problem.
-  const [existing] = await db
-    .select({ chatWebhookUrl: alertRules.chatWebhookUrl })
-    .from(alertRules)
-    .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)));
-  if (!existing) return undefined;
-  assertRuleVocabulary(
-    input,
-    input.chatWebhookUrl === undefined ? existing.chatWebhookUrl : input.chatWebhookUrl,
-  );
-  const [row] = await db
+  // ONE TRANSACTION over the read and the write. The read decides what the guard validates, so a
+  // concurrent edit that cleared the webhook between the two would let a chat rule be written with
+  // no destination — validated against a value that no longer existed. That rule then pages nobody,
+  // silently, which is the failure the guard is here to prevent.
+  return db.transaction(async (tx) => {
+    // Read the stored webhook BEFORE validating, because "omitted" means "keep what is there" and
+    // the guard has to know what that is. A rule that does not exist returns undefined here rather
+    // than reaching the guard — otherwise editing a deleted rule reports a missing webhook, which
+    // sends whoever reads it looking for the wrong problem.
+    //
+    // The org predicate is part of the LOOKUP, not a filter on the result: without it a caller could
+    // read another tenant's webhook state and validate against it.
+    const [existing] = await tx
+      .select({ chatWebhookUrl: alertRules.chatWebhookUrl })
+      .from(alertRules)
+      .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)));
+    if (!existing) return undefined;
+    assertRuleVocabulary(
+      input,
+      input.chatWebhookUrl === undefined ? existing.chatWebhookUrl : input.chatWebhookUrl,
+    );
+    const [row] = await tx
     .update(alertRules)
     .set({
       name: input.name,
@@ -170,7 +178,8 @@ export async function updateAlertRule(
     })
     .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
     .returning();
-  return row;
+    return row;
+  });
 }
 
 /**

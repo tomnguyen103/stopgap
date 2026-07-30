@@ -121,8 +121,13 @@ export default async function OversightPage() {
           </p>
         ) : (
           <p className="sub sub-tight">
-            {((oversight.spend.usd / Math.max(cap, 0.01)) * 100).toFixed(0)}% of the $
-            {cap.toFixed(2)} cap.
+            {/* A cap of ZERO is configured, not absent — it means "spend nothing", and every call
+                is over it. The old `Math.max(cap, 0.01)` floor turned that into a percentage of a
+                denominator nobody set: $3 against a $0 cap printed "30000%", which reads as a
+                display bug and buries the one fact that matters, that the cap is reached. */}
+            {cap === 0
+              ? "The cap is $0.00, so any spend is over it."
+              : `${((oversight.spend.usd / cap) * 100).toFixed(0)}% of the $${cap.toFixed(2)} cap.`}
             {oversight.spend.usd >= cap
               ? " The cap is reached: model calls route to the local provider until it resets."
               : ""}

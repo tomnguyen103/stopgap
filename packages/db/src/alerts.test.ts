@@ -25,9 +25,15 @@ const STORED = { chatWebhookUrl: "https://chat.example.test/hooks/stored-secret"
 /** The subset of the drizzle select/insert/update chain these two functions use. */
 function fakeDb(existing: Record<string, unknown>[]) {
   const writes: Record<string, unknown>[] = [];
+  /** Every predicate handed to `.where()`, so a test can assert the pre-read is org-scoped. */
+  const wheres: unknown[] = [];
   const chain = (result: unknown[]) => {
     const self: Record<string, unknown> = {};
-    for (const method of ["from", "where", "returning"]) self[method] = () => self;
+    for (const method of ["from", "returning"]) self[method] = () => self;
+    self.where = (predicate: unknown) => {
+      wheres.push(predicate);
+      return self;
+    };
     self.set = (values: Record<string, unknown>) => {
       writes.push(values);
       return self;
@@ -39,13 +45,34 @@ function fakeDb(existing: Record<string, unknown>[]) {
     self.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
     return self;
   };
-  const db = {
+  const db: Record<string, unknown> = {
     select: () => chain(existing),
     // The row the write returns is irrelevant here; only reaching the write matters.
     update: () => chain([{ id: RULE_ID }]),
     insert: () => chain([{ id: RULE_ID }]),
   };
-  return { db: db as never, writes };
+  // `updateAlertRule` reads and writes inside one transaction, so the fake has to offer one. It
+  // hands back the same object: there is no isolation to model here, only the call shape.
+  db.transaction = (fn: (tx: unknown) => unknown) => fn(db);
+  return { db: db as never, writes, wheres };
+}
+
+/**
+ * Does a captured drizzle predicate mention this value?
+ *
+ * Walks the object rather than stringifying it: a drizzle SQL node holds references back to its
+ * table, so `JSON.stringify` hits a circular structure. The `seen` set is what makes the walk
+ * terminate on exactly that shape.
+ */
+function mentions(predicate: unknown, value: string): boolean {
+  const seen = new Set<unknown>();
+  const visit = (node: unknown): boolean => {
+    if (node === value) return true;
+    if (node === null || typeof node !== "object" || seen.has(node)) return false;
+    seen.add(node);
+    return Object.values(node as Record<string, unknown>).some(visit);
+  };
+  return visit(predicate);
 }
 
 const CHAT_RULE = {
@@ -95,5 +122,24 @@ describe("a chat rule's webhook is validated against what the rule will HAVE", (
     await expect(
       createAlertRule(db, ORG, { ...CHAT_RULE, chatWebhookUrl: STORED.chatWebhookUrl }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe("the pre-read is scoped to the caller's tenant", () => {
+  it("filters by org, not by rule id alone", async () => {
+    // The gap this closes: the fake used to ignore `.where()` entirely, so deleting
+    // `eq(alertRules.orgId, orgId)` from the pre-read left every case in this file passing. The
+    // pre-read decides what the guard validates against — unscoped, it reads ANOTHER tenant's
+    // webhook state and lets a chat rule through on the strength of it.
+    const { db, wheres } = fakeDb([STORED]);
+    await updateAlertRule(db, ORG, RULE_ID, {
+      name: "r",
+      minSeverity: "high",
+      cooldownMinutes: 60,
+      channels: ["chat"],
+    });
+    expect(wheres.length).toBeGreaterThan(0);
+    expect(mentions(wheres[0], ORG)).toBe(true);
+    expect(mentions(wheres[0], RULE_ID)).toBe(true);
   });
 });

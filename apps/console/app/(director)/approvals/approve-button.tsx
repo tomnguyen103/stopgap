@@ -34,7 +34,13 @@ export function ApproveButton({
         // `aria-disabled`, not `disabled`: a disabled control leaves the tab order and takes its
         // own explanation with it. The handler no-ops and the server action refuses regardless.
         aria-disabled={blocked || undefined}
+        // The reason belongs in the ACCESSIBLE NAME as well as the tooltip, the way
+        // `components/role-gated.tsx` composes them: browsers do not fire `title` for a screen
+        // reader, so a tooltip-only explanation reaches everyone except the people who most need
+        // it. Composed with the control's own name rather than replacing it — a bare reason
+        // announces why without saying which control it belongs to.
         title={unavailableReason ?? undefined}
+        aria-label={unavailableReason ? `Approve — ${unavailableReason}` : undefined}
         disabled={pending}
         onClick={() => {
           if (blocked) return;
