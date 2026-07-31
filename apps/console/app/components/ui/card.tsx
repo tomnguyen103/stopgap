@@ -13,10 +13,14 @@ export interface CardProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
   /**
    * Tints the card's left rail.
    *
-   * Set it ONLY when the card has a real state to report. A rail on every card is a rail that
-   * says nothing; the untinted default is a hairline, which is the honest reading of "no state".
-   * It never carries the meaning alone — the badge or figure inside still says what the state is,
-   * which is what keeps it legible under `forced-colors` and to a colourblind reader.
+   * Set it ONLY when the card has a real state to report — including `ok`. "Nothing is waiting on
+   * a director" is a finding, not an absence, and a director scanning `/oversight` is looking for
+   * exactly that as much as for the amber one. What the untinted default means is "this card has
+   * no state to report at all", which is why most cards leave it unset.
+   *
+   * It never carries the meaning alone. Every card that sets this also states its state in words
+   * inside it, which is what keeps the signal under `forced-colors`, for a screen reader, and for
+   * a reader who cannot separate amber from grey.
    */
   state?: CardState;
   children: ReactNode;

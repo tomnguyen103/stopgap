@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { Card } from "./components/ui/card";
+import { Card } from "./components/ui";
 import { readGlobalsCss } from "./design-test-helpers";
 
 /**
@@ -43,10 +43,19 @@ describe("the Ledger Rail", () => {
     );
   });
 
-  it("carries the same rail onto a state-bearing table row", () => {
+  it("carries the same rail onto a table row", () => {
     // A `tr` cannot host an absolutely-positioned pseudo-element reliably, so the first cell does.
     expect(css).toMatch(/\.ds-table td:first-child\s*\{\s*position: relative/);
-    expect(css).toMatch(/\.ds-table tr\[data-state\] td:first-child::before/);
+    expect(css).toMatch(/\.ds-table tbody tr td:first-child::before/);
+  });
+
+  it("gives a stateless row its rail AT REST, so hovering tints rather than reveals", () => {
+    // §7: the row's rail "tints from `--line-subtle` to `--line-default`". A rail that only
+    // exists while hovered does not tint — it appears, which is a different and noisier thing
+    // on a 400-row queue.
+    expect(css).toMatch(
+      /\.ds-table tbody tr td:first-child::before\s*\{[^}]*var\(--rail, var\(--line-subtle\)\)/,
+    );
   });
 
   it("lets a row's own state win over its hover tint", () => {
