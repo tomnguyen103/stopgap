@@ -6,7 +6,7 @@ PR batch: B
 
 **Blocked by:** 03, 07, 09, 10
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] The pharmacist lands on their review queue, ranked by risk score
 - [x] The queue can be filtered by severity, status and risk domain, sorted, searched and paged, with state carried in the page address

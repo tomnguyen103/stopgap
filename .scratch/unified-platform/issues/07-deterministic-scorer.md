@@ -6,7 +6,7 @@ The score is code, never a model output, per the deterministic-spine decision. L
 
 **Blocked by:** 06
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #19; every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] Each signal produces a persisted snapshot carrying a per-component breakdown
 - [x] Identical inputs and an identical evaluation timestamp produce identical output

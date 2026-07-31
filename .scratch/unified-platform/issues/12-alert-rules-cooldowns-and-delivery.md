@@ -6,7 +6,7 @@ Cooldowns are a correctness requirement, not a refinement. One recorded ingestio
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #22; every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] Alert rules can be created, edited and deleted, scoped to items, categories and severities
 - [x] Each rule carries a cooldown, and a burst of matching signals within that window produces one notification rather than many

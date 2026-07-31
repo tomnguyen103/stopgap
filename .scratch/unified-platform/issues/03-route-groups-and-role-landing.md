@@ -8,7 +8,7 @@ The pure role-to-landing-route resolution and the pure list-state module already
 
 **Blocked by:** 01 (need a real sign-in to land anywhere), 02 (need primitives for the shells)
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] Four dashboard groups exist, each with its own layout and navigation
 - [x] Signing in redirects to the landing route of the caller's highest role

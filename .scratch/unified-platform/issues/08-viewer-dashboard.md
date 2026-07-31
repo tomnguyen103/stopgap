@@ -8,7 +8,7 @@ Crucially, this ships while the score is still incomplete, and says so. Stock-le
 
 **Blocked by:** 03, 07
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] Open cases are ranked by risk score rather than by creation time
 - [x] Headline counts show open, awaiting-review and exception-queue cases

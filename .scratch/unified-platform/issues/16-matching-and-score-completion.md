@@ -8,7 +8,7 @@ This is the convergence point of the programme. It is blocked by the most and ga
 
 **Blocked by:** 07, 15
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #15 (batch A); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] Signals match tenant catalog items via their identifiers, using the contract's match hints
 - [x] Matching and scoring resolve their default confidence from the same shared constant

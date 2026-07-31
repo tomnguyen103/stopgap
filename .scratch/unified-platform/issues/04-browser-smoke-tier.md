@@ -6,7 +6,7 @@ PR batch: B
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] A browser test tier exists and runs on demand, separately from the default offline gate
 - [x] Signing in as each of the four seeded role users succeeds

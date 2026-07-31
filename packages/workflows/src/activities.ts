@@ -473,18 +473,6 @@ async function fetchFeeds(): Promise<FeedResult[]> {
 }
 
 /**
- * What each connector did FOR ONE TENANT this poll (ticket 17).
- *
- * Pure, and derived from the two things that already exist — the deployment's fetch results and
- * this tenant's normalized signals — rather than counted a second time as the poll runs. A separate
- * tally maintained alongside the writes is a tally that eventually disagrees with them.
- *
- * `persistError` collapses every source to `persist_failed`: the tenant's write is ONE transaction
- * covering all four feeds, so when it fails no connector delivered anything to this hospital, and
- * reporting three of them as `ok` because their fetch worked would be the faked success this
- * codebase refuses.
- */
-/**
  * Record a REQUIRED feed's fetch failure against every tenant, on the path where the poll itself
  * does not run.
  *
@@ -500,9 +488,24 @@ async function fetchFeeds(): Promise<FeedResult[]> {
 async function recordFetchOutage(cause: unknown): Promise<void> {
   const detail = cause instanceof Error ? cause.message : String(cause);
   const ranAt = new Date();
+  let orgs: { id: string }[];
   try {
-    const orgs = await withBypassDb(() => listOrganizations());
-    for (const org of orgs) {
+    orgs = await withBypassDb(() => listOrganizations());
+  } catch (err) {
+    // Nothing to write against. Its own step rather than part of the loop's guard, because "no
+    // tenant list" and "one tenant's write failed" are different problems with different logs.
+    console.error(
+      `[poll] could not list organizations to record the fetch outage: ` +
+        `${err instanceof Error ? err.message : String(err)}. The fetch failure itself follows.`,
+    );
+    return;
+  }
+  for (const org of orgs) {
+    // PER ORG, INSIDE the loop — the same containment the poll's own tenant loop applies, and for
+    // the same reason. A guard around the whole loop means the first tenant whose write fails takes
+    // every LATER tenant's outage row with it, so a deployment-wide outage would be recorded on an
+    // arbitrary prefix of its hospitals and be invisible on the rest.
+    try {
       await withOrgDb(org.id, (db) =>
         recordConnectorRuns(
           db,
@@ -516,15 +519,28 @@ async function recordFetchOutage(cause: unknown): Promise<void> {
           })),
         ),
       );
+    } catch (err) {
+      console.error(
+        `[poll] could not record the fetch outage for org ${org.id}: ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          "Its panel shows the previous run; every other tenant is still recorded.",
+      );
     }
-  } catch (err) {
-    console.error(
-      `[poll] could not record the fetch outage on any tenant's connector panel: ` +
-        `${err instanceof Error ? err.message : String(err)}. The fetch failure itself follows.`,
-    );
   }
 }
 
+/**
+ * What each connector did FOR ONE TENANT this poll (ticket 17).
+ *
+ * Pure, and derived from the two things that already exist — the deployment's fetch results and
+ * this tenant's normalized signals — rather than counted a second time as the poll runs. A separate
+ * tally maintained alongside the writes is a tally that eventually disagrees with them.
+ *
+ * `persistError` collapses every source to `persist_failed`: the tenant's write is ONE transaction
+ * covering all four feeds, so when it fails no connector delivered anything to this hospital, and
+ * reporting three of them as `ok` because their fetch worked would be the faked success this
+ * codebase refuses.
+ */
 function connectorRunsForOrg(
   feeds: FeedResult[],
   signals: NormalizedSignal[],

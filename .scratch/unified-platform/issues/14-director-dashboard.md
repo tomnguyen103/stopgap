@@ -6,7 +6,7 @@ PR batch: C
 
 **Blocked by:** 03, 12, 13
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #37 (batch C); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] The director lands on pending approvals and facility trend figures
 - [x] Protocol versions can be approved or superseded, and version history shows what changed between versions

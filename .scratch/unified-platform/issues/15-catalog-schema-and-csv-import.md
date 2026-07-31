@@ -8,7 +8,7 @@ Import must be safe to get wrong: a bad file reports precisely which rows failed
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #15 (batch A); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] Items, item identifiers, suppliers, supplier sites, item-supplier links, facilities, inventory snapshots and procurement events persist as tenant tables with organization references and row-level policies
 - [x] An item can carry several identifier types at once, since facilities record products differently across systems

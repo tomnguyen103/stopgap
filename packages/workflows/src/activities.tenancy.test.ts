@@ -48,6 +48,10 @@ const failingSweepOrgs = new Set<string>();
 const failingSignalOrgs = new Set<string>();
 /** Orgs whose ALERT evaluation should throw — which must NOT read as a connector failure. */
 const failingAlertOrgs = new Set<string>();
+/** Orgs whose connector-health write should throw, so containment has something to contain. */
+const failingConnectorWriteOrgs = new Set<string>();
+/** Set to make the REQUIRED openFDA fetch reject, the path where the poll never runs. */
+let requiredFetchError: string | null = null;
 /** Retention sweeps performed (ticket 18) — which org, at which instant, under which windows. */
 const sweptOrgs: { orgId: string; at: string; windows: Record<string, number | null> }[] = [];
 /** The sources each org's miss sweep was scoped to, so an outage cannot retire live signals. */
@@ -108,6 +112,7 @@ vi.mock("@stopgap/db", () => ({
     ranAt: Date,
     runs: { source: string; outcome: string; signalCount: number; detail?: string }[],
   ) => {
+    if (failingConnectorWriteOrgs.has(orgId)) throw new Error("connector write refused");
     writtenConnectorRuns.push({ orgId, ranAt: ranAt.toISOString(), runs });
   },
   // Ticket 16 — the poll matches each signal against the tenant's catalog before scoring. Stubbed
@@ -257,6 +262,9 @@ vi.mock("@stopgap/ingest", () => ({
     source: "openfda_shortage",
     fetch: async () => {
       openFdaCalls += 1;
+      // openFDA shortages are a REQUIRED feed, so a rejection here is the path where `fetchFeeds`
+      // rethrows and the per-org loop never runs at all.
+      if (requiredFetchError !== null) throw new Error(requiredFetchError);
       return [{ generic_name: "Heparin" }];
     },
     normalize: (_raw: unknown, ctx: { orgId: string; fetchedAt: string }) =>
@@ -335,6 +343,8 @@ beforeEach(() => {
   unsignalableWorkflowIds.clear();
   failingSignalOrgs.clear();
   failingAlertOrgs.clear();
+  failingConnectorWriteOrgs.clear();
+  requiredFetchError = null;
   signalledWorkflowIds.length = 0;
   counters.length = 0;
   writtenSignals.length = 0;
@@ -511,6 +521,38 @@ describe("the scheduled feed poll (no session, no case)", () => {
     // Containment: the other tenant's poll is untouched by it.
     const b = writtenConnectorRuns.find((w) => w.orgId === ORG_B);
     expect(b?.runs.every((r) => r.outcome === "ok")).toBe(true);
+  });
+
+  it("records a REQUIRED feed's outage against every tenant, and still fails the poll", async () => {
+    // The gap the panel was blind to. `fetchFeeds` rethrows for a required feed BEFORE the per-org
+    // loop, so an openFDA outage used to write no row for anybody — and the panel went on showing
+    // the last good run until it aged into "quiet" 36 hours later.
+    requiredFetchError = "openFDA 503";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(pollAndOpenCases()).rejects.toThrow("openFDA 503");
+    logged.mockRestore();
+
+    expect(writtenConnectorRuns.map((w) => w.orgId)).toEqual([ORG_A, ORG_B]);
+    for (const written of writtenConnectorRuns) {
+      // ALL FOUR sources, not just openFDA: `Promise.all` reports the first rejection and discards
+      // which of them it was, so "the poll could not fetch" is the only true statement available.
+      expect(written.runs).toHaveLength(4);
+      expect(written.runs.every((r) => r.outcome === "fetch_failed")).toBe(true);
+      expect(written.runs[0]?.detail).toContain("openFDA 503");
+    }
+  });
+
+  it("keeps recording the outage for later tenants when one tenant's write fails", async () => {
+    // The containment CodeRabbit caught: a `try` around the whole loop meant the first tenant whose
+    // write failed took every LATER tenant's row with it, so a deployment-wide outage would be
+    // recorded on an arbitrary prefix of the hospitals and be invisible on the rest.
+    requiredFetchError = "openFDA 503";
+    failingConnectorWriteOrgs.add(ORG_A);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(pollAndOpenCases()).rejects.toThrow("openFDA 503");
+    logged.mockRestore();
+
+    expect(writtenConnectorRuns.map((w) => w.orgId)).toEqual([ORG_B]);
   });
 
   it("does NOT blame the connectors when alert delivery is what failed", async () => {

@@ -1,7 +1,11 @@
 # Absorption record — what came across from `medical-supply-monitor`, and what did not
 
-Stopgap is the surviving repository. `medical-supply-monitor` contributed code and design; it is
-archived once this record is complete, and its README redirects here.
+Stopgap is the surviving repository. `medical-supply-monitor` contributed code and design and is no
+longer developed.
+
+**It is not archived yet.** Replacing its README and flipping the archive switch are account-level
+actions on a repository this one does not own, so this record lands first and both are still
+pending — see "What is left" below, which carries the replacement README verbatim and the command.
 
 This file exists so the decision is not relitigated. A capability that was deliberately left behind
 looks exactly like one that was forgotten, six months later — the difference is written down here.

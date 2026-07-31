@@ -6,7 +6,7 @@ Note the deliberate asymmetry with existing feed storage: a feed record is one p
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #18; every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] Signals and snapshots persist as tenant tables, each carrying an organization reference and a row-level policy keyed to it
 - [x] Every read passes through the organization-scoped transaction helper

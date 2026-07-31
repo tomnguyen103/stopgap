@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #14; every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] All existing feeds emit the same normalized signal type through one connector interface
 - [x] A connector performs no database writes, no scoring and no notification — purely fetch, normalize, emit

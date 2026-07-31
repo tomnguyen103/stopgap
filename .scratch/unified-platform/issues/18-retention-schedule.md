@@ -6,7 +6,7 @@ PR batch: A
 
 **Blocked by:** 06, 15
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #15 (batch A); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] A scheduled job removes records past their retention window across the high-volume tables
 - [x] Retention windows are configurable per record type

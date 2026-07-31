@@ -6,7 +6,7 @@ PR batch: B
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
 - [x] The existing palette is the token source; no second palette is introduced and no colour is hard-coded beside a token
 - [x] Primitives exist for badge, button, card, input and table, all consuming tokens

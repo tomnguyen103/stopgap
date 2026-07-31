@@ -60,12 +60,20 @@ export default async function AdminIndexPage() {
   const isQuiet = (lastFetchedAt: Date | string) =>
     now - new Date(lastFetchedAt).getTime() > FEED_QUIET_HOURS * 3_600_000;
 
-  // EVERY connector in the contract, not only the ones with a row. A connector that has never run
-  // for this facility has nothing stored, and rendering only what is stored would drop it from the
-  // table entirely — which reads identically to a connector that is fine. "Never run" is the exact
-  // state a silent feed is in, so it has to have a line of its own.
+  // THE UNION of the contract and what is stored, not either one alone — both directions drop a
+  // row that matters, and both drops read as "this connector is fine".
+  //
+  // Contract-only would hide a connector that has NEVER run for this facility, which is the exact
+  // state a silent feed is in. Stored-only would hide a row whose `source` is no longer in
+  // `SIGNAL_SOURCES` — a retired connector, or one written by a newer deployment against a shared
+  // database — and that row is the more alarming of the two, because something is still writing it.
   const bySource = new Map(connectorRuns.map((run) => [run.source, run]));
-  const connectors = SIGNAL_SOURCES.map((source) => ({ source, run: bySource.get(source) }));
+  const connectors = [...new Set([...SIGNAL_SOURCES, ...bySource.keys()])].map((source) => ({
+    source,
+    run: bySource.get(source),
+    /** Stored, but not a source this deployment polls. Worth saying so rather than rendering it flat. */
+    unknown: !(SIGNAL_SOURCES as readonly string[]).includes(source),
+  }));
 
   const checklist: {
     label: string;
@@ -170,9 +178,12 @@ export default async function AdminIndexPage() {
           label="Connector health"
           head={["Connector", "Last run", "Signals", "Last success", "State"]}
         >
-          {connectors.map(({ source, run }) => (
+          {connectors.map(({ source, run, unknown }) => (
             <tr key={source}>
-              <td>{source}</td>
+              <td>
+                {source}
+                {unknown ? <span className="sub"> · not polled here</span> : null}
+              </td>
               <td className="sub">{run ? stamp(run.ranAt) : "—"}</td>
               <td>{run ? run.signalCount : "—"}</td>
               <td className="sub">
