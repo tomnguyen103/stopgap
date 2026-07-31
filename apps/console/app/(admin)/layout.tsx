@@ -13,12 +13,12 @@ import { requireGroup } from "../lib/group-guard";
  */
 
 const NAV: NavLink[] = [
-  { href: "/admin", label: "Setup" },
-  { href: "/admin/catalog", label: "Catalog" },
-  { href: "/admin/users", label: "Users" },
-  { href: "/admin/api-keys", label: "API keys" },
-  { href: "/admin/organizations", label: "Organizations" },
-  { href: "/audit", label: "Audit" },
+  { href: "/admin", label: "Setup", icon: "setup" },
+  { href: "/admin/catalog", label: "Catalog", icon: "catalog" },
+  { href: "/admin/users", label: "Users", icon: "users" },
+  { href: "/admin/api-keys", label: "API keys", icon: "keys" },
+  { href: "/admin/organizations", label: "Organizations", icon: "orgs" },
+  { href: "/audit", label: "Audit", icon: "audit" },
 ];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {

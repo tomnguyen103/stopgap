@@ -377,9 +377,28 @@ a {
   bottom. One pseudo-element, no JavaScript, no image. It survives `forced-colors` because the
   item's own text still changes weight and colour, so the mark never carries the state alone.
 */
+/* The sprite itself renders nothing — it is a library of `<symbol>`s for `<use>` to point at.
+   A class rather than `style={{ display: "none" }}`: colour and layout live in the stylesheet, and
+   an inline style is a value no token, no theme and no CSP audit can see. */
+.ds-sprite {
+  display: none;
+}
+.ds-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  /* 1.25px on a 24px grid, round caps and joins — the Phosphor Light specification §8 names. */
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .rail__item {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   color: var(--text-subtle);
@@ -453,13 +472,9 @@ a {
 
 @media (min-width: 768px) {
   .shell {
-    /*
-      §5.2 specifies 64px icon-only here. The console ships NO icon set until P4.6 — the wordmark
-      is the `◐` character — so a 64px rail at this breakpoint truncates every label to three or
-      four characters and folds the org badge to one letter per line. A readable text rail is the
-      honest intermediate; the 64px variant lands with the icons it depends on.
-    */
-    grid-template-columns: 200px minmax(0, 1fr);
+    /* §5.2: icon-only from 768 to 1023. The labels stay in the DOM (`.rail__label` below) — an
+       icon-only rail must not be an unlabelled one. */
+    grid-template-columns: 64px minmax(0, 1fr);
   }
   .rail {
     flex-direction: column;
@@ -483,7 +498,7 @@ a {
   }
   .rail__head {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--space-1);
   }
   /* The surface name returns at 1024px, where the head has room for it beside the wordmark. */
@@ -497,11 +512,32 @@ a {
   .rail__item {
     /* 40px rows (§5.2) — a real pointer target, and enough to read the active rail against. */
     min-height: 40px;
-    display: flex;
-    align-items: center;
+    justify-content: center;
+    padding: var(--space-2);
+  }
+  /*
+    Hidden from the eye, present for everything else. `display: none` would take the item's
+    accessible NAME with it and leave a link announced as a picture, so the label is clipped
+    instead — the same technique as `.ds-sr-only`, applied at one breakpoint.
+  */
+  .rail__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
     overflow: hidden;
+    clip-path: inset(50%);
     white-space: nowrap;
-    text-overflow: ellipsis;
+  }
+  /* The org badge cannot fold to one letter per line in a 64px column, so at this width the rail
+     shows only the state it is reporting; the full badge returns at 1024. */
+  .active-org-badge__name,
+  .active-org-badge__slug {
+    display: none;
+  }
+  .rail__principal {
+    display: none;
   }
   .rail__foot {
     flex-direction: column;
@@ -529,6 +565,24 @@ a {
   }
   .rail__surface {
     display: inline;
+  }
+  .rail__item {
+    justify-content: flex-start;
+    padding: var(--space-2) var(--space-3);
+  }
+  .rail__label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: hidden;
+    clip-path: none;
+    text-overflow: ellipsis;
+  }
+  .active-org-badge__name,
+  .active-org-badge__slug,
+  .rail__principal {
+    display: revert;
   }
   .shell__main {
     padding: var(--space-7);
@@ -719,6 +773,13 @@ h2 {
 .banner.bad {
   border-color: var(--crit);
   color: var(--crit);
+}
+/* Caution. Reserved for "this needs your attention now" — an issued key you will not see again —
+   as distinct from `.bad`, which is what a broken audit chain gets. */
+.banner.warn {
+  border-color: var(--high);
+  background: var(--surface-warn);
+  color: var(--text-default);
 }
 .match-ok {
   color: var(--ok);
@@ -1126,6 +1187,12 @@ h2 {
 .ds-table-scroll {
   overflow-x: auto;
 }
+/* Only ever focusable when it actually scrolls (see `ScrollRegion`), so this ring only appears on
+   a region there is something to do with. */
+.ds-table-scroll:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .ds-table {
   width: 100%;
   border-collapse: collapse;
@@ -1391,6 +1458,11 @@ h2 {
   to {
     opacity: 1;
   }
+}
+/* The confirmation reuses the drawer's elevation — it is the same kind of surface — at a width
+   sized to one sentence rather than to a captured URL. */
+.ds-confirm {
+  width: min(420px, calc(100vw - var(--space-6)));
 }
 .ds-drawer__head {
   display: flex;

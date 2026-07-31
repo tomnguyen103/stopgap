@@ -1,4 +1,5 @@
 import type { ReactNode, TableHTMLAttributes } from "react";
+import { ScrollRegion } from "./scroll-region";
 
 /**
  * A heading that is also a sort control.
@@ -38,12 +39,13 @@ export interface TableProps extends TableHTMLAttributes<HTMLTableElement> {
  * sideways rather than scrolling itself. Desktop is unaffected — the content fits, so the
  * container never scrolls and nothing moves.
  *
- * It is focusable and labelled because a scrollable region that only a mouse can reach is a
- * region a keyboard user cannot read (WCAG 2.1.1).
+ * It is focusable and labelled WHEN IT SCROLLS - see `ScrollRegion`. A scrollable region only a
+ * mouse can reach is a region a keyboard user cannot read (WCAG 2.1.1); an unconditional tab stop
+ * in front of every table that fits is a stop that does nothing, on every page, forever.
  */
 export function Table({ head, label, className, children, ...rest }: TableProps) {
   return (
-    <div className="ds-table-scroll" role="region" aria-label={label} tabIndex={0}>
+    <ScrollRegion label={label}>
       <table {...rest} className={className ? `ds-table ${className}` : "ds-table"}>
         <thead>
           <tr>
@@ -58,6 +60,6 @@ export function Table({ head, label, className, children, ...rest }: TableProps)
         </thead>
         <tbody>{children}</tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }

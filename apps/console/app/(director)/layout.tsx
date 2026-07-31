@@ -11,11 +11,11 @@ import { requireGroup } from "../lib/group-guard";
  */
 
 const NAV: NavLink[] = [
-  { href: "/oversight", label: "Oversight" },
-  { href: "/approvals", label: "Approvals" },
-  { href: "/alerts", label: "Alerts" },
-  { href: "/brief", label: "Daily brief" },
-  { href: "/metrics", label: "KPIs" },
+  { href: "/oversight", label: "Oversight", icon: "oversight" },
+  { href: "/approvals", label: "Approvals", icon: "approvals" },
+  { href: "/alerts", label: "Alerts", icon: "alerts" },
+  { href: "/brief", label: "Daily brief", icon: "brief" },
+  { href: "/metrics", label: "KPIs", icon: "metrics" },
 ];
 
 export default async function DirectorLayout({ children }: { children: ReactNode }) {
