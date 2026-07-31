@@ -139,8 +139,13 @@
   --text-sm: 12px;
   --text-md: 13px;
   --text-lg: 15px;
-  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, monospace;
+  /* Geist Sans and Geist Mono, self-hosted by `next/font` and put on <html> by the root layout.
+     A true grotesk with a narrower cut than Inter — the default of every dark admin panel since
+     2021 — real tabular figures, and a mono sibling drawn on the same skeleton, which is what
+     makes a hash sitting in a row beside prose look deliberate. The system stack behind each is
+     the fallback for the render before the inlined face resolves. */
+  --font-body: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --dur-fast: 120ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
@@ -189,16 +194,13 @@
 * {
   box-sizing: border-box;
 }
+/* The one place the three-layer token system was bypassed outright: a 14px literal with the whole
+   family stack restated, so the body face could not be changed from the token layer at all. */
 body {
   margin: 0;
   background: var(--surface-page);
   color: var(--text-default);
-  font:
-    14px/1.5 ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    sans-serif;
+  font: 14px / 1.5 var(--font-body);
 }
 a {
   color: inherit;
@@ -382,10 +384,7 @@ button {
   border: 0;
   border-radius: 8px;
   padding: 9px 16px;
-  font:
-    600 13px/1 ui-sans-serif,
-    system-ui,
-    sans-serif;
+  font: 600 var(--text-md) / 1 var(--font-body);
   cursor: pointer;
 }
 button:disabled {
