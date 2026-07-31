@@ -31,7 +31,12 @@ function referencedWithoutFallback(source: string): Set<string> {
 describe("globals.css custom properties", () => {
   it("defines every custom property it reads without a fallback", () => {
     const defined = definedProperties(css);
-    const dangling = [...referencedWithoutFallback(css)].filter((name) => !defined.has(name));
+    // `next/font` mints these on `<html>` at build time; nothing in the stylesheet can declare
+    // them, and the whole point of the package is that the generated names are not hand-written.
+    const fromNextFont = new Set(["--font-geist-sans", "--font-geist-mono"]);
+    const dangling = [...referencedWithoutFallback(css)].filter(
+      (name) => !defined.has(name) && !fromNextFont.has(name),
+    );
     expect(dangling).toEqual([]);
   });
 });

@@ -136,9 +136,58 @@
   --radius-pill: 999px;
   --radius-md: 8px;
   --radius-lg: 10px;
-  --text-sm: 12px;
-  --text-md: 13px;
-  --text-lg: 15px;
+  /*
+    ---- Scale: type --------------------------------------------------------------------------
+    Eight steps, from §4 of the design direction. The old scale was three sizes (12/13/15) plus a
+    lone 28px figure, so a KPI and a table cell sat one step apart and nothing on a page could be
+    the headline. Each step carries its own leading and tracking, because a 32px figure set at
+    body leading is not the same typeface decision as a 14px paragraph.
+  */
+  --text-display: 32px;
+  --leading-display: 1.15;
+  --tracking-display: -0.02em;
+
+  --text-title: 22px;
+  --leading-title: 1.25;
+  --tracking-title: -0.015em;
+
+  --text-heading: 16px;
+  --leading-heading: 1.35;
+  --tracking-heading: -0.01em;
+
+  --text-subhead: 14px;
+  --leading-subhead: 1.4;
+  --tracking-subhead: -0.005em;
+
+  --text-body: 14px;
+  --leading-body: 1.55;
+
+  --text-small: 13px;
+  --leading-small: 1.5;
+
+  --text-micro: 11px;
+  --leading-micro: 1.4;
+  --tracking-micro: 0.08em;
+
+  /*
+    Off the UI scale on purpose: the reading measure for clinical prose a pharmacist EDITS — the
+    protocol draft and the resolution body. A 20,000-character draft set at UI body size is a
+    document being read through a form field.
+  */
+  --text-prose: 15px;
+  --leading-prose: 1.65;
+
+  /*
+    Every numeral in the product. A column of scores that does not align is a column a reader has
+    to parse instead of scan, and `slashed-zero` is what keeps a zero out of an O in a key prefix.
+  */
+  --font-numeric: tabular-nums slashed-zero;
+
+  /* The previous three names, repointed at their nearest step rather than kept as a second scale
+     beside the first. `--text-sm` was the uppercase eyebrow size, `--text-lg` the card title. */
+  --text-sm: var(--text-micro);
+  --text-md: var(--text-small);
+  --text-lg: var(--text-heading);
   /* Geist Sans and Geist Mono, self-hosted by `next/font` and put on <html> by the root layout.
      A true grotesk with a narrower cut than Inter — the default of every dark admin panel since
      2021 — real tabular figures, and a mono sibling drawn on the same skeleton, which is what
@@ -200,7 +249,7 @@ body {
   margin: 0;
   background: var(--surface-page);
   color: var(--text-default);
-  font: 14px / 1.5 var(--font-body);
+  font: var(--text-body) / var(--leading-body) var(--font-body);
 }
 a {
   color: inherit;
@@ -228,13 +277,17 @@ a {
   padding: 24px;
 }
 h1 {
-  font-size: 20px;
-  margin: 0 0 4px;
+  font-size: var(--text-title);
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-title);
+  font-weight: 600;
+  margin: 0 0 var(--space-4);
 }
 .sub {
   color: var(--muted);
-  margin: 0 0 20px;
-  font-size: 13px;
+  margin: 0 0 var(--space-8);
+  font-size: var(--text-small);
+  line-height: var(--leading-small);
 }
 table {
   width: 100%;
@@ -249,9 +302,10 @@ td {
 th {
   color: var(--muted);
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--text-micro);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: var(--tracking-micro);
 }
 tr:hover td {
   background: var(--surface-hover);
@@ -310,8 +364,9 @@ tr:hover td {
   font-size: 13px;
 }
 .audit {
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  font-variant-numeric: var(--font-numeric);
 }
 .audit li {
   margin-bottom: 4px;
@@ -335,19 +390,22 @@ tr:hover td {
   color: var(--text);
 }
 h2 {
-  font-size: 15px;
-  margin: 24px 0 8px;
+  font-size: var(--text-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: var(--tracking-heading);
+  font-weight: 600;
+  margin: var(--space-9) 0 var(--space-4);
 }
+/* The protocol body. Set in the BODY face: monospaced clinical guidance reads as machine output,
+   which is the opposite of what a human-authored protocol is. */
 .draft {
-  margin: 14px 0 0;
-  padding: 12px 14px;
+  margin: var(--space-7) 0 0;
+  padding: var(--space-6) var(--space-7);
   background: var(--surface-sunken);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   white-space: pre-wrap;
-  font:
-    13px/1.6 ui-monospace,
-    monospace;
+  font: var(--text-prose) / var(--leading-prose) var(--font-body);
   color: var(--text);
 }
 .sev-none {
@@ -355,6 +413,7 @@ h2 {
 }
 
 /* Phase 4: HITL review panel. */
+/* Same reason as `.draft`: what a pharmacist writes here is prose, not a payload. */
 .draft-input,
 .reason-input {
   /* `flex: 1 1 200px` with `width: auto` — a SECOND `.reason-input` block used to restate these
@@ -365,11 +424,9 @@ h2 {
   background: var(--surface-sunken);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px 12px;
-  font:
-    13px/1.6 ui-monospace,
-    monospace;
+  border-radius: var(--radius-md);
+  padding: var(--space-5) var(--space-6);
+  font: var(--text-prose) / var(--leading-prose) var(--font-body);
 }
 .actions {
   display: flex;
@@ -426,9 +483,11 @@ button.danger {
 .match-bad {
   color: var(--crit);
 }
+/* Identifiers only — ids, hashes, key prefixes, NDCs. Slashed zero so a 0 cannot read as an O. */
 .mono {
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  font-variant-numeric: var(--font-numeric);
 }
 
 /* Phase 5: demo mode. */
@@ -488,8 +547,8 @@ button.danger {
 }
 .active-org-badge__slug {
   color: var(--muted);
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
 }
 
 /*
@@ -570,10 +629,11 @@ button.danger {
 }
 .ds-field__label {
   color: var(--text-subtle);
-  font-size: var(--text-sm);
+  font-size: var(--text-micro);
+  line-height: var(--leading-micro);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: var(--tracking-micro);
 }
 .ds-field__hint {
   color: var(--text-subtle);
@@ -709,7 +769,7 @@ button.danger {
   border: 1px solid var(--input-border);
   border-radius: var(--input-radius);
   padding: var(--space-5) var(--space-6);
-  font: var(--text-md) / 1.6 var(--font-mono);
+  font: var(--text-body) / var(--leading-body) var(--font-body);
 }
 .ds-input:hover:not(:disabled) {
   border-color: var(--text-subtle);
@@ -754,12 +814,18 @@ button.danger {
   padding: var(--space-5) var(--space-6);
   border-bottom: 1px solid var(--table-cell-border);
 }
+/* Every number in every table, aligned by digit. A column of scores that does not align is a
+   column a reader has to parse instead of scan. */
+.ds-table td {
+  font-variant-numeric: var(--font-numeric);
+}
 .ds-table th {
   color: var(--table-header-fg);
   font-weight: 600;
-  font-size: var(--text-sm);
+  font-size: var(--text-micro);
+  line-height: var(--leading-micro);
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: var(--tracking-micro);
 }
 .ds-table tr:hover td {
   background: var(--table-row-hover);
@@ -802,9 +868,11 @@ button.danger {
   box-shadow: var(--elev-raised);
 }
 .ds-figure__value {
-  font-size: 28px;
-  line-height: 1.1;
-  font-variant-numeric: tabular-nums;
+  font-size: var(--text-display);
+  line-height: var(--leading-display);
+  letter-spacing: var(--tracking-display);
+  font-weight: 600;
+  font-variant-numeric: var(--font-numeric);
 }
 .ds-filters {
   display: flex;
