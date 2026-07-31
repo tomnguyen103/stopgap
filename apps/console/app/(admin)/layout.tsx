@@ -22,9 +22,9 @@ const NAV: NavLink[] = [
 ];
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  await requireGroup("admin");
+  const principal = await requireGroup("admin");
   return (
-    <DashboardShell surface="administration" nav={NAV}>
+    <DashboardShell surface="administration" nav={NAV} principal={principal.label}>
       {children}
     </DashboardShell>
   );

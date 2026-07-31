@@ -198,7 +198,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               Withheld by the compliance guard ({describeViolations(draftScreen)}).
             </p>
           ) : live.draft ? (
-            <pre className="draft">{live.draft}</pre>
+            <pre className="draft ds-prose">{live.draft}</pre>
           ) : null}
         </div>
       ) : null}
@@ -232,7 +232,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       />
 
       <div className="card">
-        <h1 style={{ fontSize: 15 }}>Audit trail (hash-chained)</h1>
+        <h2>Audit trail (hash-chained)</h2>
         <ol className="audit">
           {audit.map((a) => (
             <li key={a.id}>

@@ -281,26 +281,210 @@ a {
   color: inherit;
   text-decoration: none;
 }
-.topbar {
+/*
+  ---- Shell (P2.1) ---------------------------------------------------------------------------
+  Mobile first, and mobile is the case that was broken: the top bar this replaces was a
+  non-wrapping flex row holding six nav links, the brand, the surface tag and a `nowrap` org badge
+  — about 600px of content in a 375px viewport, so the whole page scrolled sideways. Below 768px
+  the rail becomes a WRAPPING bar, which is the fix; above it, six items stacked vertically do not
+  compete for width at all.
+*/
+.shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100vh;
+}
+.rail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--surface-raised);
+  box-shadow: var(--elev-raised);
+}
+.rail__head {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel);
+  gap: var(--space-2);
 }
-.brand {
-  font-weight: 700;
-  letter-spacing: 0.3px;
+.rail__brand {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-size: var(--text-heading);
 }
-.tag {
-  color: var(--muted);
-  font-size: 12px;
+.rail__surface {
+  color: var(--text-subtle);
+  font-size: var(--text-micro);
+  line-height: var(--leading-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
 }
-.wrap {
-  max-width: 1080px;
+.rail__nav {
+  min-width: 0;
+}
+.rail__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+/*
+  The Ledger Rail on a nav item (§6): a 2px tinted edge driven by `--rail`, inset from top and
+  bottom. One pseudo-element, no JavaScript, no image. It survives `forced-colors` because the
+  item's own text still changes weight and colour, so the mark never carries the state alone.
+*/
+.rail__item {
+  position: relative;
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-subtle);
+  font-size: var(--text-small);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+.rail__item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--rail, transparent);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.rail__item:hover {
+  color: var(--text-default);
+  background: var(--surface-hover);
+  --rail: var(--line-default);
+}
+.rail__item[aria-current="page"] {
+  color: var(--text-default);
+  font-weight: 600;
+  background: var(--surface-hover);
+  --rail: var(--pt-900);
+}
+.rail__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.rail__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  min-width: 0;
+}
+.rail__principal {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--text-micro);
+  line-height: var(--leading-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+.shell__main {
+  width: 100%;
   margin: 0 auto;
-  padding: 24px;
+  padding: var(--space-4);
+}
+/*
+  Two measures (§5.2). The shell is the DATA measure at 1280px — queue, overview, audit, catalog,
+  admin tables. `.ds-prose` is the 720px reading measure, applied to the blocks a person reads
+  rather than scans: the protocol body, the review panel, the brief, the access-denied page. It is
+  a block-level utility rather than a second shell width because the case page is both — a key/
+  value header a reader scans and a clinical draft they read.
+
+  A 20,000-character draft at 1080px runs about 150 characters to the line. Nobody reads that
+  accurately, and this one is a substitution protocol for a hospital floor.
+*/
+.shell__main {
+  max-width: 1280px;
+}
+.ds-prose {
+  max-width: 720px;
+}
+
+@media (min-width: 768px) {
+  .shell {
+    grid-template-columns: 64px 1fr;
+  }
+  .rail {
+    flex-direction: column;
+    align-items: stretch;
+    flex-wrap: nowrap;
+    gap: var(--space-6);
+    padding: var(--space-4) var(--space-2);
+    border-bottom: 0;
+    border-right: 1px solid var(--border-default);
+    /* The rail stays put while a 400-row queue scrolls past it: a fixed anchor is most of what
+       makes a dense screen navigable. */
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: 100vh;
+    overflow-y: auto;
+  }
+  .rail__head {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  /* At this width the rail is icon-width; the wordmark's glyph carries it and the surface name
+     would not fit legibly. The name is still announced by the nav's own label. */
+  .rail__surface {
+    display: none;
+  }
+  .rail__list {
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+  .rail__item {
+    /* 40px rows (§5.2) — a real pointer target, and enough to read the active rail against. */
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .rail__foot {
+    flex-direction: column;
+    align-items: stretch;
+    margin-left: 0;
+    margin-top: auto;
+  }
+  .shell__main {
+    padding: var(--space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  .shell {
+    grid-template-columns: 232px 1fr;
+  }
+  .rail {
+    padding: var(--space-6) var(--space-4);
+  }
+  .rail__head {
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+  .rail__surface {
+    display: inline;
+  }
+  .shell__main {
+    padding: var(--space-7);
+  }
 }
 h1 {
   font-size: var(--text-title);
@@ -377,13 +561,35 @@ tr:hover td {
   margin-bottom: 16px;
   box-shadow: var(--elev-raised);
 }
+/*
+  Key/value pairs. STACKED by default and two-column only when there is room: at 375px the fixed
+  `160px 1fr` grid left about 127px of usable width for values like `org-<uuid>-case-<key>` — a
+  ~50-character unbreakable token — so it pushed the page sideways instead of wrapping.
+*/
 .kv {
   display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 6px 16px;
+  grid-template-columns: 1fr;
+  gap: var(--space-1) var(--space-4);
 }
 .kv dt {
   color: var(--muted);
+  font-size: var(--text-micro);
+  line-height: var(--leading-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+}
+.kv dd {
+  margin: 0 0 var(--space-3);
+  overflow-wrap: anywhere;
+}
+@media (min-width: 768px) {
+  .kv {
+    grid-template-columns: 160px 1fr;
+    gap: var(--space-2) var(--space-4);
+  }
+  .kv dd {
+    margin: 0;
+  }
 }
 /*
   A link's affordance is weight and an underline, not a hue (§3.3). The underline sits in
@@ -425,19 +631,7 @@ tr:hover td {
   color: var(--text);
 }
 
-/* Phase 3: nav + protocol/shadow views. */
-.nav {
-  margin-left: auto;
-  display: flex;
-  gap: 16px;
-  font-size: 13px;
-}
-.nav a {
-  color: var(--muted);
-}
-.nav a:hover {
-  color: var(--text);
-}
+/* Phase 3: protocol/shadow views. */
 h2 {
   font-size: var(--text-heading);
   line-height: var(--leading-heading);
@@ -570,17 +764,19 @@ button.danger {
   "you are writing into another hospital's records" is a caution, not a navigation aid.
 */
 .active-org-badge {
-  margin-left: 16px;
   display: inline-flex;
   align-items: baseline;
-  gap: 8px;
-  padding: 4px 12px;
-  border-radius: 999px;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
   border: 1px solid var(--high);
   background: var(--surface-warn);
   color: var(--high);
-  font-size: 12px;
-  white-space: nowrap;
+  font-size: var(--text-micro);
+  /* `nowrap` was what pushed the old top bar past a phone's width. In the rail it has a column to
+     wrap inside, so it can. */
+  overflow-wrap: anywhere;
 }
 .active-org-badge:hover {
   background: var(--surface-warn-hover);

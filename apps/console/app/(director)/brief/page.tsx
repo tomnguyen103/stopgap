@@ -32,7 +32,7 @@ export default async function BriefPage() {
   return (
     <>
       <h1>Daily brief</h1>
-      <p className="sub">
+      <p className="sub ds-prose">
         What moved, what is newly at risk, and what needs review · generated on a schedule, one per
         day · every figure comes from the deterministic scorer, never from the model
       </p>

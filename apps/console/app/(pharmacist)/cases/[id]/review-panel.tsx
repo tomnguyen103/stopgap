@@ -66,7 +66,7 @@ export function ReviewPanel({
   if (status === "awaiting_review") {
     const edited = editedDraft !== draft;
     return (
-      <div className="card">
+      <div className="card ds-prose">
         <h2>Pharmacist review</h2>
         <p className="sub">
           This case is blocked on your decision. Alternatives proposed:{" "}
@@ -160,7 +160,7 @@ export function ReviewPanel({
 
   if (status === "exception") {
     return (
-      <div className="card">
+      <div className="card ds-prose">
         <h2>Resolve exception</h2>
         <p className="sub">
           The agent escalated this case. What you write here becomes an approved protocol version
