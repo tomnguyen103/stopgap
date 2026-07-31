@@ -13,9 +13,9 @@ import { requireGroup } from "../lib/group-guard";
  */
 
 const NAV: NavLink[] = [
-  { href: "/queue", label: "Queue" },
-  { href: "/protocols", label: "Protocols" },
-  { href: "/shadow", label: "Shadow" },
+  { href: "/queue", label: "Queue", icon: "queue" },
+  { href: "/protocols", label: "Protocols", icon: "protocols" },
+  { href: "/shadow", label: "Shadow", icon: "shadow" },
 ];
 
 export default async function PharmacistLayout({ children }: { children: ReactNode }) {

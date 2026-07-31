@@ -2,7 +2,16 @@
 
 import { useState, useTransition } from "react";
 import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
-import { Badge, Button, Card, Field, Table, Toggle } from "../../../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  ConfirmButton,
+  CopyButton,
+  Field,
+  Table,
+  Toggle,
+} from "../../../components/ui";
 
 /**
  * API key management UI (PHASE6 §6.7). A thin client over the admin server actions, which re-check
@@ -126,20 +135,26 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
           </Button>
         </div>
         {issued ? (
-          <div className="banner bad">
+          /* CAUTION, not critical. `banner bad` is the treatment a BROKEN audit chain gets, and
+             issuing a key successfully is not a failure — spending the critical red on it teaches
+             an operator to read that colour as "notice", which is the one thing it must never mean. */
+          <div className="banner warn">
             <p className="sub-tight">
               Copy the key for <b>{issued.name}</b> now — it is shown once and cannot be recovered.
               The server stores only its hash.
             </p>
             <p className="mono">{issued.plaintext}</p>
-            <Button
-              type="button"
-              onClick={() => {
-                setIssued(undefined);
-              }}
-            >
-              I have copied it
-            </Button>
+            <div className="actions">
+              <CopyButton value={issued.plaintext} label="Copy key" />
+              <Button
+                type="button"
+                onClick={() => {
+                  setIssued(undefined);
+                }}
+              >
+                I have copied it
+              </Button>
+            </div>
           </div>
         ) : null}
       </Card>
@@ -171,16 +186,18 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
                   {key.revokedAt ? (
                     <Badge severity="critical">revoked</Badge>
                   ) : (
-                    <Button
-                      type="button"
+                    <ConfirmButton
                       variant="danger"
                       disabled={pending}
-                      onClick={() => {
+                      target={`${key.name} (${key.keyPrefix}…)`}
+                      confirmLabel="Revoke key"
+                      description="Every request using this key starts failing immediately. Revoking cannot be undone — an integration that needs access again needs a new key."
+                      action={() => {
                         run(() => revokeApiKeyAction(key.id));
                       }}
                     >
                       Revoke
-                    </Button>
+                    </ConfirmButton>
                   )}
                 </td>
               </tr>

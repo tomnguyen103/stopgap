@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ActiveOrgBadge } from "../active-org-badge";
 import type { NavLink } from "./nav-link";
+import { IconSprite } from "./icon-sprite";
 import { RailNav } from "./rail-nav";
 
 export type { NavLink };
@@ -11,14 +12,14 @@ export type { NavLink };
  * One shell, four navs. The alternative — four hand-written headers — is four places to forget the
  * active-org badge, and forgetting it on the pharmacist surface is exactly where it matters most.
  *
- * A PERSISTENT LEFT RAIL at >=1024px (232px), a narrower one at 768–1023 (200px), and a WRAPPING
- * top bar below that. §5.2 specifies 64px icon-only for the middle band; the console ships no icon
- * set until P4.6, and at 64px every label truncates to three characters, so the narrow variant
- * lands with the icons it depends on. The single top bar it replaces was a non-wrapping flex row: the admin group put six nav
- * links plus the brand, the surface tag and a `white-space: nowrap` org badge into it — roughly
- * 600px of content in a 375px viewport — so the whole page scrolled sideways on a phone. Six items
- * stacked vertically do not compete for width, which is why the rail is the fix rather than a
- * smaller font.
+ * A PERSISTENT LEFT RAIL at >=1024px (232px), an ICON-ONLY rail at 768–1023 (64px, §5.2), and a
+ * WRAPPING top bar below that.
+ *
+ * The single top bar it replaces was a non-wrapping flex row: the admin group put six nav links
+ * plus the brand, the surface tag and a `white-space: nowrap` org badge into it — roughly 600px of
+ * content in a 375px viewport — so the whole page scrolled sideways on a phone. Six items stacked
+ * vertically do not compete for width, which is why the rail is the fix rather than a smaller
+ * font.
  *
  * The principal and the org badge pin to the bottom of the rail. In the top bar the badge floated
  * in a flex row and moved every time the nav changed length; in the rail it has a permanent place,
@@ -43,6 +44,7 @@ export function DashboardShell({
 }) {
   return (
     <div className="shell">
+      <IconSprite />
       <header className="rail">
         <div className="rail__head">
           <span className="rail__brand">◐ Stopgap</span>

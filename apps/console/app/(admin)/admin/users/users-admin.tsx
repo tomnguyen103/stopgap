@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import type { Role } from "@stopgap/core";
 import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../../lib/actions";
-import { Button, Card, Table, Toggle } from "../../../components/ui";
+import { Button, Card, ConfirmButton, Table, Toggle } from "../../../components/ui";
 
 /**
  * Role management UI (PHASE6 §6.1). A thin client over the admin server actions — each role is a
@@ -82,16 +82,18 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
                   </Button>
                 </div>
               ) : (
-                <Button
-                  type="button"
+                <ConfirmButton
                   variant="danger"
                   disabled={pending}
-                  onClick={() => {
+                  target={user.label}
+                  confirmLabel="Disable account"
+                  description="They lose access at their next request. Roles are kept, and the account can be re-enabled from the disabled view."
+                  action={() => {
                     run(() => setUserDisabledAction(user.id, true));
                   }}
                 >
                   Disable
-                </Button>
+                </ConfirmButton>
               )}
             </td>
           </tr>

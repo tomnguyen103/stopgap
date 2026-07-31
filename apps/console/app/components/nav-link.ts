@@ -8,4 +8,6 @@
 export interface NavLink {
   href: string;
   label: string;
+  /** A symbol id from the sprite, without the `i-` prefix. Carries the icon-only breakpoint. */
+  icon: string;
 }

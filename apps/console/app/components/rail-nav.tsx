@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Icon } from "./icon-sprite";
 import type { NavLink } from "./nav-link";
 
 /**
@@ -29,7 +30,10 @@ export function RailNav({ nav }: { nav: NavLink[] }) {
                 className="rail__item"
                 aria-current={current ? "page" : undefined}
               >
-                {link.label}
+                <Icon name={link.icon} />
+                {/* Visually hidden at the icon-only breakpoint, never REMOVED: the accessible
+                    name of a nav item must not depend on a picture. */}
+                <span className="rail__label">{link.label}</span>
               </Link>
             </li>
           );
