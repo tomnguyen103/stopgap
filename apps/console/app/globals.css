@@ -123,19 +123,36 @@
   --surface-warn-hover: var(--tint-warn-hover);
 
   /* ---- Scale: the spacing, radius and type steps the stylesheet was already using ---------- */
-  --space-1: 2px;
-  /* `.ds-gates` has read `--space-3` since ticket 14 with nothing defining it, so its `gap` was an
-     invalid declaration and collapsed to 0. Defined here at the step the 2px base implies. */
-  --space-3: 6px;
-  --space-4: 8px;
-  --space-5: 10px;
-  --space-6: 12px;
-  --space-7: 16px;
-  --space-8: 20px;
-  --space-9: 24px;
+  /*
+    ---- Scale: spacing -----------------------------------------------------------------------
+    One 4px base, contiguous, no gaps. The previous scale was named 1,4,5,6,7,8,9 off a 2px base
+    — no 2, no 3 — with two values (9px, 18px) deliberately left off it entirely, and `.ds-gates`
+    reading a `--space-3` that nothing declared. A scale with holes in it is a scale every new
+    rule has to guess at.
+
+    This RENUMBERS: `--space-4` was 8px and is now 16px. Every reference in this file was rewritten
+    in the same commit, which is the only safe way to do it — half a migration silently moves every
+    padding in the application. No `.tsx` reads a spacing token, so this file is the whole blast
+    radius, which is why no legacy alias block is needed to catch stragglers.
+  */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  /* The coarse end is deliberately sparse: nothing in a dense instrument needs a 52px. */
+  --space-10: 64px;
+  --space-12: 96px;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-pill: 999px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
   /*
     ---- Scale: type --------------------------------------------------------------------------
     Eight steps, from §4 of the design direction. The old scale was three sizes (12/13/15) plus a
@@ -203,22 +220,20 @@
   --badge-fg: inherit;
   --badge-radius: var(--radius-pill);
   --badge-pad-y: var(--space-1);
-  /* 9px and 18px are the stylesheet's historical values, deliberately not rounded onto the
-     scale: re-rounding them would move pixels, which is the one thing this ticket must not do. */
-  --badge-pad-x: 9px;
+  --badge-pad-x: var(--space-2);
 
   --button-bg: var(--interactive);
   --button-fg: var(--text-on-accent);
   --button-radius: var(--radius-md);
-  --button-pad-y: 9px;
-  --button-pad-x: var(--space-7);
+  --button-pad-y: var(--space-2);
+  --button-pad-x: var(--space-4);
   --button-disabled-opacity: 0.45;
 
   --card-bg: var(--surface-raised);
   --card-border: var(--border-default);
   --card-radius: var(--radius-lg);
-  --card-pad-y: 18px;
-  --card-pad-x: var(--space-8);
+  --card-pad-y: var(--space-5);
+  --card-pad-x: var(--space-5);
 
   --input-bg: var(--surface-sunken);
   --input-fg: var(--text-default);
@@ -281,11 +296,11 @@ h1 {
   line-height: var(--leading-title);
   letter-spacing: var(--tracking-title);
   font-weight: 600;
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-2);
 }
 .sub {
   color: var(--muted);
-  margin: 0 0 var(--space-8);
+  margin: 0 0 var(--space-5);
   font-size: var(--text-small);
   line-height: var(--leading-small);
 }
@@ -394,13 +409,13 @@ h2 {
   line-height: var(--leading-heading);
   letter-spacing: var(--tracking-heading);
   font-weight: 600;
-  margin: var(--space-9) 0 var(--space-4);
+  margin: var(--space-6) 0 var(--space-2);
 }
 /* The protocol body. Set in the BODY face: monospaced clinical guidance reads as machine output,
    which is the opposite of what a human-authored protocol is. */
 .draft {
-  margin: var(--space-7) 0 0;
-  padding: var(--space-6) var(--space-7);
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) var(--space-4);
   background: var(--surface-sunken);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
@@ -425,7 +440,7 @@ h2 {
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-3) var(--space-3);
   font: var(--text-prose) / var(--leading-prose) var(--font-body);
 }
 .actions {
@@ -605,10 +620,10 @@ button.danger {
 */
 .ds-loading {
   display: grid;
-  gap: var(--space-6);
+  gap: var(--space-3);
 }
 .ds-loading__bar {
-  height: var(--space-9);
+  height: var(--space-6);
   border-radius: var(--radius-md);
   background: var(--surface-raised);
   border: 1px solid var(--border-default);
@@ -623,7 +638,7 @@ button.danger {
 */
 .ds-field {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
   min-width: 0;
   flex: 1 1 200px;
 }
@@ -747,17 +762,17 @@ button.danger {
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
-  margin-bottom: var(--space-7);
+  margin-bottom: var(--space-4);
   box-shadow: var(--elev-raised);
 }
 /* Matches the global `h2` rule exactly — a card rebuilt on the primitive must not shift. */
 .ds-card__title {
-  margin: var(--space-9) 0 var(--space-4);
+  margin: var(--space-6) 0 var(--space-2);
   font-size: var(--text-lg);
 }
 .ds-card__sub {
   color: var(--text-subtle);
-  margin: 0 0 var(--space-8);
+  margin: 0 0 var(--space-5);
   font-size: var(--text-md);
 }
 
@@ -768,7 +783,7 @@ button.danger {
   color: var(--input-fg);
   border: 1px solid var(--input-border);
   border-radius: var(--input-radius);
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-3) var(--space-3);
   font: var(--text-body) / var(--leading-body) var(--font-body);
 }
 .ds-input:hover:not(:disabled) {
@@ -811,7 +826,7 @@ button.danger {
 .ds-table th,
 .ds-table td {
   text-align: left;
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-3) var(--space-3);
   border-bottom: 1px solid var(--table-cell-border);
 }
 /* Every number in every table, aligned by digit. A column of scores that does not align is a
@@ -857,8 +872,8 @@ button.danger {
   /* `minmax(0, 1fr)`, not `1fr`: a long figure otherwise widens its track and pushes the page
      sideways on a 320px viewport. */
   grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
-  gap: var(--space-6);
-  margin: var(--space-7) 0;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
 }
 .ds-figure {
   background: var(--card-bg);
@@ -878,15 +893,15 @@ button.danger {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-5);
-  margin-bottom: var(--space-6);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 .ds-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4);
-  margin-bottom: var(--space-5);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 .ds-chip {
   border: 1px solid var(--badge-border);
@@ -913,8 +928,8 @@ button.danger {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-6);
-  margin-top: var(--space-7);
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
 /* A pager link at the end of its range stays visible and stops responding, rather than vanishing
    and moving the two controls beside it. */
@@ -943,7 +958,7 @@ button.danger {
   padding: var(--card-pad-y) var(--card-pad-x);
   /* Wide enough to read a source URL without wrapping it to death, and never wider than the
      viewport it opens over. */
-  width: min(680px, calc(100vw - var(--space-9)));
+  width: min(680px, calc(100vw - var(--space-6)));
   max-height: 80vh;
   overflow-y: auto;
 }
@@ -954,18 +969,18 @@ button.danger {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-6);
+  gap: var(--space-3);
 }
 .ds-drawer__list {
   list-style: none;
-  margin: var(--space-7) 0 0;
+  margin: var(--space-4) 0 0;
   padding: 0;
   display: grid;
-  gap: var(--space-7);
+  gap: var(--space-4);
 }
 .ds-drawer__list li {
   border-top: 1px solid var(--border-default);
-  padding-top: var(--space-6);
+  padding-top: var(--space-3);
   /* A captured URL is one long unbreakable token; without this it widens the dialog. */
   overflow-wrap: anywhere;
 }
@@ -977,7 +992,7 @@ button.danger {
   display: block;
 }
 .ds-chart figcaption {
-  margin-top: var(--space-5);
+  margin-top: var(--space-3);
 }
 /* The legend key repeats the line's colour beside its NAME, so identity never rests on colour
    alone — the same reason the diff below carries a + and a − as well as a tint. */
@@ -986,7 +1001,7 @@ button.danger {
   width: 10px;
   height: 2px;
   vertical-align: middle;
-  margin-right: var(--space-4);
+  margin-right: var(--space-2);
 }
 .ds-chart__key--cases {
   background: var(--interactive);
@@ -1016,10 +1031,10 @@ button.danger {
 */
 .ds-errors {
   list-style: none;
-  margin: var(--space-5) 0 0;
+  margin: var(--space-3) 0 0;
   padding: 0;
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-2);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--status-bad);
@@ -1041,7 +1056,7 @@ button.danger {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 .ds-gates li[data-met="yes"] {
   color: var(--status-ok);
