@@ -5,6 +5,9 @@ import { Field } from "../../../components/ui/field";
 import { Toggle } from "../../../components/ui/toggle";
 import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
 import { Table } from "../../../components/ui/table";
+import { Badge } from "../../../components/ui/badge";
+import { Card } from "../../../components/ui/card";
+import { Button } from "../../../components/ui/button";
 
 /**
  * API key management UI (PHASE6 §6.7). A thin client over the admin server actions, which re-check
@@ -67,8 +70,7 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
 
   return (
     <>
-      <div className="card">
-        <h2 className="card-title">Issue a key</h2>
+      <Card title="Issue a key">
         <p className="sub-tight">
           Scopes are the whole authorization story for a key — it can do exactly what is ticked here
           and nothing else.
@@ -120,13 +122,13 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
           ))}
         </div>
         <div className="actions">
-          <button
+          <Button
             type="button"
             disabled={pending || name.trim() === "" || scopes.length === 0}
             onClick={issue}
           >
             Issue key
-          </button>
+          </Button>
         </div>
         {issued ? (
           <div className="banner bad">
@@ -135,24 +137,24 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
               The server stores only its hash.
             </p>
             <p className="mono">{issued.plaintext}</p>
-            <button
+            <Button
               type="button"
               onClick={() => {
                 setIssued(undefined);
               }}
             >
               I have copied it
-            </button>
+            </Button>
           </div>
         ) : null}
-      </div>
+      </Card>
 
       {keys.length === 0 ? (
         <div className="empty">
           No keys issued — the public API refuses every request until one exists.
         </div>
       ) : (
-        <div className="card">
+        <Card>
           <Table
             head={["Name", "Prefix", "Scopes", "Limit/hr", "Last used", "State"]}
             label="Issued API keys"
@@ -164,9 +166,7 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
                 <td>
                   <div className="actions">
                     {key.scopes.map((scope) => (
-                      <span key={scope} className="pill">
-                        {scope}
-                      </span>
+                      <Badge key={scope}>{scope}</Badge>
                     ))}
                   </div>
                 </td>
@@ -174,24 +174,24 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
                 <td className="mono">{key.lastUsedAt ?? "never"}</td>
                 <td>
                   {key.revokedAt ? (
-                    <span className="pill sev-critical">revoked</span>
+                    <Badge severity="critical">revoked</Badge>
                   ) : (
-                    <button
+                    <Button
                       type="button"
-                      className="danger"
+                      variant="danger"
                       disabled={pending}
                       onClick={() => {
                         run(() => revokeApiKeyAction(key.id));
                       }}
                     >
                       Revoke
-                    </button>
+                    </Button>
                   )}
                 </td>
               </tr>
             ))}
           </Table>
-        </div>
+        </Card>
       )}
       {error ? (
         <p className="error" role="alert">

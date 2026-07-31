@@ -1,6 +1,7 @@
 import { getShadowDashboard, getShadowRuns } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
 import { Table } from "../../components/ui/table";
+import { asSeverity, Badge } from "../../components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
@@ -74,11 +75,11 @@ export default async function ShadowPage() {
             <tr key={run.id}>
               <td>{run.corpusId}</td>
               <td>
-                <span className={`pill sev-${run.proposedSeverity}`}>{run.proposedSeverity}</span>{" "}
+                <Badge severity={asSeverity(run.proposedSeverity)}>{run.proposedSeverity}</Badge>{" "}
                 {run.proposedAlternatives.length} alt
               </td>
               <td>
-                <span className={`pill sev-${run.baselineSeverity}`}>{run.baselineSeverity}</span>{" "}
+                <Badge severity={asSeverity(run.baselineSeverity)}>{run.baselineSeverity}</Badge>{" "}
                 {run.baselineAlternatives.length} alt
               </td>
               <td>{(Number(run.agreement) * 100).toFixed(0)}%</td>

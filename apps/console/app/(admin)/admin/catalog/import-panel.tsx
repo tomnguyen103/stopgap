@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 
 import { importCatalogAction } from "../../../lib/actions";
 import { MAX_UPLOAD_BYTES } from "../../../lib/upload-limit";
+import { Button } from "../../../components/ui/button";
 
 /**
  * Upload a catalog file, and read back what was wrong with it (ticket 17).
@@ -100,7 +101,7 @@ export function ImportPanel({
             );
           }}
         />
-        <button
+        <Button
           type="button"
           className="ds-button"
           aria-disabled={blocked || undefined}
@@ -135,7 +136,7 @@ export function ImportPanel({
           }}
         >
           {pending ? "Importing…" : "Import"}
-        </button>
+        </Button>
         {fileName ? <span className="sub">{fileName}</span> : null}
       </div>
 

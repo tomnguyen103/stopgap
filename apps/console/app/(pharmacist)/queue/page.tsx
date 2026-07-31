@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
 
-import { Badge, Card, Table } from "../../components/ui";
+import { Badge, Button, Card, Table } from "../../components/ui";
 import { DemoPanel } from "../../demo-panel";
 import { getCaseQueue, getFeedFreshness } from "../../lib/data";
 import { formatUtc } from "../../lib/format";
@@ -101,9 +101,7 @@ export default async function CaseQueuePage({
           <input type="hidden" name="sort" value={params.sort} />
           <input type="hidden" name="dir" value={params.dir} />
           <input type="hidden" name="pageSize" value={String(params.pageSize)} />
-          <button className="ds-button" type="submit">
-            Search
-          </button>
+          <Button type="submit">Search</Button>
         </form>
 
         {Object.entries(CASE_QUEUE_SCHEMA.filters).map(([key, allowed]) => (

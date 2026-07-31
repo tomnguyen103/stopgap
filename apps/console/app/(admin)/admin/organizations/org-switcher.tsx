@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { setActiveOrgAction } from "../../../lib/actions";
 import { Table } from "../../../components/ui/table";
+import { Card } from "../../../components/ui/card";
+import { Button } from "../../../components/ui/button";
 
 /**
  * The admin active-org switch (PHASE6 §6.5) — a thin client over `setActiveOrgAction`.
@@ -35,7 +37,7 @@ export function OrgSwitcher({ orgs, activeOrgId }: { orgs: OrgOption[]; activeOr
   }
 
   return (
-    <div className="card">
+    <Card>
       {error ? <p className="sub">{error}</p> : null}
       <Table head={["Organization", "Slug", "Active"]} label="Organizations on this deployment">
         {orgs.map((org) => {
@@ -48,15 +50,15 @@ export function OrgSwitcher({ orgs, activeOrgId }: { orgs: OrgOption[]; activeOr
                 {active ? (
                   <span className="status">current</span>
                 ) : (
-                  <button type="button" disabled={pending} onClick={() => switchTo(org.id)}>
+                  <Button type="button" disabled={pending} onClick={() => switchTo(org.id)}>
                     Act in this organization
-                  </button>
+                  </Button>
                 )}
               </td>
             </tr>
           );
         })}
       </Table>
-    </div>
+    </Card>
   );
 }

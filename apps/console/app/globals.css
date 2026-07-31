@@ -499,50 +499,6 @@ h1 {
   font-size: var(--text-small);
   line-height: var(--leading-small);
 }
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-th,
-td {
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line);
-}
-th {
-  color: var(--muted);
-  font-weight: 600;
-  font-size: var(--text-micro);
-  line-height: var(--leading-micro);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-micro);
-}
-tr:hover td {
-  background: var(--surface-hover);
-}
-.pill {
-  display: inline-block;
-  padding: 2px 9px;
-  border-radius: 999px;
-  font-size: 12px;
-  border: 1px solid var(--line);
-}
-.sev-critical {
-  color: var(--crit);
-  border-color: var(--crit);
-}
-.sev-high {
-  color: var(--high);
-  border-color: var(--high);
-}
-.sev-moderate {
-  color: var(--mod);
-  border-color: var(--mod);
-}
-.sev-low {
-  color: var(--low);
-  border-color: var(--low);
-}
 .status {
   color: var(--interactive);
 }
@@ -552,14 +508,6 @@ tr:hover td {
   color: var(--muted);
   border: 1px dashed var(--line);
   border-radius: 10px;
-}
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 18px 20px;
-  margin-bottom: 16px;
-  box-shadow: var(--elev-raised);
 }
 /*
   Key/value pairs. STACKED by default and two-column only when there is room: at 375px the fixed
@@ -651,9 +599,6 @@ h2 {
   font: var(--text-prose) / var(--leading-prose) var(--font-body);
   color: var(--text);
 }
-.sev-none {
-  color: var(--muted);
-}
 
 /* Phase 4: HITL review panel. */
 /* Same reason as `.draft`: what a pharmacist writes here is prose, not a payload. */
@@ -677,24 +622,6 @@ h2 {
   gap: 10px;
   align-items: center;
   margin-top: 12px;
-}
-button {
-  background: var(--interactive);
-  color: var(--text-on-accent);
-  border: 0;
-  border-radius: 8px;
-  padding: 9px 16px;
-  font: 600 var(--text-md) / 1 var(--font-body);
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-button.danger {
-  background: transparent;
-  color: var(--crit);
-  border: 1px solid var(--crit);
 }
 .error {
   color: var(--crit);
@@ -798,14 +725,16 @@ button.danger {
 
 /*
   ---------------------------------------------------------------------------------------------
-  Ticket 02 — the shared primitives, as classes over the component-token layer.
+  The shared primitives, as classes over the component-token layer.
 
-  These live BESIDE the page classes above, not instead of them. Every page written before this
-  ticket keeps rendering against the rules it was written for; a page rebuilt on the primitives
-  produces the same pixels because both ends read the same tokens. That is the whole claim of this
-  ticket, and it is why the severity classes below alias `.sev-*`'s tokens rather than restating
-  their hex values — a critical case cannot look one way through `.pill.sev-critical` and another
-  through `<Badge severity="critical">`.
+  These USED to live beside a parallel set of hand-written page rules — `.card`, `.pill`,
+  `.sev-*`, and bare `table`/`th`/`td`/`button` selectors — which most pages actually used. P2.4
+  deleted that half. Two systems is two places to fix anything, and they had already drifted: a
+  bare `<table>` had no scroll container, so a five-column table pushed the whole PAGE sideways on
+  a phone instead of scrolling itself, and `.pill.muted` styled nothing at all.
+
+  There is now one dialect. A page gets the console's look by using a primitive, and a change to
+  the look is a change to a token.
   ---------------------------------------------------------------------------------------------
 */
 

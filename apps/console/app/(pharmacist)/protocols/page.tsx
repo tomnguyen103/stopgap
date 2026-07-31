@@ -1,5 +1,5 @@
 import { getProtocols } from "../../lib/data";
-import { Card, Table } from "../../components/ui";
+import { Button, Card, Table } from "../../components/ui";
 import { requireGroup } from "../../lib/group-guard";
 import {
   diffLines,
@@ -153,9 +153,7 @@ export default async function ProtocolsPage({
                       </option>
                     ))}
                   </select>
-                  <button className="ds-button" type="submit">
-                    Show what changed
-                  </button>
+                  <Button type="submit">Show what changed</Button>
                 </form>
               )}
 

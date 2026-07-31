@@ -5,6 +5,8 @@ import type { Role } from "@stopgap/core";
 import { Toggle } from "../../../components/ui/toggle";
 import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../../lib/actions";
 import { Table } from "../../../components/ui/table";
+import { Card } from "../../../components/ui/card";
+import { Button } from "../../../components/ui/button";
 
 /**
  * Role management UI (PHASE6 §6.1). A thin client over the admin server actions — each role is a
@@ -37,7 +39,7 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
   }
 
   return (
-    <div className="card">
+    <Card>
       <Table head={["User", "Roles", "Account"]} label="Users and their roles">
         {users.map((user) => (
           <tr key={user.id}>
@@ -64,16 +66,16 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
               </div>
             </td>
             <td>
-              <button
+              <Button
                 type="button"
-                className="danger"
+                variant="danger"
                 disabled={pending}
                 onClick={() => {
                   run(() => setUserDisabledAction(user.id, true));
                 }}
               >
                 Disable
-              </button>
+              </Button>
             </td>
           </tr>
         ))}
@@ -83,6 +85,6 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
           {error}
         </p>
       ) : null}
-    </div>
+    </Card>
   );
 }

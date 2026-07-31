@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isDemoMode } from "@stopgap/demo";
 
-import { Badge, Card, Table } from "../../../components/ui";
+import { Badge, Button, Card, Table } from "../../../components/ui";
 import { isActionAllowed } from "../../../lib/authz";
 import { unavailableReason } from "../../../lib/case-queue";
 import {
@@ -87,9 +87,7 @@ export default async function CatalogPage({
           )}
           <input type="hidden" name="sort" value={params.sort} />
           <input type="hidden" name="dir" value={params.dir} />
-          <button className="ds-button" type="submit">
-            Search
-          </button>
+          <Button type="submit">Search</Button>
         </form>
 
         <div className="ds-chips">

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 
 import { createAlertRuleAction, updateAlertRuleAction } from "../../lib/actions";
 import { Table } from "../../components/ui/table";
+import { Button } from "../../components/ui/button";
 
 export interface RuleView {
   id: string;
@@ -167,7 +168,7 @@ export function RulesPanel({
               </td>
               <td className="sub">{rule.lastFired ?? "never"}</td>
               <td>
-                <button
+                <Button
                   type="button"
                   className="ds-button ds-button--quiet"
                   aria-disabled={blocked || undefined}
@@ -189,7 +190,7 @@ export function RulesPanel({
                   }}
                 >
                   {rule.enabled ? "Enabled" : "Disabled"}
-                </button>
+                </Button>
               </td>
             </tr>
           ))
@@ -266,7 +267,7 @@ export function RulesPanel({
             }}
           />
         ) : null}
-        <button
+        <Button
           type="button"
           className="ds-button"
           aria-disabled={blocked || undefined}
@@ -295,7 +296,7 @@ export function RulesPanel({
           }}
         >
           Create rule
-        </button>
+        </Button>
       </div>
       {error ? (
         <p className="error" role="alert">

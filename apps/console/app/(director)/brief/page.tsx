@@ -2,6 +2,7 @@ import { DEGRADED_REASONS, type DegradedReason } from "@stopgap/db";
 import { getDailyBriefs } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
 import { Table } from "../../components/ui/table";
+import { Badge } from "../../components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export default async function BriefPage() {
             {latest.degradedReason ? (
               <>
                 {" "}
-                <span className="pill sev-high">{degradedLabel(latest.degradedReason)}</span>
+                <Badge severity="high">{degradedLabel(latest.degradedReason)}</Badge>
               </>
             ) : null}
           </h2>
@@ -105,7 +106,7 @@ export default async function BriefPage() {
                 <td>{brief.briefDate}</td>
                 <td>
                   {brief.degradedReason ? (
-                    <span className="pill sev-high">{degradedLabel(brief.degradedReason)}</span>
+                    <Badge severity="high">{degradedLabel(brief.degradedReason)}</Badge>
                   ) : (
                     brief.headline
                   )}

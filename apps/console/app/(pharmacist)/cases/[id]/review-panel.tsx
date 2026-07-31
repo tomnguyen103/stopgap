@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { Field } from "../../../components/ui/field";
 import { resolveExceptionCase, reviewCase } from "../../../lib/actions";
+import { Card } from "../../../components/ui/card";
+import { Button } from "../../../components/ui/button";
 
 /**
  * The HITL gate (PROJECT_PLAN §2). A case sitting in `awaiting_review` blocks its workflow
@@ -66,7 +68,7 @@ export function ReviewPanel({
   if (status === "awaiting_review") {
     const edited = editedDraft !== draft;
     return (
-      <div className="card ds-prose">
+      <Card className="ds-prose">
         <h2>Pharmacist review</h2>
         <p className="sub">
           This case is blocked on your decision. Alternatives proposed:{" "}
@@ -101,7 +103,7 @@ export function ReviewPanel({
           )}
         </Field>
         <div className="actions">
-          <button
+          <Button
             type="button"
             // `aria-disabled` rather than `disabled` when the caller lacks the role: a disabled
             // control leaves the tab order, taking the explanation of WHY with it. The handler
@@ -120,7 +122,7 @@ export function ReviewPanel({
             }}
           >
             {edited ? "Approve with edits" : "Approve"}
-          </button>
+          </Button>
           <Field label="Reason" hint="Required to reject.">
             {(id, describedBy) => (
               <input
@@ -135,9 +137,9 @@ export function ReviewPanel({
               />
             )}
           </Field>
-          <button
+          <Button
             type="button"
-            className="danger"
+            variant="danger"
             aria-disabled={blocked || undefined}
             title={unavailableReason ?? undefined}
             disabled={pending || rejectReason.trim().length === 0}
@@ -147,20 +149,20 @@ export function ReviewPanel({
             }}
           >
             Reject
-          </button>
+          </Button>
         </div>
         {error ? (
           <p className="error" role="alert">
             {error}
           </p>
         ) : null}
-      </div>
+      </Card>
     );
   }
 
   if (status === "exception") {
     return (
-      <div className="card ds-prose">
+      <Card className="ds-prose">
         <h2>Resolve exception</h2>
         <p className="sub">
           The agent escalated this case. What you write here becomes an approved protocol version
@@ -219,7 +221,7 @@ export function ReviewPanel({
               />
             )}
           </Field>
-          <button
+          <Button
             type="button"
             aria-disabled={blocked || undefined}
             title={unavailableReason ?? undefined}
@@ -238,14 +240,14 @@ export function ReviewPanel({
             }}
           >
             Resolve and write protocol
-          </button>
+          </Button>
         </div>
         {error ? (
           <p className="error" role="alert">
             {error}
           </p>
         ) : null}
-      </div>
+      </Card>
     );
   }
 
