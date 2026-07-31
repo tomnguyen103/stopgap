@@ -47,7 +47,12 @@ export function DashboardShell({
       <IconSprite />
       <header className="rail">
         <div className="rail__head">
-          <span className="rail__brand">◐ Stopgap</span>
+          <span className="rail__brand">
+            <span aria-hidden="true">◐</span>
+            {/* Clipped, not removed, at the icon-only breakpoint — the wordmark is the document's
+                only statement of what this application is. */}
+            <span className="rail__wordmark">Stopgap</span>
+          </span>
           <span className="rail__surface">{surface}</span>
         </div>
         <RailNav nav={nav} />
