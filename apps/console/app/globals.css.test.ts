@@ -17,7 +17,7 @@ const css = readFileSync(fileURLToPath(new URL("./globals.css", import.meta.url)
 
 /** Every `--name:` that appears in a declaration position. */
 function definedProperties(source: string): Set<string> {
-  return new Set(Array.from(source.matchAll(/(--[a-z0-9-]+)\s*:/gi), (m) => m[1]));
+  return new Set(Array.from(source.matchAll(/(--[a-z0-9-]+)\s*:/gi), (m) => m[1] ?? ""));
 }
 
 /**
@@ -25,7 +25,7 @@ function definedProperties(source: string): Set<string> {
  * how `--rail` and friends are meant to be optional — so only the bare ones are required to exist.
  */
 function referencedWithoutFallback(source: string): Set<string> {
-  return new Set(Array.from(source.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi), (m) => m[1]));
+  return new Set(Array.from(source.matchAll(/var\(\s*(--[a-z0-9-]+)\s*\)/gi), (m) => m[1] ?? ""));
 }
 
 describe("globals.css custom properties", () => {
