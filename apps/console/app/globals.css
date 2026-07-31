@@ -472,6 +472,32 @@ button.danger {
 }
 
 /*
+  Field — a control with a label that stays on screen.
+
+  `display: grid` rather than a wrapper with margins, so the label, the hint and the control keep
+  their vertical rhythm whatever the control is, and `min-width: 0` so a field inside `.actions`
+  (a wrapping flex row) can shrink instead of pushing the row sideways.
+*/
+.ds-field {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  flex: 1 1 200px;
+}
+.ds-field__label {
+  color: var(--text-subtle);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.ds-field__hint {
+  color: var(--text-subtle);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+/*
   Toggle — the two-state selector on the credential surfaces.
 
   Fill AND border AND text weight all move between the states, deliberately: this control decides

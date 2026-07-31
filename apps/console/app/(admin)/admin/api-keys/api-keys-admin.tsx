@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Field } from "../../../components/ui/field";
 import { Toggle } from "../../../components/ui/toggle";
 import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
 
@@ -72,27 +73,36 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
           and nothing else.
         </p>
         <div className="actions">
-          <input
-            className="reason-input"
-            placeholder="Name (e.g. epic-integration)"
-            value={name}
-            disabled={pending}
-            onChange={(e) => {
-              setName(e.target.value);
-            }}
-          />
-          <input
-            className="reason-input"
-            type="number"
-            min={1}
-            max={100000}
-            value={rateLimit}
-            disabled={pending}
-            onChange={(e) => {
-              setRateLimit(Number(e.target.value));
-            }}
-            aria-label="Requests per hour"
-          />
+          <Field label="Name" hint="For example, epic-integration.">
+            {(id, describedBy) => (
+              <input
+                id={id}
+                aria-describedby={describedBy}
+                className="reason-input"
+                value={name}
+                disabled={pending}
+                onChange={(e) => {
+                  setName(e.target.value);
+                }}
+              />
+            )}
+          </Field>
+          <Field label="Requests per hour">
+            {(id) => (
+              <input
+                id={id}
+                className="reason-input"
+                type="number"
+                min={1}
+                max={100000}
+                value={rateLimit}
+                disabled={pending}
+                onChange={(e) => {
+                  setRateLimit(Number(e.target.value));
+                }}
+              />
+            )}
+          </Field>
         </div>
         <div className="actions">
           {allScopes.map((scope) => (
