@@ -1163,7 +1163,7 @@ h2 {
   display: grid;
   /* `minmax(0, 1fr)`, not `1fr`: a long figure otherwise widens its track and pushes the page
      sideways on a 320px viewport. */
-  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: var(--space-3);
   margin: var(--space-4) 0;
 }
@@ -1173,6 +1173,24 @@ h2 {
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
   box-shadow: var(--elev-raised);
+}
+/* A Card used as a figure tile sits in the grid, so its stack margin would double the gap. */
+.ds-figures .ds-card {
+  margin-bottom: 0;
+}
+.ds-figure__label {
+  margin: var(--space-1) 0 0;
+  color: var(--text-subtle);
+  font-size: var(--type-micro);
+  line-height: var(--leading-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+}
+.ds-figure__target {
+  margin: var(--space-2) 0 0;
+  color: var(--text-subtle);
+  font-size: var(--type-small);
+  font-variant-numeric: var(--font-numeric);
 }
 .ds-figure__value {
   font-size: var(--type-display);
