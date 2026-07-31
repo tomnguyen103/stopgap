@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { getEnv } from "@stopgap/core";
 import { isDemoMode } from "@stopgap/demo";
+import { SIGNAL_SOURCES } from "@stopgap/ingest";
 
 import { Badge, Card, Table } from "../../components/ui";
-import { getCatalogCoverage, getFeedFreshness, getOversight } from "../../lib/data";
+import {
+  getCatalogCoverage,
+  getConnectorRuns,
+  getFeedFreshness,
+  getOversight,
+} from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
 import { SeedDemoPanel } from "./seed-demo-panel";
 
@@ -11,6 +17,17 @@ export const dynamic = "force-dynamic";
 
 /** How stale a feed may be before an administrator should be looking at it. */
 const FEED_QUIET_HOURS = 36;
+
+/**
+ * What a connector outcome is called on screen. The stored values are the vocabulary
+ * `CONNECTOR_RUN_OUTCOMES` declares; an unmapped one renders as itself rather than as a blank cell,
+ * so a value added to the database and not here is visible instead of invisible.
+ */
+const OUTCOME_LABELS: Record<string, string> = {
+  ok: "ok",
+  fetch_failed: "fetch failed",
+  persist_failed: "write failed",
+};
 
 /**
  * The administrator's landing page: what still needs configuring, and whether the system is
@@ -25,15 +42,23 @@ const FEED_QUIET_HOURS = 36;
  */
 export default async function AdminIndexPage() {
   const principal = await requireGroup("admin");
-  const [coverage, feeds, oversight] = await Promise.all([
+  const [coverage, feeds, oversight, connectorRuns] = await Promise.all([
     getCatalogCoverage(),
     getFeedFreshness(),
     getOversight(),
+    getConnectorRuns(),
   ]);
   const env = getEnv();
   const now = Date.now();
   const isQuiet = (lastFetchedAt: Date | string) =>
     now - new Date(lastFetchedAt).getTime() > FEED_QUIET_HOURS * 3_600_000;
+
+  // EVERY connector in the contract, not only the ones with a row. A connector that has never run
+  // for this facility has nothing stored, and rendering only what is stored would drop it from the
+  // table entirely — which reads identically to a connector that is fine. "Never run" is the exact
+  // state a silent feed is in, so it has to have a line of its own.
+  const bySource = new Map(connectorRuns.map((run) => [run.source, run]));
+  const connectors = SIGNAL_SOURCES.map((source) => ({ source, run: bySource.get(source) }));
 
   const checklist: {
     label: string;
@@ -121,6 +146,58 @@ export default async function AdminIndexPage() {
       </Card>
 
       {/*
+        CONNECTOR HEALTH, THIS FACILITY'S (ticket 17). The card below it reads `feed_records`, which
+        is deployment-wide and written only by the shortage connectors; this one reads
+        `connector_runs`, which is per tenant and covers every connector in the contract. The two
+        answer different questions and both are worth having: "has this deployment heard from
+        openFDA" is not "did my hospital get signals out of that poll".
+      */}
+      <Card
+        title="Connector health"
+        sub={`This facility's last run per feed · quiet for over ${String(FEED_QUIET_HOURS)} hours is flagged`}
+      >
+        <Table
+          label="Connector health"
+          head={["Connector", "Last run", "Signals", "Last success", "State"]}
+        >
+          {connectors.map(({ source, run }) => (
+            <tr key={source}>
+              <td>{source}</td>
+              <td className="sub">
+                {run ? new Date(run.ranAt).toISOString().slice(0, 16) : "—"}
+              </td>
+              <td>{run ? run.signalCount : "—"}</td>
+              <td className="sub">
+                {/* Separate from the last RUN on purpose: a connector failing every poll for a week
+                    still has a recent run, and the gap between the two columns is the whole signal. */}
+                {run?.lastOkAt ? new Date(run.lastOkAt).toISOString().slice(0, 16) : "never"}
+              </td>
+              <td>
+                {!run ? (
+                  <Badge severity="high">never run</Badge>
+                ) : run.outcome !== "ok" ? (
+                  <Badge severity="critical">{OUTCOME_LABELS[run.outcome] ?? run.outcome}</Badge>
+                ) : isQuiet(run.ranAt) ? (
+                  <Badge severity="critical">quiet</Badge>
+                ) : (
+                  <Badge tone="status">fresh</Badge>
+                )}
+              </td>
+            </tr>
+          ))}
+        </Table>
+        {/* The failure itself, not just that there was one — an administrator who has to act needs
+            to know whether the source is unreachable or this facility's own write is failing. */}
+        {connectors
+          .filter((c) => c.run?.detail)
+          .map(({ source, run }) => (
+            <p className="sub sub-tight" key={source}>
+              <strong>{source}</strong>: {run?.detail}
+            </p>
+          ))}
+      </Card>
+
+      {/*
         WHAT THIS CARD CAN SEE. `feed_records` is written by the shortage connectors; the recall
         connectors normalize straight onto the signal contract and store no feed record, so they
         cannot appear here yet. Naming that is the difference between "no recall feed is listed"
@@ -130,8 +207,8 @@ export default async function AdminIndexPage() {
         same content again — so this answers "did the poll run", not "did the source change".
       */}
       <Card
-        title="Feed health"
-        sub={`A feed quiet for over ${String(FEED_QUIET_HOURS)} hours is flagged`}
+        title="Feed records, deployment-wide"
+        sub={`Provenance behind every case · quiet for over ${String(FEED_QUIET_HOURS)} hours is flagged`}
       >
         {feeds.length === 0 ? (
           <p className="sub sub-tight">
@@ -139,7 +216,7 @@ export default async function AdminIndexPage() {
             does not mean the feeds are healthy.
           </p>
         ) : (
-          <Table label="Feed health" head={["Feed", "Last stored record", "Records", "State"]}>
+          <Table label="Feed records" head={["Feed", "Last stored record", "Records", "State"]}>
             {feeds.map((feed) => (
               <tr key={feed.source}>
                 <td>{feed.source}</td>

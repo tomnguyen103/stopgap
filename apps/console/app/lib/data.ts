@@ -4,6 +4,8 @@ import {
   feedFreshness,
   browseCatalog,
   catalogCoverage,
+  listConnectorRuns,
+  type ConnectorRunRow,
   dailyCounts,
   getCatalogItem,
   getCaseByWorkflowId,
@@ -583,4 +585,16 @@ export async function getCatalogItemDetail(sku: string): Promise<CatalogItemDeta
 export async function getCatalogCoverage(): Promise<CatalogCoverage> {
   const orgId = await currentOrgId();
   return withOrgDb(orgId, (db) => catalogCoverage(db, orgId));
+}
+
+/**
+ * What each connector did for THIS tenant on its last run (ticket 17).
+ *
+ * ORG-SCOPED, unlike `getFeedFreshness` beside it, and the pair is the point: that one reads the
+ * global `feed_records` and answers "has this deployment heard from openFDA"; this one answers "did
+ * my hospital get anything out of that poll", which is the question a silent feed actually raises.
+ */
+export async function getConnectorRuns(): Promise<ConnectorRunRow[]> {
+  const orgId = await currentOrgId();
+  return withOrgDb(orgId, (db) => listConnectorRuns(db, orgId));
 }

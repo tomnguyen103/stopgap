@@ -30,6 +30,8 @@ import {
   listRoleRecipients,
   recordFeedRecords,
   dedupeByKey,
+  recordConnectorRuns,
+  type ConnectorRunInput,
   recordEvidence,
   listAlertRules,
   lastFiredByRule,
@@ -432,6 +434,14 @@ interface FeedResult {
    * open.
    */
   attested: boolean;
+  /**
+   * The fetch failure, when there was one — carried so the per-tenant connector row (ticket 17) can
+   * SAY what went wrong rather than just that something did. Absent on a fetch that resolved.
+   *
+   * Distinct from `attested`: a feed that answered `[]` fetched fine and is simply unattested, and
+   * an administrator reading the health panel needs those two apart.
+   */
+  fetchError?: string;
 }
 
 /** Fetch every feed once for the deployment. Required feeds still throw; additive ones do not. */
@@ -444,15 +454,56 @@ async function fetchFeeds(): Promise<FeedResult[]> {
       } catch (err) {
         if (required) throw err;
         incrementCounter("stopgap_feed_fetch_failures_total");
+        const message = err instanceof Error ? err.message : String(err);
         console.error(
-          `[poll] ${feed.source} fetch failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          `[poll] ${feed.source} fetch failed: ${message}. ` +
             "The poll continues without that feed. Its existing signals are left alone - they are " +
             "NOT counted as missing, because an outage is not the feed saying the hazard ended.",
         );
-        return { source: feed.source, rows: [], normalize: feed.normalize, attested: false };
+        return {
+          source: feed.source,
+          rows: [],
+          normalize: feed.normalize,
+          attested: false,
+          fetchError: message,
+        };
       }
     }),
   );
+}
+
+/**
+ * What each connector did FOR ONE TENANT this poll (ticket 17).
+ *
+ * Pure, and derived from the two things that already exist — the deployment's fetch results and
+ * this tenant's normalized signals — rather than counted a second time as the poll runs. A separate
+ * tally maintained alongside the writes is a tally that eventually disagrees with them.
+ *
+ * `persistError` collapses every source to `persist_failed`: the tenant's write is ONE transaction
+ * covering all four feeds, so when it fails no connector delivered anything to this hospital, and
+ * reporting three of them as `ok` because their fetch worked would be the faked success this
+ * codebase refuses.
+ */
+function connectorRunsForOrg(
+  feeds: FeedResult[],
+  signals: NormalizedSignal[],
+  persistError: string | undefined,
+): ConnectorRunInput[] {
+  return feeds.map((feed) => {
+    const signalCount = signals.filter((s) => s.source === feed.source).length;
+    if (persistError !== undefined) {
+      return { source: feed.source, outcome: "persist_failed" as const, signalCount: 0, detail: persistError };
+    }
+    if (feed.fetchError !== undefined) {
+      return {
+        source: feed.source,
+        outcome: "fetch_failed" as const,
+        signalCount: 0,
+        detail: feed.fetchError,
+      };
+    }
+    return { source: feed.source, outcome: "ok" as const, signalCount };
+  });
 }
 
 /**
@@ -823,14 +874,18 @@ export async function pollAndOpenCases(): Promise<{
       // ON CONFLICT DO UPDATE refuses to touch twice in one statement. Collapsing at the source
       // means they cannot disagree about how many signals this poll saw, and a later consumer
       // inherits the list rather than the bug.
-      const signals = dedupeByKey(
-        normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp }),
-      );
+      //
+      // DECLARED OUTSIDE the try so the connector-run rows below can still be written when the
+      // block throws: a poll that failed for this tenant is precisely the poll an administrator
+      // needs recorded, and a `signals` scoped to the try would be unreachable from there.
+      let signals: NormalizedSignal[] = [];
+      let persistError: string | undefined;
       // ONE TENANT'S SIGNAL WRITE MUST NOT STOP THE POLL — the containment the resolution loop
       // below already applies per case, and the reason `fetchFeeds` contains an additive feed's
       // failure. Unguarded, one org's write error means every LATER org gets no case opened this
       // cycle, which reads in the runbook as "the poller stopped".
       try {
+        signals = dedupeByKey(normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp }));
         await withOrgDb(org.id, async (db) => {
           const persisted = await upsertSignals(db, org.id, signals);
           // The FEED-ABSENT half, kept distinct from `sourceResolved`: a signal the poll did not
@@ -870,11 +925,36 @@ export async function pollAndOpenCases(): Promise<{
         await evaluateAndNotify(org.id, scoredForAlerts, pollTimestamp);
       } catch (err) {
         incrementCounter("stopgap_signal_persist_failures_total");
+        persistError = err instanceof Error ? err.message : String(err);
         console.error(
-          `[poll] signal persistence failed for org ${org.id}: ` +
-            `${err instanceof Error ? err.message : String(err)}. ` +
+          `[poll] signal persistence failed for org ${org.id}: ${persistError}. ` +
             "That tenant keeps its previous signals and its miss counters are unchanged, so the " +
             "next poll retries it; case opening for this org and every later one continues.",
+        );
+      }
+
+      // Ticket 17 — what each connector did FOR THIS TENANT, so the administrator's health panel
+      // can answer "is my feed quiet" rather than only "has this deployment heard from openFDA".
+      // Its own scope, AFTER the block above and outside it: a run that failed is the one most
+      // worth recording, and writing it inside the transaction that just failed would roll it back
+      // with everything else.
+      try {
+        await withOrgDb(org.id, (db) =>
+          recordConnectorRuns(
+            db,
+            org.id,
+            new Date(pollTimestamp),
+            connectorRunsForOrg(feeds, signals, persistError),
+          ),
+        );
+      } catch (err) {
+        // CONTAINED, like every other per-tenant failure in this loop. Health bookkeeping must not
+        // be the thing that stops a poll: losing one tenant's connector row costs an administrator
+        // a stale panel, while letting it escape costs every LATER org its whole cycle.
+        console.error(
+          `[poll] connector health write failed for org ${org.id}: ` +
+            `${err instanceof Error ? err.message : String(err)}. ` +
+            "The panel shows this tenant's previous run until the next poll succeeds.",
         );
       }
 
