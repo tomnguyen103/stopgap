@@ -2,7 +2,9 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { planImport } from "@stopgap/catalog";
 import { importCatalog, RefusedImportError } from "./catalog.js";
+import { browseCatalog, type CatalogBrowseOptions } from "./catalog-browse.js";
 import { closeDb } from "./client.js";
+import { withOrgDb } from "./org-context.js";
 
 /**
  * The WRITE half of catalog import (ticket 15), against a live Postgres.
@@ -206,5 +208,91 @@ describe("an import belongs to the tenant that ran it", () => {
     );
     expect(a[0]?.name).toBe("Sodium Chloride 0.9%");
     expect(b[0]?.name).toBe("Org B saline");
+  });
+});
+
+/**
+ * The READ half (ticket 17's catalog browser), against real SQL.
+ *
+ * Here rather than offline because the behaviour under test is the SQL: the page and the size of
+ * the filtered set now come out of ONE statement via `count(*) over ()` (batch-A review finding 13
+ * — it used to build the whole CTE twice per page view), and a window count returns nothing at all
+ * for a page past the end. That edge is the reason this suite exists rather than a comment.
+ *
+ * Its own organization, seeded and torn down here: every other describe in this file accumulates
+ * rows in ORG_A, and paging assertions that depend on how many tests ran before them are the kind
+ * that fail for reasons unrelated to the change that broke them.
+ */
+describe("browsing the catalog", () => {
+  const ORG_C = "cccccccc-0000-0000-0000-0000000000cc";
+  const opts = (over: Partial<CatalogBrowseOptions> = {}): CatalogBrowseOptions => ({
+    sort: "sku",
+    dir: "asc",
+    page: 1,
+    pageSize: 2,
+    ...over,
+  });
+  const browse = (over?: Partial<CatalogBrowseOptions>) =>
+    withOrgDb(ORG_C, (db) => browseCatalog(db, ORG_C, opts(over)));
+
+  beforeAll(async () => {
+    await raw`insert into organizations (id, slug, name)
+              values (${ORG_C}, 'catalog-org-c', 'catalog-org-c') on conflict (id) do nothing`;
+    await importCatalog(
+      ORG_C,
+      planImport(
+        "items",
+        ["sku,name", "AAA-1,Alpha", "BBB-2,Bravo", "CCC-3,Charlie", "DDD-4,Delta", "EEE-5,Echo"].join(
+          "\n",
+        ),
+      ),
+    );
+  });
+
+  afterAll(async () => {
+    await asOrg(ORG_C, async (tx) => {
+      await tx`delete from item_identifiers where org_id = ${ORG_C}`;
+      await tx`delete from items where org_id = ${ORG_C}`;
+    });
+    await raw`delete from organizations where id = ${ORG_C}`;
+  });
+
+  it("returns one page and the size of the whole filtered set together", async () => {
+    const result = await browse();
+    expect(result.rows.map((r) => r.sku)).toEqual(["AAA-1", "BBB-2"]);
+    // FIVE, not two: the window count describes the filtered set, not the page cut out of it.
+    expect(result.total).toBe(5);
+    expect(result.page).toBe(1);
+  });
+
+  it("pages without the total moving", async () => {
+    const result = await browse({ page: 3 });
+    expect(result.rows.map((r) => r.sku)).toEqual(["EEE-5"]);
+    expect(result.total).toBe(5);
+    expect(result.page).toBe(3);
+  });
+
+  it("clamps a page past the end back to the last one rather than answering empty", async () => {
+    // The case the window count CANNOT answer — no rows, so no count either — and therefore the
+    // only one that still costs a second statement. A hand-edited address lands here.
+    const result = await browse({ page: 99 });
+    expect(result.page).toBe(3);
+    expect(result.rows.map((r) => r.sku)).toEqual(["EEE-5"]);
+    expect(result.total).toBe(5);
+  });
+
+  it("counts the FILTERED set under a search term, not the whole catalog", async () => {
+    const result = await browse({ q: "Alpha" });
+    expect(result.rows.map((r) => r.sku)).toEqual(["AAA-1"]);
+    expect(result.total).toBe(1);
+  });
+
+  it("answers a term that matches nothing with an empty page and a zero total", async () => {
+    // Distinct from the clamp above: page 1 of an empty result set is a real answer, so it must
+    // NOT trigger the second statement — an empty catalog and an empty search read the same here.
+    const result = await browse({ q: "no such product" });
+    expect(result.rows).toHaveLength(0);
+    expect(result.total).toBe(0);
+    expect(result.page).toBe(1);
   });
 });

@@ -99,28 +99,56 @@ export async function browseCatalog(
               or (${options.sourcing ?? null} = 'unsourced' and coalesce(sites.site_count, 0) = 0))
     )`;
 
-  const [counted] = await db.execute<{ total: string }>(
-    sql`${base} select count(*)::text as total from catalog`,
-  );
-  const total = Number(counted?.total ?? 0);
-  const page = Math.max(1, Math.min(options.page, Math.max(1, Math.ceil(total / pageSize))));
   // The ORDER BY is assembled from an allow-listed key, never interpolated from the parameter.
   const order =
     sort === "sku" ? sql`sku` : sort === "suppliers" ? sql`site_count` : sql`lower(name)`;
-  const rows = await db.execute<{
-    id: string;
-    sku: string;
-    name: string;
-    generic_name: string | null;
-    unit: string | null;
-    site_count: string;
-    on_hand: string | null;
-  }>(sql`
-    ${base}
-    select * from catalog
-     order by ${order} ${options.dir === "desc" ? sql`desc` : sql`asc`}, sku
-     limit ${pageSize} offset ${(page - 1) * pageSize}
-  `);
+
+  /**
+   * ONE STATEMENT for the page AND the total (batch-A review finding 13).
+   *
+   * This used to be two `db.execute`s over the same `base` CTE — a `count(*)` and then the page —
+   * so every page view built the join, the distinct-on and the ILIKE filter TWICE to return one
+   * screen of rows. `count(*) over ()` is the standard way to carry the size of the filtered set out
+   * with the page: same result, one pass.
+   *
+   * The window count comes back repeated on every row and is identical across them, so reading it
+   * from the first is not a sample — it is the value.
+   */
+  const pageAt = (at: number) =>
+    db.execute<{
+      id: string;
+      sku: string;
+      name: string;
+      generic_name: string | null;
+      unit: string | null;
+      site_count: string;
+      on_hand: string | null;
+      total: string;
+    }>(sql`
+      ${base}
+      select *, (count(*) over ())::text as total from catalog
+       order by ${order} ${options.dir === "desc" ? sql`desc` : sql`asc`}, sku
+       limit ${pageSize} offset ${(at - 1) * pageSize}
+    `);
+
+  // Sanitized the same way `pageSize` is, and for the same reason: a hand-edited address must
+  // degrade to a sensible default rather than reach OFFSET as NaN.
+  const requested = Number.isFinite(options.page) ? Math.max(1, Math.floor(options.page)) : 1;
+  let page = requested;
+  let rows = await pageAt(page);
+  let total = Number(rows[0]?.total ?? 0);
+
+  // AN EMPTY PAGE PAST THE END is the one case the window count cannot answer — no rows means no
+  // count either — so it is also the only case that still costs a second statement. A page-1 miss
+  // needs none of this: an empty catalog and an empty first page are the same answer.
+  if (rows.length === 0 && page > 1) {
+    const [counted] = await db.execute<{ total: string }>(
+      sql`${base} select count(*)::text as total from catalog`,
+    );
+    total = Number(counted?.total ?? 0);
+    page = Math.max(1, Math.min(page, Math.max(1, Math.ceil(total / pageSize))));
+    if (page !== requested) rows = await pageAt(page);
+  }
 
   return {
     total,
