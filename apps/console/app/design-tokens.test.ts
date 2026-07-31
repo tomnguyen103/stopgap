@@ -114,6 +114,20 @@ describe("contrast", () => {
     expect(round(contrast(resolve(token), resolve("--surface-raised")))).toBeGreaterThanOrEqual(3);
   });
 
+  // The two pairs P3/P4 introduced. Both put text on a fill that is not one of the four surfaces
+  // above, which is exactly the case the surface loop cannot see.
+  it("keeps the caution banner's text legible on its warm tint", () => {
+    expect(
+      round(contrast(resolve("--text-default"), resolve("--surface-warn"))),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("keeps an applied filter chip legible on its selected fill", () => {
+    expect(
+      round(contrast(resolve("--interactive"), resolve("--surface-selected"))),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("keeps a primary button's label legible on its own fill", () => {
     expect(
       round(contrast(resolve("--text-on-accent"), resolve("--interactive"))),
