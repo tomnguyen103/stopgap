@@ -27,6 +27,10 @@ import { defineConfig } from "vitest/config";
  *  - `retention.e2e.test.ts` (ticket 18) needs the APPLICATION role too: it asserts that one
  *    tenant's cleanup cannot reach another tenant's rows, and that the audit chain still verifies
  *    after a sweep.
+ *  - `tenant-keys.e2e.test.ts` (ticket 21) needs the APPLICATION role for the sharpest version of
+ *    the same reason: it asserts that the composite keys REFUSE a row whose org and whose parent
+ *    disagree. The owner bypasses the policies, and the insert it would then measure is not the
+ *    insert the application makes.
  *
  * `fileParallelism` is off: the suites seed and tear down fixed row ids, so two files racing over
  * the same rows would produce failures that look like isolation bugs and are not.
@@ -41,6 +45,7 @@ export default defineConfig({
       "packages/db/src/public-lists.e2e.test.ts",
       "packages/db/src/retention.e2e.test.ts",
       "packages/db/src/protocols.e2e.test.ts",
+      "packages/db/src/tenant-keys.e2e.test.ts",
     ],
     fileParallelism: false,
     testTimeout: 60_000,
