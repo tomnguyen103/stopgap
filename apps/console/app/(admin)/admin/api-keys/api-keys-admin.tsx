@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { Toggle } from "../../../components/ui/toggle";
 import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
 
 /**
@@ -94,22 +95,18 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
           />
         </div>
         <div className="actions">
-          {allScopes.map((scope) => {
-            const on = scopes.includes(scope);
-            return (
-              <button
-                key={scope}
-                type="button"
-                className={on ? "pill" : "pill muted"}
-                disabled={pending}
-                onClick={() => {
-                  toggleScope(scope);
-                }}
-              >
-                {on ? `✓ ${scope}` : scope}
-              </button>
-            );
-          })}
+          {allScopes.map((scope) => (
+            <Toggle
+              key={scope}
+              pressed={scopes.includes(scope)}
+              disabled={pending}
+              onClick={() => {
+                toggleScope(scope);
+              }}
+            >
+              {scope}
+            </Toggle>
+          ))}
         </div>
         <div className="actions">
           <button

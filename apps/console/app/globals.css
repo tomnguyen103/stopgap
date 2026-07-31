@@ -107,6 +107,14 @@
   --input-radius: var(--radius-md);
   --input-invalid-border: var(--status-bad);
 
+  /* Toggle — a granted scope and a withheld one, told apart without reading a glyph. Both values
+     go through the semantic layer so the P1 ink/platinum remap carries them without a second edit. */
+  --toggle-on-bg: var(--surface-hover);
+  --toggle-on-border: var(--text-default);
+  --toggle-on-fg: var(--text-default);
+  --toggle-off-border: var(--border-default);
+  --toggle-off-fg: var(--text-subtle);
+
   --table-header-fg: var(--text-subtle);
   --table-cell-border: var(--border-default);
   --table-row-hover: var(--surface-hover);
@@ -461,6 +469,46 @@ button.danger {
 }
 .ds-badge--status {
   --badge-fg: var(--interactive);
+}
+
+/*
+  Toggle — the two-state selector on the credential surfaces.
+
+  Fill AND border AND text weight all move between the states, deliberately: this control decides
+  whether an API key may write protocols, and "selected" has to survive being read at a glance, in
+  peripheral vision, by someone who cannot separate two greys. The check glyph is the third
+  channel, not the only one.
+*/
+.ds-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--badge-pad-y) var(--badge-pad-x);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.ds-toggle--on {
+  background: var(--toggle-on-bg);
+  border: 1px solid var(--toggle-on-border);
+  color: var(--toggle-on-fg);
+  font-weight: 600;
+}
+.ds-toggle--off {
+  background: transparent;
+  border: 1px solid var(--toggle-off-border);
+  color: var(--toggle-off-fg);
+  font-weight: 400;
+}
+.ds-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.ds-toggle:disabled {
+  opacity: var(--button-disabled-opacity);
+  cursor: not-allowed;
 }
 
 /*

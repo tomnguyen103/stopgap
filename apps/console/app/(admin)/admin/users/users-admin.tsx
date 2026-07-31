@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { Role } from "@stopgap/core";
+import { Toggle } from "../../../components/ui/toggle";
 import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../../lib/actions";
 
 /**
@@ -53,10 +54,9 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
                   {allRoles.map((role) => {
                     const has = user.roles.includes(role);
                     return (
-                      <button
+                      <Toggle
                         key={role}
-                        type="button"
-                        className={has ? "pill" : "pill muted"}
+                        pressed={has}
                         disabled={pending}
                         onClick={() => {
                           run(() =>
@@ -64,8 +64,8 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
                           );
                         }}
                       >
-                        {has ? `✓ ${role}` : role}
-                      </button>
+                        {role}
+                      </Toggle>
                     );
                   })}
                 </div>

@@ -15,3 +15,4 @@ export { Button, type ButtonProps } from "./button.js";
 export { Card, type CardProps } from "./card.js";
 export { Input, type InputProps } from "./input.js";
 export { Table, type TableProps } from "./table.js";
+export { Toggle, type ToggleProps } from "./toggle.js";
