@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getEnv } from "@stopgap/core";
 import { isDemoMode } from "@stopgap/demo";
+import type { ConnectorRunOutcome } from "@stopgap/db";
 import { SIGNAL_SOURCES } from "@stopgap/ingest";
 
 import { Badge, Card, Table } from "../../components/ui";
@@ -19,15 +20,21 @@ export const dynamic = "force-dynamic";
 const FEED_QUIET_HOURS = 36;
 
 /**
- * What a connector outcome is called on screen. The stored values are the vocabulary
- * `CONNECTOR_RUN_OUTCOMES` declares; an unmapped one renders as itself rather than as a blank cell,
- * so a value added to the database and not here is visible instead of invisible.
+ * What a connector outcome is called on screen.
+ *
+ * Keyed to `ConnectorRunOutcome` rather than to `string`, so adding a value to the vocabulary
+ * without adding a label here is a compile error. The lookup still falls back to the raw value,
+ * because the column holds whatever the database holds: a row written by an older or newer
+ * deployment renders as itself rather than as a blank cell.
  */
-const OUTCOME_LABELS: Record<string, string> = {
+const OUTCOME_LABELS: Record<ConnectorRunOutcome, string> = {
   ok: "ok",
   fetch_failed: "fetch failed",
   persist_failed: "write failed",
 };
+
+/** The one timestamp format this page uses, in one place — minutes, UTC, no seconds. */
+const stamp = (at: Date | string) => new Date(at).toISOString().slice(0, 16);
 
 /**
  * The administrator's landing page: what still needs configuring, and whether the system is
@@ -114,7 +121,10 @@ export default async function AdminIndexPage() {
       detail:
         env.LLM_DAILY_USD_CAP === undefined
           ? "No cap set. LLM_DAILY_USD_CAP is deployment environment, not a console setting: the cap binds every process in the deployment, so a per-tenant control here would let one hospital lift a limit that binds the others."
-          : `$${env.LLM_DAILY_USD_CAP.toFixed(2)} per day, deployment-wide — $${oversight.spend.usd.toFixed(2)} spent today.`,
+          : // The REASON belongs on both branches. It read only on the unset branch, so an
+            // administrator on a configured deployment — the ordinary case — saw "deployment-wide"
+            // and no explanation of why there is no control here to change it.
+            `$${env.LLM_DAILY_USD_CAP.toFixed(2)} per day — $${oversight.spend.usd.toFixed(2)} spent today. Set by LLM_DAILY_USD_CAP in deployment environment, not here: the cap binds every process in the deployment, so a per-tenant control would let one hospital lift a limit that binds the others.`,
       href: "/oversight",
     },
   ];
@@ -163,20 +173,20 @@ export default async function AdminIndexPage() {
           {connectors.map(({ source, run }) => (
             <tr key={source}>
               <td>{source}</td>
-              <td className="sub">
-                {run ? new Date(run.ranAt).toISOString().slice(0, 16) : "—"}
-              </td>
+              <td className="sub">{run ? stamp(run.ranAt) : "—"}</td>
               <td>{run ? run.signalCount : "—"}</td>
               <td className="sub">
                 {/* Separate from the last RUN on purpose: a connector failing every poll for a week
                     still has a recent run, and the gap between the two columns is the whole signal. */}
-                {run?.lastOkAt ? new Date(run.lastOkAt).toISOString().slice(0, 16) : "never"}
+                {run?.lastOkAt ? stamp(run.lastOkAt) : "never"}
               </td>
               <td>
                 {!run ? (
                   <Badge severity="high">never run</Badge>
                 ) : run.outcome !== "ok" ? (
-                  <Badge severity="critical">{OUTCOME_LABELS[run.outcome] ?? run.outcome}</Badge>
+                  <Badge severity="critical">
+                    {OUTCOME_LABELS[run.outcome as ConnectorRunOutcome] ?? run.outcome}
+                  </Badge>
                 ) : isQuiet(run.ranAt) ? (
                   <Badge severity="critical">quiet</Badge>
                 ) : (
@@ -220,7 +230,7 @@ export default async function AdminIndexPage() {
             {feeds.map((feed) => (
               <tr key={feed.source}>
                 <td>{feed.source}</td>
-                <td className="sub">{new Date(feed.lastFetchedAt).toISOString().slice(0, 16)}</td>
+                <td className="sub">{stamp(feed.lastFetchedAt)}</td>
                 <td>{feed.records}</td>
                 <td>
                   {isQuiet(feed.lastFetchedAt) ? (

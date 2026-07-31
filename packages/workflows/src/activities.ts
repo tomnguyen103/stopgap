@@ -484,6 +484,47 @@ async function fetchFeeds(): Promise<FeedResult[]> {
  * reporting three of them as `ok` because their fetch worked would be the faked success this
  * codebase refuses.
  */
+/**
+ * Record a REQUIRED feed's fetch failure against every tenant, on the path where the poll itself
+ * does not run.
+ *
+ * Every source is marked `fetch_failed`, not just the one that threw: `fetchFeeds` runs the four
+ * fetches under `Promise.all`, which reports the first rejection and discards which of them it was.
+ * Claiming to know would be a guess, and "the poll could not fetch" is the true statement about all
+ * four for this cycle.
+ *
+ * Best-effort by construction. It runs on a path that is already failing, so a database problem
+ * here must not replace the fetch error the caller is about to rethrow — that error is the one an
+ * operator needs.
+ */
+async function recordFetchOutage(cause: unknown): Promise<void> {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const ranAt = new Date();
+  try {
+    const orgs = await withBypassDb(() => listOrganizations());
+    for (const org of orgs) {
+      await withOrgDb(org.id, (db) =>
+        recordConnectorRuns(
+          db,
+          org.id,
+          ranAt,
+          POLLED_FEEDS.map(({ feed }) => ({
+            source: feed.source,
+            outcome: "fetch_failed" as const,
+            signalCount: 0,
+            detail,
+          })),
+        ),
+      );
+    }
+  } catch (err) {
+    console.error(
+      `[poll] could not record the fetch outage on any tenant's connector panel: ` +
+        `${err instanceof Error ? err.message : String(err)}. The fetch failure itself follows.`,
+    );
+  }
+}
+
 function connectorRunsForOrg(
   feeds: FeedResult[],
   signals: NormalizedSignal[],
@@ -492,7 +533,12 @@ function connectorRunsForOrg(
   return feeds.map((feed) => {
     const signalCount = signals.filter((s) => s.source === feed.source).length;
     if (persistError !== undefined) {
-      return { source: feed.source, outcome: "persist_failed" as const, signalCount: 0, detail: persistError };
+      return {
+        source: feed.source,
+        outcome: "persist_failed" as const,
+        signalCount: 0,
+        detail: persistError,
+      };
     }
     if (feed.fetchError !== undefined) {
       return {
@@ -814,7 +860,18 @@ export async function pollAndOpenCases(): Promise<{
   // `ShortageRecord` path that opens cases, and the normalized-signal path (ticket 06) that
   // persists per tenant. Fetching twice for the two shapes would double every provider call to
   // store the same bytes.
-  const feeds = await fetchFeeds();
+  let feeds: FeedResult[];
+  try {
+    feeds = await fetchFeeds();
+  } catch (err) {
+    // A REQUIRED feed threw, so this poll does not run at all and no org loop below executes.
+    // Record it for every tenant before rethrowing: an openFDA or ASHP outage is the exact case
+    // ticket 17's panel exists to surface, and without this the panel keeps showing the last good
+    // run and only turns quiet 36 hours later — the slow version of the same news. The throw is
+    // preserved, so the activity still fails loudly and Temporal still retries it.
+    await recordFetchOutage(err);
+    throw err;
+  }
   const rowsOf = (source: string) => feeds.find((f) => f.source === source)?.rows ?? [];
   const openFdaRaw = rowsOf(openFdaShortageConnector.source) as OpenFdaResult[];
   const ashpRaw = rowsOf(ashpShortageConnector.source) as AshpEntry[];
@@ -875,17 +932,20 @@ export async function pollAndOpenCases(): Promise<{
       // means they cannot disagree about how many signals this poll saw, and a later consumer
       // inherits the list rather than the bug.
       //
-      // DECLARED OUTSIDE the try so the connector-run rows below can still be written when the
-      // block throws: a poll that failed for this tenant is precisely the poll an administrator
-      // needs recorded, and a `signals` scoped to the try would be unreachable from there.
-      let signals: NormalizedSignal[] = [];
+      // OUTSIDE the containment below, deliberately. Normalization is pure and depends on the
+      // fetched payloads rather than on this tenant, so a normalizer that throws throws for EVERY
+      // org — containing it here would turn one poll-wide bug into a `persist_failed` row per
+      // tenant and a poll that still reports success, which is the loud failure made quiet.
+      const signals = dedupeByKey(
+        normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp }),
+      );
+      /** The tenant's own WRITE failing — and nothing else. See the alert block below. */
       let persistError: string | undefined;
       // ONE TENANT'S SIGNAL WRITE MUST NOT STOP THE POLL — the containment the resolution loop
       // below already applies per case, and the reason `fetchFeeds` contains an additive feed's
       // failure. Unguarded, one org's write error means every LATER org gets no case opened this
       // cycle, which reads in the runbook as "the poller stopped".
       try {
-        signals = dedupeByKey(normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp }));
         await withOrgDb(org.id, async (db) => {
           const persisted = await upsertSignals(db, org.id, signals);
           // The FEED-ABSENT half, kept distinct from `sourceResolved`: a signal the poll did not
@@ -919,10 +979,6 @@ export async function pollAndOpenCases(): Promise<{
           // and notified outside it.
           scoredForAlerts = pairScored(signals, persisted, snapshots);
         });
-        // Ticket 12 — decide what is worth telling someone about, and tell them. Outside the write
-        // transaction above on purpose: the sends are network calls, and a transaction held across
-        // one pins a pooled connection for the duration of somebody else's SMTP.
-        await evaluateAndNotify(org.id, scoredForAlerts, pollTimestamp);
       } catch (err) {
         incrementCounter("stopgap_signal_persist_failures_total");
         persistError = err instanceof Error ? err.message : String(err);
@@ -956,6 +1012,34 @@ export async function pollAndOpenCases(): Promise<{
             `${err instanceof Error ? err.message : String(err)}. ` +
             "The panel shows this tenant's previous run until the next poll succeeds.",
         );
+      }
+
+      // Ticket 12 — decide what is worth telling someone about, and tell them. Outside the write
+      // transaction on purpose: the sends are network calls, and a transaction held across one pins
+      // a pooled connection for the duration of somebody else's SMTP.
+      //
+      // AND OUTSIDE THE CONNECTOR ROW ABOVE, which is the reason it is its own block rather than
+      // the tail of the write's `try`. `sendChat` and `sendEmail` reject on a webhook timeout or an
+      // SMTP outage — neither of which says anything about whether a FEED delivered. Sharing the
+      // catch marked all four connectors `persist_failed` with `signalCount: 0` after a signal
+      // write that had already committed, so a mail outage rendered four healthy feeds as broken
+      // and put the mail server's error text on the administrator's page.
+      //
+      // Skipped when the write failed, which is what the shared `try` did by construction: there is
+      // nothing to notify about when nothing was scored.
+      if (persistError === undefined) {
+        try {
+          await evaluateAndNotify(org.id, scoredForAlerts, pollTimestamp);
+        } catch (err) {
+          // The SAME counter the shared block incremented, deliberately: this split is about which
+          // failure the connector row reports, not about changing what the metrics say.
+          incrementCounter("stopgap_signal_persist_failures_total");
+          console.error(
+            `[poll] alert evaluation or delivery failed for org ${org.id}: ` +
+              `${err instanceof Error ? err.message : String(err)}. ` +
+              "This tenant's signals and scores are written; the firing is retried next poll.",
+          );
+        }
       }
 
       const { existingWorkflowIds, openCases } = await withOrgDb(org.id, async (db) => {

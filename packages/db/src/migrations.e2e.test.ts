@@ -227,15 +227,19 @@ describe("migrations 0013/0014 against a database that already had rows", () => 
   });
 
   /**
-   * Ticket 06 — the two signal tables arrive POLICED, applied as the role a deployment migrates as.
+   * Tickets 06 and 17 — these tables arrive POLICED, applied as the role a deployment migrates as.
    *
    * The whole migration set already ran above, as the owner, against a throwaway database. What
-   * this adds is the assertion that the hand-written half of 0015 ran too: a table created without
-   * its policy is not a missing feature, it is a table every tenant can read in full, and the DDL
-   * would succeed either way.
+   * this adds is the assertion that the hand-written halves of 0015 and 0022 ran too: a table
+   * created without its policy is not a missing feature, it is a table every tenant can read in
+   * full, and the DDL would succeed either way.
+   *
+   * `connector_runs` is here rather than only in `rls.e2e.test.ts` because that suite runs as
+   * `stopgap_app`, which the policy applies to whether or not it is FORCED. Only a check under the
+   * OWNER can tell an enabled policy from a forced one, and this connection is the owner.
    */
-  it("creates the signal tables with row-level security FORCED and a policy on each", async () => {
-    for (const table of ["risk_signals", "risk_score_snapshots"]) {
+  it("creates the policed tables with row-level security FORCED and a policy on each", async () => {
+    for (const table of ["risk_signals", "risk_score_snapshots", "connector_runs"]) {
       const [rel] = await scratch`select relrowsecurity, relforcerowsecurity
                                   from pg_class where relname = ${table}`;
       expect(rel?.relrowsecurity, `${table} RLS enabled`).toBe(true);

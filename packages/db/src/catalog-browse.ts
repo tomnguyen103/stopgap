@@ -133,7 +133,12 @@ export async function browseCatalog(
 
   // Sanitized the same way `pageSize` is, and for the same reason: a hand-edited address must
   // degrade to a sensible default rather than reach OFFSET as NaN.
-  const requested = Number.isFinite(options.page) ? Math.max(1, Math.floor(options.page)) : 1;
+  // Both bounds. `Number.isFinite` alone lets 1e308 through, and `(1e308 - 1) * pageSize` overflows
+  // to Infinity in the OFFSET, which the driver rejects as a bad bigint rather than degrading.
+  const MAX_PAGE = 1_000_000;
+  const requested = Number.isFinite(options.page)
+    ? Math.min(MAX_PAGE, Math.max(1, Math.floor(options.page)))
+    : 1;
   let page = requested;
   let rows = await pageAt(page);
   let total = Number(rows[0]?.total ?? 0);

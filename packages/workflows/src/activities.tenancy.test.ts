@@ -46,6 +46,8 @@ const writtenSignals: { orgId: string; dedupeKeys: string[] }[] = [];
 const failingSweepOrgs = new Set<string>();
 /** Orgs whose signal write should throw — the `persist_failed` connector outcome (ticket 17). */
 const failingSignalOrgs = new Set<string>();
+/** Orgs whose ALERT evaluation should throw — which must NOT read as a connector failure. */
+const failingAlertOrgs = new Set<string>();
 /** Retention sweeps performed (ticket 18) — which org, at which instant, under which windows. */
 const sweptOrgs: { orgId: string; at: string; windows: Record<string, number | null> }[] = [];
 /** The sources each org's miss sweep was scoped to, so an outage cannot retire live signals. */
@@ -159,7 +161,10 @@ vi.mock("@stopgap/db", () => ({
   totalRemoved: (counts: Record<string, number>) =>
     Object.values(counts).reduce((sum, n) => sum + n, 0),
   RETAINED_FOREVER: null,
-  listAlertRules: async () => [],
+  listAlertRules: async (_db: unknown, orgId: string) => {
+    if (failingAlertOrgs.has(orgId)) throw new Error("smtp relay unreachable");
+    return [];
+  },
   lastFiredByRule: async () => ({}),
   recordAlertEvents: async () => [],
   recordAlertDeliveries: async () => undefined,
@@ -329,6 +334,7 @@ beforeEach(() => {
   openMonitoringCases.clear();
   unsignalableWorkflowIds.clear();
   failingSignalOrgs.clear();
+  failingAlertOrgs.clear();
   signalledWorkflowIds.length = 0;
   counters.length = 0;
   writtenSignals.length = 0;
@@ -505,6 +511,24 @@ describe("the scheduled feed poll (no session, no case)", () => {
     // Containment: the other tenant's poll is untouched by it.
     const b = writtenConnectorRuns.find((w) => w.orgId === ORG_B);
     expect(b?.runs.every((r) => r.outcome === "ok")).toBe(true);
+  });
+
+  it("does NOT blame the connectors when alert delivery is what failed", async () => {
+    // THE FALSE ALARM THIS SPLIT EXISTS TO PREVENT. `sendChat` and `sendEmail` are network calls,
+    // and they used to share the signal write's catch — so an SMTP outage, arriving AFTER a signal
+    // write that had already committed, marked all four connectors `persist_failed` with
+    // `signalCount: 0` and put the mail server's error text on the administrator's page. Four
+    // healthy feeds rendered as broken is worse than no panel.
+    failingAlertOrgs.add(ORG_A);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await pollAndOpenCases();
+    logged.mockRestore();
+
+    const a = writtenConnectorRuns.find((w) => w.orgId === ORG_A);
+    expect(a?.runs.every((r) => r.outcome === "ok")).toBe(true);
+    expect(a?.runs.every((r) => r.detail === undefined)).toBe(true);
+    // The signals really were written, which is what makes `ok` the honest answer.
+    expect(writtenSignals.map((w) => w.orgId)).toContain(ORG_A);
   });
 
   it("sweeps misses only for feeds that returned something, never for a silent one", async () => {

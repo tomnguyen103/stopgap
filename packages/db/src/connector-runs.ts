@@ -37,6 +37,55 @@ export interface ConnectorRunInput {
   detail?: string;
 }
 
+/** How much of a failure message is worth storing and showing. */
+const DETAIL_MAX_CHARS = 500;
+
+/**
+ * Credential-bearing shapes that turn up in the error text of an HTTP or SMTP client.
+ *
+ * `detail` is a raw `Error.message` from a network client, stored and then RENDERED on an
+ * administrator's page — which makes it a disclosure surface, not just a log line. openFDA is
+ * called with an API key in the query string and chat delivery with a bearer webhook URL, so a
+ * client that ever echoes the request it failed on would put those on screen. Worse, one shared
+ * fetch error is copied into EVERY tenant's row, so it would be on every hospital's page at once.
+ *
+ * Today's connectors report status codes only. This is here because the day one of them starts
+ * echoing the URL is not a day anybody will remember this column exists.
+ */
+const REDACTIONS: [RegExp, string][] = [
+  // Query parameters that carry a secret, by the names these clients actually use.
+  [
+    /\b(api[_-]?key|apikey|key|token|access[_-]?token|secret|password|pass|pwd|sig|signature)=[^&\s"']+/gi,
+    "$1=[redacted]",
+  ],
+  // `scheme://user:password@host` — the credential is the part before the `@`.
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, "$1[redacted]@"],
+  // `Authorization: Bearer …` and bare bearer tokens in a message.
+  [/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, "$1 [redacted]"],
+  // Slack, Teams and Discord webhook paths — the path segment IS the credential.
+  [
+    /(hooks\.slack\.com\/services|discord\.com\/api\/webhooks|webhook\.office\.com\/webhookb2)\/\S+/gi,
+    "$1/[redacted]",
+  ],
+];
+
+/**
+ * Bound and redact a failure message before it is stored.
+ *
+ * Truncated as well as redacted: an unbounded provider error is a row that grows without limit and
+ * a page that renders it, and 500 characters is well past where a status code and a reason stop
+ * being useful. The ellipsis is deliberate — a silently cut message reads as the whole one.
+ */
+export function redactDetail(detail: string): string {
+  const clean = REDACTIONS.reduce(
+    (text, [pattern, replacement]) => text.replace(pattern, replacement),
+    detail,
+  );
+  return clean.length <= DETAIL_MAX_CHARS
+    ? clean
+    : `${clean.slice(0, DETAIL_MAX_CHARS)}… (truncated)`;
+}
+
 /**
  * Record this poll's runs for one tenant, replacing the previous entry per connector.
  *
@@ -66,7 +115,7 @@ export async function recordConnectorRuns(
         outcome: run.outcome,
         signalCount: run.signalCount,
         lastOkAt: run.outcome === "ok" ? ranAt : null,
-        detail: run.detail ?? null,
+        detail: run.detail === undefined ? null : redactDetail(run.detail),
       })),
     )
     .onConflictDoUpdate({
@@ -78,6 +127,12 @@ export async function recordConnectorRuns(
         lastOkAt: sql`coalesce(excluded.last_ok_at, ${connectorRuns.lastOkAt})`,
         detail: sql`excluded.detail`,
       },
+      // A SLOW POLL MUST NOT REWIND A NEWER ONE. Two polls can overlap — a retried activity, or a
+      // schedule firing while the previous run is still working through the tenant list — and
+      // without this the one that COMMITS last wins regardless of which one RAN last, restamping a
+      // stale failure over a fresh success. Equality is excluded too, so a retry of the same poll
+      // (same `ranAt` for every org) is a no-op rather than a rewrite.
+      setWhere: sql`${connectorRuns.ranAt} < excluded.ran_at`,
     });
 }
 
