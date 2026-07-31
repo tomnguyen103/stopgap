@@ -28,7 +28,10 @@ export async function ActiveOrgBadge() {
     <Link
       href="/admin/organizations"
       className="active-org-badge"
-      title="Switch back to your own organization"
+      // The full sentence lives on the element, not only in the visible text, because at the
+      // icon-only breakpoint the visible text is clipped and this warning must survive that.
+      title={`Acting in ${active.name} (${active.slug}) — switch back to your own organization`}
+      aria-label={`Acting in ${active.name}. Switch back to your own organization.`}
     >
       <span className="active-org-badge__label">Acting in</span>
       <strong className="active-org-badge__name">{active.name}</strong>

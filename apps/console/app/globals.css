@@ -350,6 +350,8 @@ a {
   gap: var(--space-2);
 }
 .rail__brand {
+  display: inline-flex;
+  gap: var(--space-1);
   font-weight: 600;
   letter-spacing: -0.01em;
   font-size: var(--type-heading);
@@ -530,11 +532,38 @@ a {
     clip-path: inset(50%);
     white-space: nowrap;
   }
-  /* The org badge cannot fold to one letter per line in a 64px column, so at this width the rail
-     shows only the state it is reporting; the full badge returns at 1024. */
+  /*
+    The wordmark and the org badge both overflow a 64px column. Neither is DELETED: the wordmark's
+    glyph stays and its word is clipped, and the badge collapses to a marked dot whose `aria-label`
+    and `title` still carry the whole sentence. That warning — "you are writing into another
+    hospital's records" — is the last thing that may become unreachable, so it keeps its name in
+    the accessibility tree at every width.
+  */
+  .rail__wordmark {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .active-org-badge {
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    align-self: center;
+  }
+  .active-org-badge__label,
   .active-org-badge__name,
   .active-org-badge__slug {
     display: none;
+  }
+  .active-org-badge::before {
+    content: "!";
+    font-weight: 600;
+    font-size: var(--type-small);
   }
   .rail__principal {
     display: none;
@@ -579,6 +608,23 @@ a {
     clip-path: none;
     text-overflow: ellipsis;
   }
+  .rail__wordmark {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip-path: none;
+  }
+  .active-org-badge {
+    justify-content: flex-start;
+    width: auto;
+    height: auto;
+    padding: var(--space-1) var(--space-3);
+  }
+  .active-org-badge::before {
+    content: none;
+  }
+  .active-org-badge__label,
   .active-org-badge__name,
   .active-org-badge__slug,
   .rail__principal {
