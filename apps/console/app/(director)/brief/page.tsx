@@ -113,9 +113,7 @@ export default async function BriefPage() {
                   <td>{brief.briefDate}</td>
                   <td>
                     {brief.degradedReason ? (
-                      <span className="pill sev-high">
-                        {degradedLabel(brief.degradedReason)}
-                      </span>
+                      <span className="pill sev-high">{degradedLabel(brief.degradedReason)}</span>
                     ) : (
                       brief.headline
                     )}

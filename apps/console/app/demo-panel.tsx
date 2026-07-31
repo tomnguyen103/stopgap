@@ -50,7 +50,11 @@ export function DemoPanel({ drugs }: { drugs: { key: string; genericName: string
         ))}
       </div>
       {message ? <p className="sub sub-note">{message}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

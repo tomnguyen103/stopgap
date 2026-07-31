@@ -18,8 +18,8 @@ export default function AccessDeniedPage() {
       <h1>Access denied</h1>
       <Card title="No Stopgap role is assigned to this account">
         <p>
-          You are signed in, but this account carries no role that Stopgap recognizes, so there is no
-          dashboard to send you to.
+          You are signed in, but this account carries no role that Stopgap recognizes, so there is
+          no dashboard to send you to.
         </p>
         <p>
           Ask an administrator to grant the account a role in the identity provider. If roles were

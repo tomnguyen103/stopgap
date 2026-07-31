@@ -1,6 +1,15 @@
 import { approveProtocolVersion, listProtocolVersions, withOrgDb } from "@stopgap/db";
-import { authenticateApiRequest, demoGateOr403, recordApiAudit } from "../../../../../../../lib/api-auth";
-import { jsonError, jsonOk, parseJsonBodyOr400, parseOr400 } from "../../../../../../../lib/api-response";
+import {
+  authenticateApiRequest,
+  demoGateOr403,
+  recordApiAudit,
+} from "../../../../../../../lib/api-auth";
+import {
+  jsonError,
+  jsonOk,
+  parseJsonBodyOr400,
+  parseOr400,
+} from "../../../../../../../lib/api-response";
 import { approvedSchema, approveVersionSchema } from "../../../../../../../lib/api-schemas";
 import { z } from "zod";
 
@@ -70,7 +79,8 @@ export async function POST(
   const target = (await withOrgDb(orgId, (db) => listProtocolVersions(orgId, key, db))).find(
     (v) => v.version === parsedVersion.data,
   );
-  if (!target) return jsonError(404, "not_found", `no version ${parsedVersion.data} of protocol "${key}"`);
+  if (!target)
+    return jsonError(404, "not_found", `no version ${parsedVersion.data} of protocol "${key}"`);
 
   const { key: apiKey } = auth;
   let row: Awaited<ReturnType<typeof approveProtocolVersion>>["row"];
@@ -103,7 +113,13 @@ export async function POST(
       "protocols:write",
       "POST /api/v1/protocols/{key}/versions/{version}/approve",
       "protocol.version_approved",
-      { protocolKey: key, versionId: target.id, version: row.version, rationale: body.data.rationale, via: "api-key" },
+      {
+        protocolKey: key,
+        versionId: target.id,
+        version: row.version,
+        rationale: body.data.rationale,
+        via: "api-key",
+      },
       // Keyed by version id so it never collides with the console's `.direct.<id>` entries or the
       // workflow's own per-run approval entries.
       `protocol.version_approved.api.${target.id}`,

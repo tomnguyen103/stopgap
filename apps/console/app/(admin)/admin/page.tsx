@@ -152,7 +152,11 @@ export default async function AdminIndexPage() {
               <td>
                 {/* A word as well as a colour: a checklist that separates done from not-done by
                     green alone is unreadable to a reader who cannot see the difference. */}
-                {row.done ? <Badge tone="status">done</Badge> : <Badge severity="high">to do</Badge>}
+                {row.done ? (
+                  <Badge tone="status">done</Badge>
+                ) : (
+                  <Badge severity="high">to do</Badge>
+                )}
               </td>
               <td>
                 {row.href === undefined ? row.label : <Link href={row.href}>{row.label}</Link>}

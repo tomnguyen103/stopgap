@@ -65,7 +65,11 @@ export function ApproveButton({
           {unavailableReason}
         </p>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </>
   );
 }

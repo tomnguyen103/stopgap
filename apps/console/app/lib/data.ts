@@ -321,10 +321,7 @@ export async function getViewerOverview(q: string | null = null): Promise<Viewer
       .select({ components: schema.riskScoreSnapshots.components })
       .from(schema.riskScoreSnapshots)
       .where(eq(schema.riskScoreSnapshots.orgId, orgId))
-      .orderBy(
-        desc(schema.riskScoreSnapshots.computedAt),
-        desc(schema.riskScoreSnapshots.id),
-      )
+      .orderBy(desc(schema.riskScoreSnapshots.computedAt), desc(schema.riskScoreSnapshots.id))
       .limit(1);
     return {
       kpis,
@@ -512,7 +509,10 @@ export async function getOversight(): Promise<OversightData> {
       })
       .from(schema.protocolVersions)
       .where(
-        and(eq(schema.protocolVersions.orgId, orgId), eq(schema.protocolVersions.state, "approved")),
+        and(
+          eq(schema.protocolVersions.orgId, orgId),
+          eq(schema.protocolVersions.state, "approved"),
+        ),
       )
       .orderBy(schema.protocolVersions.protocolId, desc(schema.protocolVersions.version));
     const approvedByProtocol = new Map(

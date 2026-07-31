@@ -90,8 +90,20 @@ let heldScopes: string[] = ["signals:read", "scores:read", "catalog:read"];
 vi.mock("../../../lib/api-auth", () => ({
   authenticateApiRequest: async (_request: Request, scope: string) =>
     heldScopes.includes(scope)
-      ? { ok: true, key: { id: "key-1", orgId: KEY_ORG_ID, name: "planner", scopes: heldScopes, createdByUserId: null } }
-      : { ok: false, response: Response.json({ error: "forbidden", message: scope }, { status: 403 }) },
+      ? {
+          ok: true,
+          key: {
+            id: "key-1",
+            orgId: KEY_ORG_ID,
+            name: "planner",
+            scopes: heldScopes,
+            createdByUserId: null,
+          },
+        }
+      : {
+          ok: false,
+          response: Response.json({ error: "forbidden", message: scope }, { status: 403 }),
+        },
 }));
 
 const { GET: getSignals } = await import("./route");
@@ -102,7 +114,8 @@ const { GET: getItems } = await import("../catalog/items/route");
 beforeEach(() => {
   scopedOrgIds.length = 0;
   heldScopes = ["signals:read", "scores:read", "catalog:read"];
-  for (const spy of [listSignalsPageForApi, listScoresPage, listCatalogItemsPage, getSignalForApi]) spy.mockClear();
+  for (const spy of [listSignalsPageForApi, listScoresPage, listCatalogItemsPage, getSignalForApi])
+    spy.mockClear();
 });
 
 describe("GET /api/v1/signals", () => {
@@ -119,9 +132,12 @@ describe("GET /api/v1/signals", () => {
   });
 
   it("ignores an org supplied in the query string or headers — the credential decides", async () => {
-    const hostile = new Request(`https://console.test/api/v1/signals?orgId=${OTHER_ORG_ID}&org=stopgap`, {
-      headers: { "x-org-id": OTHER_ORG_ID },
-    });
+    const hostile = new Request(
+      `https://console.test/api/v1/signals?orgId=${OTHER_ORG_ID}&org=stopgap`,
+      {
+        headers: { "x-org-id": OTHER_ORG_ID },
+      },
+    );
     expect((await getSignals(hostile)).status).toBe(200);
     expect(scopedOrgIds).toEqual([KEY_ORG_ID]);
     expect(scopedOrgIds).not.toContain(OTHER_ORG_ID);
@@ -129,7 +145,9 @@ describe("GET /api/v1/signals", () => {
 
   it("passes the console's sort, direction, page and filters through to the query", async () => {
     await getSignals(
-      new Request("https://console.test/api/v1/signals?sort=title&dir=asc&page=2&pageSize=25&riskDomain=recall&q=cef"),
+      new Request(
+        "https://console.test/api/v1/signals?sort=title&dir=asc&page=2&pageSize=25&riskDomain=recall&q=cef",
+      ),
     );
     expect(listSignalsPageForApi).toHaveBeenCalledWith(
       {},
@@ -173,7 +191,9 @@ describe("GET /api/v1/signals/{key}", () => {
 
 describe("GET /api/v1/scores", () => {
   it("ranks on the scorer's number and scopes to the key's org", async () => {
-    const response = await getScores(new Request("https://console.test/api/v1/scores?band=critical"));
+    const response = await getScores(
+      new Request("https://console.test/api/v1/scores?band=critical"),
+    );
     expect(response.status).toBe(200);
     expect(scopedOrgIds).toEqual([KEY_ORG_ID]);
     expect(listScoresPage).toHaveBeenCalledWith(

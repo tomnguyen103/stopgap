@@ -117,7 +117,11 @@ export function EscalationPanel({
           </button>
         </div>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

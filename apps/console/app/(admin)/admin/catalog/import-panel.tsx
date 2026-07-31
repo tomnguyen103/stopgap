@@ -15,7 +15,6 @@ import { MAX_UPLOAD_BYTES } from "../../../lib/upload-limit";
  * first bad line turns a 4,000-row export into forty round trips.
  */
 
-
 export function ImportPanel({
   kinds,
   unavailableReason,

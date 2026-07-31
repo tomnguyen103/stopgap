@@ -13,7 +13,13 @@ import {
 } from "../../../lib/catalog-list";
 import { getCatalogPage } from "../../../lib/data";
 import { requireGroup } from "../../../lib/group-guard";
-import { filterValue, listHref, pageCount, sortHref, toggleFilterHref } from "../../../lib/list-href";
+import {
+  filterValue,
+  listHref,
+  pageCount,
+  sortHref,
+  toggleFilterHref,
+} from "../../../lib/list-href";
 import { resolvePrincipal } from "../../../lib/principal";
 import { ImportPanel } from "./import-panel";
 

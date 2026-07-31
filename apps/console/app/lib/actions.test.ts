@@ -263,7 +263,9 @@ describe("alert-rule actions (server-enforced authorization)", () => {
   it("REFUSES a pharmacist, who works cases but does not decide who gets paged", async () => {
     resolvePrincipal.mockResolvedValue(principal(["pharmacist"]));
     await expect(createAlertRuleAction(RULE)).rejects.toBeInstanceOf(AuthorizationError);
-    await expect(updateAlertRuleAction(VERSION_ID, RULE)).rejects.toBeInstanceOf(AuthorizationError);
+    await expect(updateAlertRuleAction(VERSION_ID, RULE)).rejects.toBeInstanceOf(
+      AuthorizationError,
+    );
     // The gate fires before the write and before the audit append, not after.
     expect(createAlertRule).not.toHaveBeenCalled();
     expect(updateAlertRule).not.toHaveBeenCalled();

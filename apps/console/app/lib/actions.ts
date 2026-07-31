@@ -340,7 +340,9 @@ export async function createAlertRuleAction(input: unknown): Promise<void> {
   assertMutationAllowed("Creating an alert rule");
   const principal = await requireRole("manage_alert_rules");
   const parsed = alertRuleSchema.parse(input);
-  const row = await withOrgDb(principal.orgId, (db) => createAlertRule(db, principal.orgId, parsed));
+  const row = await withOrgDb(principal.orgId, (db) =>
+    createAlertRule(db, principal.orgId, parsed),
+  );
   await recordPrivilegedAudit(
     principal,
     "alert_rule.created",

@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  API_LIST_SCHEMAS,
-  parseApiListQuery,
-  type ApiListQuery,
-} from "./api-list-query";
+import { API_LIST_SCHEMAS, parseApiListQuery, type ApiListQuery } from "./api-list-query";
 
 /**
  * The public API's list vocabulary is the CONSOLE's list vocabulary (ticket 19: "list endpoints

@@ -58,7 +58,8 @@ export function RulesPanel({
    * identity goes, which is not an improvement on the tooltip. Undefined when allowed, so the
    * element keeps its own text.
    */
-  const gatedLabel = (name: string) => (unavailableReason ? `${name} — ${unavailableReason}` : undefined);
+  const gatedLabel = (name: string) =>
+    unavailableReason ? `${name} — ${unavailableReason}` : undefined;
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
   // Cooldown edits are CONTROLLED, keyed by rule. With an uncontrolled input the toggle button
@@ -304,7 +305,11 @@ export function RulesPanel({
           Create rule
         </button>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </>
   );
 }

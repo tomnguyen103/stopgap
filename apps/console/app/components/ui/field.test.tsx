@@ -36,7 +36,9 @@ describe("Field", () => {
   });
 
   it("renders the label as visible text, not as an sr-only afterthought", () => {
-    const html = renderToStaticMarkup(<Field label="Draft protocol">{(id) => <input id={id} />}</Field>);
+    const html = renderToStaticMarkup(
+      <Field label="Draft protocol">{(id) => <input id={id} />}</Field>,
+    );
     expect(html).toContain("Draft protocol");
     expect(html).not.toContain("ds-sr-only");
   });

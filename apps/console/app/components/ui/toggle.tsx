@@ -1,7 +1,9 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
-export interface ToggleProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "type" | "aria-pressed"> {
+export interface ToggleProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "children" | "type" | "aria-pressed"
+> {
   /** Whether the thing this toggle names is currently granted. */
   pressed: boolean;
   children: ReactNode;

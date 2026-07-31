@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  diffLines,
-  parseVersionParam,
-  resolveComparison,
-  summarizeDiff,
-} from "./version-diff.js";
+import { diffLines, parseVersionParam, resolveComparison, summarizeDiff } from "./version-diff.js";
 
 describe("protocol version diff", () => {
   it("reports an unchanged body as unchanged", () => {
@@ -49,7 +44,9 @@ describe("protocol version diff", () => {
 
 describe("resolveComparison", () => {
   const versions = [{ version: 3 }, { version: 2 }, { version: 1 }];
-  const req = (over: Partial<{ compare: string | null; from: number | null; to: number | null }>) => ({
+  const req = (
+    over: Partial<{ compare: string | null; from: number | null; to: number | null }>,
+  ) => ({
     compare: "heparin",
     from: 1,
     to: 3,

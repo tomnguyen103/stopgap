@@ -69,8 +69,8 @@ export default async function CaseQueuePage({
           <p className="sub sub-tight">
             {feeds.map((f) => (
               <span key={f.source} className="feed-line">
-                <b>{f.source}</b> · latest stored record{" "}
-                {formatUtc(f.lastFetchedAt)} · {f.records} record
+                <b>{f.source}</b> · latest stored record {formatUtc(f.lastFetchedAt)} · {f.records}{" "}
+                record
                 {f.records === 1 ? "" : "s"}
               </span>
             ))}
@@ -152,7 +152,9 @@ export default async function CaseQueuePage({
             {queue.rows.map((row) => (
               <tr key={row.id}>
                 <td>
-                  <Link href={`/cases/${encodeURIComponent(row.workflowId)}`}>{row.genericName}</Link>
+                  <Link href={`/cases/${encodeURIComponent(row.workflowId)}`}>
+                    {row.genericName}
+                  </Link>
                 </td>
                 <td>
                   {isException(row.status) ? (

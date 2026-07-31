@@ -119,13 +119,12 @@ export default async function AlertsPage({
             No alert events match this view. <Link href="?">Clear filters</Link>
           </p>
         ) : (
-          <Table
-            label="Alert history"
-            head={["Fired", "Rule", "Outcome", "Matched", "Delivered"]}
-          >
+          <Table label="Alert history" head={["Fired", "Rule", "Outcome", "Matched", "Delivered"]}>
             {history.rows.map(({ event, ruleName }) => (
               <tr key={event.id}>
-                <td className="sub">{event.firedAt.toISOString().replace("T", " ").slice(0, 16)}</td>
+                <td className="sub">
+                  {event.firedAt.toISOString().replace("T", " ").slice(0, 16)}
+                </td>
                 <td>{ruleName ?? <span className="sub">deleted rule</span>}</td>
                 <td>
                   {event.outcome === "suppressed_cooldown" ? (

@@ -37,9 +37,7 @@ export const CASE_QUEUE_SCHEMA: ListParamsSchema = {
   defaultPageSize: 25,
 };
 
-export function parseCaseQueueParams(
-  input: Parameters<typeof parseListParams>[0],
-): ListParams {
+export function parseCaseQueueParams(input: Parameters<typeof parseListParams>[0]): ListParams {
   return parseListParams(input, CASE_QUEUE_SCHEMA);
 }
 

@@ -86,7 +86,11 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
           ))}
         </tbody>
       </table>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -51,7 +51,10 @@ export default async function ApprovalsPage() {
               sub={`v${String(version.version)} · authored by ${version.authoredBy} · ${summarizeDiff(diff)}`}
             >
               {version.rationale ? <p className="sub">{version.rationale}</p> : null}
-              <Table label={`Changes in ${protocol.title} v${String(version.version)}`} head={["", "Line"]}>
+              <Table
+                label={`Changes in ${protocol.title} v${String(version.version)}`}
+                head={["", "Line"]}
+              >
                 {diff.map((line, index) => (
                   <tr key={`${String(index)}:${line.text}`}>
                     <td className="sub">
