@@ -985,13 +985,48 @@ h2 {
 }
 
 /* Card — the same panel the console has always drawn, expressed once. */
+/*
+  ---- The Ledger Rail (§6) -------------------------------------------------------------------
+  A 2px vertical rail on the left edge, inset top and bottom, tinted by the element's state.
+
+  Why this and not an ornament: the two structures this product is built on — a hash-chained
+  audit log and an escalation ladder — are both ordered vertical sequences, and a rail running
+  down a stack of cards is that structure drawn. It does real work too: a director scanning
+  `/oversight` had to read five card titles to find the one that needed them, and an amber rail
+  is findable in peripheral vision before reading.
+
+  One pseudo-element, one custom property. No JavaScript, no image, no extra DOM. The border-box
+  survives `forced-colors`, and the rail never carries meaning alone — the badge or figure inside
+  the card still says what the state is.
+*/
 .ds-card {
+  position: relative;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
   margin-bottom: var(--space-4);
   box-shadow: var(--elev-raised);
+}
+.ds-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--rail, var(--line-default));
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.ds-card[data-state="critical"] {
+  --rail: var(--severity-critical);
+}
+.ds-card[data-state="attention"] {
+  --rail: var(--severity-high);
+}
+.ds-card[data-state="ok"] {
+  --rail: var(--status-ok);
 }
 /* Matches the global `h2` rule exactly — a card rebuilt on the primitive must not shift. */
 .ds-card__title {
@@ -1073,6 +1108,33 @@ h2 {
 }
 .ds-table tr:hover td {
   background: var(--table-row-hover);
+}
+/*
+  The same rail, on a row that has a state. A `tr` cannot host an absolutely-positioned
+  pseudo-element reliably across engines, so the row's FIRST CELL carries it — which is also
+  where the eye starts.
+*/
+.ds-table tr[data-state] td:first-child {
+  position: relative;
+}
+.ds-table tr[data-state] td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--rail, transparent);
+}
+.ds-table tr[data-state="critical"] {
+  --rail: var(--severity-critical);
+}
+.ds-table tr[data-state="attention"] {
+  --rail: var(--severity-high);
+}
+.ds-table tr[data-state="ok"] {
+  --rail: var(--status-ok);
 }
 /* Same pair `.sub` applies when it lands on a cell: recede, and drop one type step. */
 .ds-table td.is-subtle {

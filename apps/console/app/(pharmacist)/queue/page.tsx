@@ -148,7 +148,10 @@ export default async function CaseQueuePage({
             ]}
           >
             {queue.rows.map((row) => (
-              <tr key={row.id}>
+              // The Ledger Rail marks a row the workflow escalated. It repeats what the badge in
+              // the next cell already says — deliberately: the badge is what a reader RESOLVES,
+              // the rail is what they find without reading.
+              <tr key={row.id} data-state={isException(row.status) ? "attention" : undefined}>
                 <td>
                   <Link href={`/cases/${encodeURIComponent(row.workflowId)}`}>
                     {row.genericName}

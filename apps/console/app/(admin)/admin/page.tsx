@@ -145,7 +145,13 @@ export default async function AdminIndexPage() {
         {isDemoMode() ? " · demo deployment" : ""}
       </p>
 
-      <Card title="Setup checklist" sub="Each line answered by a query, not by a flag">
+      <Card
+        // The checklist IS this page's state: every line answered by a query, so "all done" is a
+        // fact rather than a flag someone set.
+        state={checklist.every((row) => row.done) ? "ok" : "attention"}
+        title="Setup checklist"
+        sub="Each line answered by a query, not by a flag"
+      >
         <Table label="Setup checklist" head={["", "Item", "State"]}>
           {checklist.map((row) => (
             <tr key={row.label}>
