@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { setActiveOrgAction } from "../../../lib/actions";
+import { Table } from "../../../components/ui/table";
 
 /**
  * The admin active-org switch (PHASE6 §6.5) — a thin client over `setActiveOrgAction`.
@@ -36,35 +37,26 @@ export function OrgSwitcher({ orgs, activeOrgId }: { orgs: OrgOption[]; activeOr
   return (
     <div className="card">
       {error ? <p className="sub">{error}</p> : null}
-      <table>
-        <thead>
-          <tr>
-            <th>Organization</th>
-            <th>Slug</th>
-            <th>Active</th>
-          </tr>
-        </thead>
-        <tbody>
-          {orgs.map((org) => {
-            const active = org.id === activeOrgId;
-            return (
-              <tr key={org.id}>
-                <td>{org.name}</td>
-                <td className="sub">{org.slug}</td>
-                <td>
-                  {active ? (
-                    <span className="status">current</span>
-                  ) : (
-                    <button type="button" disabled={pending} onClick={() => switchTo(org.id)}>
-                      Act in this organization
-                    </button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <Table head={["Organization", "Slug", "Active"]} label="Organizations on this deployment">
+        {orgs.map((org) => {
+          const active = org.id === activeOrgId;
+          return (
+            <tr key={org.id}>
+              <td>{org.name}</td>
+              <td className="sub">{org.slug}</td>
+              <td>
+                {active ? (
+                  <span className="status">current</span>
+                ) : (
+                  <button type="button" disabled={pending} onClick={() => switchTo(org.id)}>
+                    Act in this organization
+                  </button>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </Table>
     </div>
   );
 }

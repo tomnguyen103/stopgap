@@ -1,6 +1,7 @@
 import { getAuditIntegrity } from "../../lib/data";
 import { formatUtc } from "../../lib/format";
 import { requireGroup } from "../../lib/group-guard";
+import { Table } from "../../components/ui/table";
 
 export const dynamic = "force-dynamic";
 
@@ -50,45 +51,32 @@ export default async function AuditPage() {
           hour once the worker and schedule are running.
         </div>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Taken</th>
-              <th>Head row</th>
-              <th>Head hash</th>
-              <th>Sink</th>
-              <th>DB match</th>
-              <th>External match</th>
+        <Table
+          head={["Taken", "Head row", "Head hash", "Sink", "DB match", "External match"]}
+          label="External audit anchors"
+        >
+          {anchors.map((a) => (
+            <tr key={a.id}>
+              <td className="sub">{formatUtc(a.ts)}</td>
+              <td>#{String(a.maxAuditId)}</td>
+              <td className="mono" title={a.headHash}>
+                {a.headHash.slice(0, 12)}…
+              </td>
+              <td>{a.sink}</td>
+              <td className={a.headMatches ? "match-ok" : "match-bad"}>
+                {a.headMatches ? "✓" : "✗ mismatch"}
+              </td>
+              <td
+                className={
+                  a.externalMatches === null ? "sub" : a.externalMatches ? "match-ok" : "match-bad"
+                }
+                title="Outside-the-DB anchor file vs the live chain"
+              >
+                {a.externalMatches === null ? "—" : a.externalMatches ? "✓" : "✗ mismatch"}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {anchors.map((a) => (
-              <tr key={a.id}>
-                <td className="sub">{formatUtc(a.ts)}</td>
-                <td>#{String(a.maxAuditId)}</td>
-                <td className="mono" title={a.headHash}>
-                  {a.headHash.slice(0, 12)}…
-                </td>
-                <td>{a.sink}</td>
-                <td className={a.headMatches ? "match-ok" : "match-bad"}>
-                  {a.headMatches ? "✓" : "✗ mismatch"}
-                </td>
-                <td
-                  className={
-                    a.externalMatches === null
-                      ? "sub"
-                      : a.externalMatches
-                        ? "match-ok"
-                        : "match-bad"
-                  }
-                  title="Outside-the-DB anchor file vs the live chain"
-                >
-                  {a.externalMatches === null ? "—" : a.externalMatches ? "✓" : "✗ mismatch"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ))}
+        </Table>
       )}
     </>
   );

@@ -1,5 +1,6 @@
 import { getShadowDashboard, getShadowRuns } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
+import { Table } from "../../components/ui/table";
 
 export const dynamic = "force-dynamic";
 
@@ -35,68 +36,57 @@ export default async function ShadowPage() {
           No shadow runs yet. Replay the corpus: <code>pnpm --filter @stopgap/shadow replay</code>
         </div>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Drug class</th>
-              <th>Runs</th>
-              <th>Agreement</th>
-              <th>Severity match</th>
-              <th>Under-escalation</th>
-              <th>Stage</th>
-              <th>Blocked by</th>
+        <Table
+          head={[
+            "Drug class",
+            "Runs",
+            "Agreement",
+            "Severity match",
+            "Under-escalation",
+            "Stage",
+            "Blocked by",
+          ]}
+          label="Shadow-mode agreement by day"
+        >
+          {classes.map(({ stats, decision }) => (
+            <tr key={stats.drugClass ?? "unclassified"}>
+              <td>{stats.drugClass ?? "unclassified"}</td>
+              <td>{stats.runs}</td>
+              <td>{(stats.meanAgreement * 100).toFixed(0)}%</td>
+              <td>{(stats.severityAgreementRate * 100).toFixed(0)}%</td>
+              <td>{(stats.underEscalationRate * 100).toFixed(0)}%</td>
+              <td className="status">{decision.stage}</td>
+              <td className="sub">{decision.blockedBy.join("; ") || "—"}</td>
             </tr>
-          </thead>
-          <tbody>
-            {classes.map(({ stats, decision }) => (
-              <tr key={stats.drugClass ?? "unclassified"}>
-                <td>{stats.drugClass ?? "unclassified"}</td>
-                <td>{stats.runs}</td>
-                <td>{(stats.meanAgreement * 100).toFixed(0)}%</td>
-                <td>{(stats.severityAgreementRate * 100).toFixed(0)}%</td>
-                <td>{(stats.underEscalationRate * 100).toFixed(0)}%</td>
-                <td className="status">{decision.stage}</td>
-                <td className="sub">{decision.blockedBy.join("; ") || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ))}
+        </Table>
       )}
 
       <h2>Recent runs</h2>
       {runs.length === 0 ? (
         <div className="empty">Nothing to triage yet.</div>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Corpus case</th>
-              <th>Proposed</th>
-              <th>Baseline</th>
-              <th>Agreement</th>
-              <th>Latency</th>
-              <th>Model</th>
+        <Table
+          head={["Corpus case", "Proposed", "Baseline", "Agreement", "Latency", "Model"]}
+          label="Shadow-mode disagreements"
+        >
+          {runs.map((run) => (
+            <tr key={run.id}>
+              <td>{run.corpusId}</td>
+              <td>
+                <span className={`pill sev-${run.proposedSeverity}`}>{run.proposedSeverity}</span>{" "}
+                {run.proposedAlternatives.length} alt
+              </td>
+              <td>
+                <span className={`pill sev-${run.baselineSeverity}`}>{run.baselineSeverity}</span>{" "}
+                {run.baselineAlternatives.length} alt
+              </td>
+              <td>{(Number(run.agreement) * 100).toFixed(0)}%</td>
+              <td>{run.latencyMs} ms</td>
+              <td className="sub">{run.modelId}</td>
             </tr>
-          </thead>
-          <tbody>
-            {runs.map((run) => (
-              <tr key={run.id}>
-                <td>{run.corpusId}</td>
-                <td>
-                  <span className={`pill sev-${run.proposedSeverity}`}>{run.proposedSeverity}</span>{" "}
-                  {run.proposedAlternatives.length} alt
-                </td>
-                <td>
-                  <span className={`pill sev-${run.baselineSeverity}`}>{run.baselineSeverity}</span>{" "}
-                  {run.baselineAlternatives.length} alt
-                </td>
-                <td>{(Number(run.agreement) * 100).toFixed(0)}%</td>
-                <td>{run.latencyMs} ms</td>
-                <td className="sub">{run.modelId}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          ))}
+        </Table>
       )}
     </>
   );

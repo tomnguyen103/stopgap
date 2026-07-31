@@ -1,6 +1,7 @@
 import { DEGRADED_REASONS, type DegradedReason } from "@stopgap/db";
 import { getDailyBriefs } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
+import { Table } from "../../components/ui/table";
 
 export const dynamic = "force-dynamic";
 
@@ -98,32 +99,22 @@ export default async function BriefPage() {
       {earlier.length > 0 && (
         <>
           <h2>Earlier</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Headline</th>
-                <th>Signals</th>
-                <th>Model</th>
+          <Table head={["Date", "Headline", "Signals", "Model"]} label="Earlier daily briefs">
+            {earlier.map((brief) => (
+              <tr key={brief.id}>
+                <td>{brief.briefDate}</td>
+                <td>
+                  {brief.degradedReason ? (
+                    <span className="pill sev-high">{degradedLabel(brief.degradedReason)}</span>
+                  ) : (
+                    brief.headline
+                  )}
+                </td>
+                <td>{brief.signalKeys.length}</td>
+                <td className="sub">{brief.model ?? "—"}</td>
               </tr>
-            </thead>
-            <tbody>
-              {earlier.map((brief) => (
-                <tr key={brief.id}>
-                  <td>{brief.briefDate}</td>
-                  <td>
-                    {brief.degradedReason ? (
-                      <span className="pill sev-high">{degradedLabel(brief.degradedReason)}</span>
-                    ) : (
-                      brief.headline
-                    )}
-                  </td>
-                  <td>{brief.signalKeys.length}</td>
-                  <td className="sub">{brief.model ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </Table>
         </>
       )}
     </>

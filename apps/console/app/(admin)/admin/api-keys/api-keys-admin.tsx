@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Field } from "../../../components/ui/field";
 import { Toggle } from "../../../components/ui/toggle";
 import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
+import { Table } from "../../../components/ui/table";
 
 /**
  * API key management UI (PHASE6 §6.7). A thin client over the admin server actions, which re-check
@@ -152,53 +153,44 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
         </div>
       ) : (
         <div className="card">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Prefix</th>
-                <th>Scopes</th>
-                <th>Limit/hr</th>
-                <th>Last used</th>
-                <th>State</th>
+          <Table
+            head={["Name", "Prefix", "Scopes", "Limit/hr", "Last used", "State"]}
+            label="Issued API keys"
+          >
+            {keys.map((key) => (
+              <tr key={key.id}>
+                <td>{key.name}</td>
+                <td className="mono">{key.keyPrefix}…</td>
+                <td>
+                  <div className="actions">
+                    {key.scopes.map((scope) => (
+                      <span key={scope} className="pill">
+                        {scope}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td>{key.rateLimitPerHour}</td>
+                <td className="mono">{key.lastUsedAt ?? "never"}</td>
+                <td>
+                  {key.revokedAt ? (
+                    <span className="pill sev-critical">revoked</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={pending}
+                      onClick={() => {
+                        run(() => revokeApiKeyAction(key.id));
+                      }}
+                    >
+                      Revoke
+                    </button>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {keys.map((key) => (
-                <tr key={key.id}>
-                  <td>{key.name}</td>
-                  <td className="mono">{key.keyPrefix}…</td>
-                  <td>
-                    <div className="actions">
-                      {key.scopes.map((scope) => (
-                        <span key={scope} className="pill">
-                          {scope}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td>{key.rateLimitPerHour}</td>
-                  <td className="mono">{key.lastUsedAt ?? "never"}</td>
-                  <td>
-                    {key.revokedAt ? (
-                      <span className="pill sev-critical">revoked</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="danger"
-                        disabled={pending}
-                        onClick={() => {
-                          run(() => revokeApiKeyAction(key.id));
-                        }}
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </Table>
         </div>
       )}
       {error ? (
