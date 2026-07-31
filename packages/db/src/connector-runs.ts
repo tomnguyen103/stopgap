@@ -41,6 +41,17 @@ export interface ConnectorRunInput {
 const DETAIL_MAX_CHARS = 500;
 
 /**
+ * How much of it the patterns below are allowed to run over.
+ *
+ * Bounds the SCAN as well as the output, which are different limits. A Postgres error can carry a
+ * whole statement and a fetch failure can carry a response body, and four global regexes over
+ * megabytes to produce 500 characters is work done for nothing. Everything past this point is
+ * discarded either way — the output is cut twenty times shorter — so nothing readable is lost, and
+ * a secret sitting beyond it could never have reached the page regardless.
+ */
+const DETAIL_SCAN_MAX_CHARS = 10_000;
+
+/**
  * Credential-bearing shapes that turn up in the error text of an HTTP or SMTP client.
  *
  * `detail` is a raw `Error.message` from a network client, stored and then RENDERED on an
@@ -77,11 +88,15 @@ const REDACTIONS: [RegExp, string][] = [
  * being useful. The ellipsis is deliberate — a silently cut message reads as the whole one.
  */
 export function redactDetail(detail: string): string {
+  const bounded = detail.slice(0, DETAIL_SCAN_MAX_CHARS);
   const clean = REDACTIONS.reduce(
     (text, [pattern, replacement]) => text.replace(pattern, replacement),
-    detail,
+    bounded,
   );
-  return clean.length <= DETAIL_MAX_CHARS
+  // Two ways to be truncated, and both must say so: the redacted text is still over the display
+  // bound, or the input was long enough that the scan itself dropped a tail. Testing only the first
+  // would mark a 20,000-character error as whole whenever redaction happened to shrink it under 500.
+  return clean.length <= DETAIL_MAX_CHARS && bounded.length === detail.length
     ? clean
     : `${clean.slice(0, DETAIL_MAX_CHARS)}… (truncated)`;
 }

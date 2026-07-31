@@ -48,6 +48,14 @@ describe("redacting a connector failure before it is stored", () => {
     expect(redacted).toContain("(truncated)");
   });
 
+  it("marks a message truncated by the SCAN bound, even when redaction shrank it under the display bound", () => {
+    // The case a single length check gets wrong. Redaction collapses this to well under 500
+    // characters, so testing the output alone would report a 40,000-character error as complete.
+    const redacted = redactDetail(`api_key=${"z".repeat(40_000)}`);
+    expect(redacted).not.toContain("zzzz");
+    expect(redacted).toContain("(truncated)");
+  });
+
   it("leaves an ordinary message alone", () => {
     expect(redactDetail("ASHP feed returned 503")).toBe("ASHP feed returned 503");
   });
