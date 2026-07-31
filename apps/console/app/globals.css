@@ -472,6 +472,24 @@ button.danger {
 }
 
 /*
+  Loading — the placeholder a landing shows while its data resolves.
+
+  Static bars, no shimmer: motion in this console confirms a state change and never announces
+  content, and a pulsing rectangle tells a reader under time pressure nothing that the word
+  "loading" above it does not.
+*/
+.ds-loading {
+  display: grid;
+  gap: var(--space-6);
+}
+.ds-loading__bar {
+  height: var(--space-9);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+}
+
+/*
   Field — a control with a label that stays on screen.
 
   `display: grid` rather than a wrapper with margins, so the label, the hint and the control keep
