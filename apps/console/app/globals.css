@@ -831,6 +831,7 @@ h2 {
 .ds-badge--status {
   --badge-fg: var(--interactive);
   --badge-border: var(--border-strong);
+
   font-weight: 600;
 }
 
