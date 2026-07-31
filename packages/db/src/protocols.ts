@@ -83,7 +83,11 @@ export interface ProtocolSummary {
  * ever broke, this list would fan out — which is the correct, visible failure, rather than silently
  * picking one of two rows that both claim to be live.
  */
-export async function listProtocols(orgId: string, limit = 50, db: Db = getDb()): Promise<ProtocolSummary[]> {
+export async function listProtocols(
+  orgId: string,
+  limit = 50,
+  db: Db = getDb(),
+): Promise<ProtocolSummary[]> {
   return db
     .select({
       key: protocols.key,
@@ -150,7 +154,9 @@ export async function draftProtocolVersion(
     const [latest] = await tx
       .select({ version: protocolVersions.version })
       .from(protocolVersions)
-      .where(and(eq(protocolVersions.orgId, input.orgId), eq(protocolVersions.protocolId, protocol.id)))
+      .where(
+        and(eq(protocolVersions.orgId, input.orgId), eq(protocolVersions.protocolId, protocol.id)),
+      )
       .orderBy(desc(protocolVersions.version))
       .limit(1);
 
@@ -304,7 +310,12 @@ export async function approveProtocolVersion(
 
     const [approved] = await tx
       .update(protocolVersions)
-      .set({ state: "approved", approvedBy, approvedByUserId: approvedByUserId ?? null, approvedAt: new Date() })
+      .set({
+        state: "approved",
+        approvedBy,
+        approvedByUserId: approvedByUserId ?? null,
+        approvedAt: new Date(),
+      })
       .where(and(eq(protocolVersions.orgId, orgId), eq(protocolVersions.id, versionId)))
       .returning();
 

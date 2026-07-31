@@ -80,7 +80,7 @@ const nextAuth = NextAuth({
       // scoped query instead of silently defaulting to some other tenant's data.
       session.user.orgId = typeof token.orgId === "string" ? token.orgId : "";
       session.user.roles = Array.isArray(token.roles)
-        ? (token.roles.filter((r): r is Role => typeof r === "string" && isRole(r)))
+        ? token.roles.filter((r): r is Role => typeof r === "string" && isRole(r))
         : [];
       return session;
     },

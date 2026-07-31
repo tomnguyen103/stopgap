@@ -110,7 +110,10 @@ function extractOrgId(node: unknown): string | undefined {
     seen.add(n);
     const values = Array.isArray(n) ? n : Object.values(n as Record<string, unknown>);
     for (const value of values) {
-      if (typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+      if (
+        typeof value === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+      ) {
         found = value;
         return;
       }
@@ -157,7 +160,10 @@ describe("anchorAuditChain", () => {
     heads[ORG_A] = { id: 5, hash: "d".repeat(64) };
     heads[ORG_B] = { id: 6, hash: "e".repeat(64) };
     await anchorAuditChain(fakeDb() as never, [ORG_A, ORG_B]);
-    const lines = (await readFile(anchorFile, "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+    const lines = (await readFile(anchorFile, "utf8"))
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
     expect(lines.map((l: { orgId: string }) => l.orgId)).toEqual([ORG_A, ORG_B]);
   });
 });

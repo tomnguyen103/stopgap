@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { API_SCOPES, generateApiKey, hashApiKey, isApiScope, reserveApiKeyRequest } from "./api-keys.js";
+import {
+  API_SCOPES,
+  generateApiKey,
+  hashApiKey,
+  isApiScope,
+  reserveApiKeyRequest,
+} from "./api-keys.js";
 
 /**
  * The API key store (PHASE6 §6.7) — minting, hashing, scope narrowing, and the rate-limit
@@ -125,7 +131,10 @@ describe("reserveApiKeyRequest", () => {
 
   it("refuses OVER the limit (a limit lowered under an already-busy key) and writes nothing", async () => {
     recentCount = 999;
-    expect(await reserveApiKeyRequest(KEY_ID, since(), 10)).toEqual({ allowed: false, recent: 999 });
+    expect(await reserveApiKeyRequest(KEY_ID, since(), 10)).toEqual({
+      allowed: false,
+      recent: 999,
+    });
     expect(inserted).not.toHaveBeenCalled();
   });
 

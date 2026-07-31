@@ -118,7 +118,8 @@ export async function getOpsMetrics(
     ackLatencySeconds: ackAgg?.avg_seconds == null ? undefined : Number(ackAgg.avg_seconds),
     criticalUnacked: {
       count: Number(caseAgg?.critical_unacked_count ?? 0),
-      maxAgeSeconds: caseAgg?.critical_unacked_max_age == null ? 0 : Number(caseAgg.critical_unacked_max_age),
+      maxAgeSeconds:
+        caseAgg?.critical_unacked_max_age == null ? 0 : Number(caseAgg.critical_unacked_max_age),
     },
   };
 }

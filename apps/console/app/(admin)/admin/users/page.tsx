@@ -1,4 +1,5 @@
 import { ROLES } from "@stopgap/core";
+import Link from "next/link";
 import { getUsers } from "../../../lib/data";
 import { isActionAllowed } from "../../../lib/authz";
 import { resolvePrincipal } from "../../../lib/principal";
@@ -21,7 +22,11 @@ export const dynamic = "force-dynamic";
  * render this page with the layout skipped entirely — so the check that matters is the one here.
  * The layout's guard stays, because it is what makes the redirect happen before any chrome paints.
  */
-export default async function AdminUsersPage() {
+export default async function AdminUsersPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requireGroup("admin");
   const principal = await resolvePrincipal();
   const allowed = isActionAllowed(principal.roles, "manage_users");
@@ -35,19 +40,32 @@ export default async function AdminUsersPage() {
       </>
     );
   }
-  const users = await getUsers();
+  // In the ADDRESS, like every other list state in this console: the view an admin is looking at
+  // is the view they can send to a colleague, and the back button behaves.
+  const includeDisabled = (await searchParams).disabled === "1";
+  const users = await getUsers({ includeDisabled });
+  const active = users.filter((u) => u.disabledAt === null).length;
   return (
     <>
       <h1>Users</h1>
       <p className="sub">
-        {users.length} active user{users.length === 1 ? "" : "s"} · roles gate every mutating action
-        server-side (viewer &lt; pharmacist &lt; pharmacy_director &lt; admin)
+        {active} active user{active === 1 ? "" : "s"} · roles gate every mutating action server-side
+        (viewer &lt; pharmacist &lt; pharmacy_director &lt; admin)
+      </p>
+      <p>
+        <Link
+          className="ds-link"
+          href={includeDisabled ? "/admin/users" : "/admin/users?disabled=1"}
+        >
+          {includeDisabled ? "Hide disabled accounts" : "Show disabled accounts"}
+        </Link>
       </p>
       <UsersAdmin
         users={users.map((u) => ({
           id: u.id,
           label: u.displayName ?? u.email ?? u.oidcSubject ?? u.id,
           roles: u.roles,
+          disabled: u.disabledAt !== null,
         }))}
         allRoles={[...ROLES]}
       />

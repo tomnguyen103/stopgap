@@ -107,7 +107,11 @@ async function probeRoleRls(db: ReturnType<typeof getDb>): Promise<RoleRlsStatus
       bypassesRls: row.rolsuper || row.rolbypassrls,
     };
   } catch (err) {
-    return { checked: false, bypassesRls: false, reason: err instanceof Error ? err.message : String(err) };
+    return {
+      checked: false,
+      bypassesRls: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -139,7 +143,9 @@ export function checkAppRoleRls(): Promise<RoleRlsStatus> {
           "DATABASE_URL_MAINTENANCE at the bypassing role — see docs/multi-tenancy.md.",
       );
     } else if (!status.checked) {
-      console.warn(`[db] could not determine whether RLS applies to this connection: ${status.reason ?? "unknown"}`);
+      console.warn(
+        `[db] could not determine whether RLS applies to this connection: ${status.reason ?? "unknown"}`,
+      );
     }
     return status;
   });

@@ -72,5 +72,7 @@ export const config = {
   //    principal passes, and so does anyone when demo mode is on or no IdP is configured, because
   //    there is no session to demand in those deployments. An auth-configured deployment refuses
   //    an unauthenticated reader with 401 — HTML from `/docs`, JSON from `/openapi.json`.
-  matcher: ["/((?!api/auth|api/healthz|api/readyz|api/metrics|api/v1|_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    "/((?!api/auth|api/healthz|api/readyz|api/metrics|api/v1|_next/static|_next/image|favicon.ico).*)",
+  ],
 };

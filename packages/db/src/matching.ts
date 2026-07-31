@@ -58,9 +58,21 @@ async function candidatesFor(
   hintsList: SignalMatchHints[],
 ): Promise<MatchCandidate[]> {
   const codes = [
-    ...new Set(hintsList.flatMap((h) => [...h.ndcs, ...h.rxcuis]).map(normalizeCode).filter(Boolean)),
+    ...new Set(
+      hintsList
+        .flatMap((h) => [...h.ndcs, ...h.rxcuis])
+        .map(normalizeCode)
+        .filter(Boolean),
+    ),
   ];
-  const names = [...new Set(hintsList.flatMap((h) => h.names).map(normalizeName).filter(Boolean))];
+  const names = [
+    ...new Set(
+      hintsList
+        .flatMap((h) => h.names)
+        .map(normalizeName)
+        .filter(Boolean),
+    ),
+  ];
   if (codes.length === 0 && names.length === 0) return [];
 
   const [byCode, byName] = await Promise.all([

@@ -117,12 +117,8 @@
           "name": "audit_log_case_id_cases_id_fk",
           "tableFrom": "audit_log",
           "tableTo": "cases",
-          "columnsFrom": [
-            "case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["case_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

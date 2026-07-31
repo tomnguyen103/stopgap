@@ -31,7 +31,10 @@ const ORG_B = "bbbbbbbb-0000-0000-0000-0000000000cb";
 const raw = postgres(DATABASE_URL, { max: 2, onnotice: () => undefined });
 
 /** Read a tenant's rows directly, inside that tenant's own scope. */
-async function asOrg<T>(orgId: string, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+async function asOrg<T>(
+  orgId: string,
+  fn: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
   return raw.begin(async (tx) => {
     await tx`select set_config('app.current_org', ${orgId}, true)`;
     return fn(tx);
@@ -185,10 +188,7 @@ describe("an import belongs to the tenant that ran it", () => {
   it("is invisible from another tenant's scope", async () => {
     await importCatalog(ORG_B, planImport("items", ["sku,name", "B-ONLY,Org B item"].join("\n")));
 
-    const seenByB = await asOrg(
-      ORG_B,
-      (tx) => tx`select sku from items where org_id = ${ORG_B}`,
-    );
+    const seenByB = await asOrg(ORG_B, (tx) => tx`select sku from items where org_id = ${ORG_B}`);
     expect(seenByB.map((r) => r.sku)).toEqual(["B-ONLY"]);
 
     // Org A asks for org B's rows explicitly and still gets none — the policy, not the predicate.
@@ -242,9 +242,14 @@ describe("browsing the catalog", () => {
       ORG_C,
       planImport(
         "items",
-        ["sku,name", "AAA-1,Alpha", "BBB-2,Bravo", "CCC-3,Charlie", "DDD-4,Delta", "EEE-5,Echo"].join(
-          "\n",
-        ),
+        [
+          "sku,name",
+          "AAA-1,Alpha",
+          "BBB-2,Bravo",
+          "CCC-3,Charlie",
+          "DDD-4,Delta",
+          "EEE-5,Echo",
+        ].join("\n"),
       ),
     );
   });

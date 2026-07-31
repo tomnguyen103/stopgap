@@ -48,7 +48,11 @@ const APP_URL = "postgres://app@db/stopgap";
 const MAINT_URL = "postgres://maintenance@db/stopgap";
 
 const APP_ROLE: FakeRole = { rolname: "stopgap_app", rolsuper: false, rolbypassrls: false };
-const MAINT_ROLE: FakeRole = { rolname: "stopgap_maintenance", rolsuper: false, rolbypassrls: true };
+const MAINT_ROLE: FakeRole = {
+  rolname: "stopgap_maintenance",
+  rolsuper: false,
+  rolbypassrls: true,
+};
 const SUPERUSER: FakeRole = { rolname: "stopgap", rolsuper: true, rolbypassrls: false };
 
 beforeEach(() => {
