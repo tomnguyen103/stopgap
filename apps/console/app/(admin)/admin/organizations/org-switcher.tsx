@@ -36,7 +36,11 @@ export function OrgSwitcher({ orgs, activeOrgId }: { orgs: OrgOption[]; activeOr
 
   return (
     <Card>
-      {error ? <p className="sub">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
       <Table head={["Organization", "Slug", "Active"]} label="Organizations on this deployment">
         {orgs.map((org) => {
           const active = org.id === activeOrgId;

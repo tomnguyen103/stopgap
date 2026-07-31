@@ -221,10 +221,14 @@
   /* Geist Sans and Geist Mono, self-hosted by `next/font` and put on <html> by the root layout.
      A true grotesk with a narrower cut than Inter — the default of every dark admin panel since
      2021 — real tabular figures, and a mono sibling drawn on the same skeleton, which is what
-     makes a hash sitting in a row beside prose look deliberate. The system stack behind each is
-     the fallback for the render before the inlined face resolves. */
-  --font-body: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+     makes a hash sitting in a row beside prose look deliberate.
+
+     The fallback sits INSIDE the `var()`, not after it. `next/font` mints `--font-geist-sans` on
+     `<html>`; anywhere that class is not in scope the reference is invalid at computed-value time,
+     and an invalid `--font-body` makes the whole `font` shorthand on `body` invalid — so the page
+     would lose its SIZE and LEADING as well as its face. */
+  --font-body: var(--font-geist-sans, ui-sans-serif), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono, ui-monospace), monospace;
   --dur-fast: 120ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
@@ -539,8 +543,17 @@ h1 {
   font-size: var(--type-small);
   line-height: var(--leading-small);
 }
+/*
+  A lifecycle state, told apart by WEIGHT rather than by hue.
+
+  `--interactive` resolved to a blue that separated a status cell from its neighbours by colour;
+  since P1.5 it is `--pt-900`, which is exactly `--text-default` — so colour alone now says
+  nothing. Reaching for a second hue to fix that would spend the one thing this console reserves
+  for clinical meaning on a lifecycle label, so the distinction is carried by weight instead.
+*/
 .status {
   color: var(--interactive);
+  font-weight: 600;
 }
 .empty {
   padding: var(--space-8);
@@ -817,6 +830,8 @@ h2 {
 }
 .ds-badge--status {
   --badge-fg: var(--interactive);
+  --badge-border: var(--border-strong);
+  font-weight: 600;
 }
 
 /*
@@ -876,7 +891,10 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: var(--badge-pad-y) var(--badge-pad-x);
+  /* Sits beside a `Button` in the same `.actions` row on the users surface, so it takes the same
+     control height. Badge padding alone left it at ~29px against the button's 44px. */
+  min-height: var(--control-height);
+  padding: var(--badge-pad-y) var(--space-3);
   border-radius: var(--radius-pill);
   font-size: var(--type-sm);
   font-family: inherit;
@@ -1060,9 +1078,10 @@ h2 {
   color: var(--text-subtle);
   font-size: var(--type-md);
 }
-/* The accent-coloured lifecycle state, as `.status` has always rendered it. */
+/* Same as `.status`: the state reads through weight, because its colour is now the body colour. */
 .ds-table td.is-status {
   color: var(--interactive);
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {

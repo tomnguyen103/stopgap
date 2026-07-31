@@ -8,5 +8,5 @@ export default function PharmacistError(props: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  return <RouteError {...props} surface="the queue" />;
+  return <RouteError {...props} surface="pharmacist workspace" />;
 }

@@ -8,5 +8,5 @@ export default function ViewerError(props: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  return <RouteError {...props} surface="the overview" />;
+  return <RouteError {...props} surface="viewer dashboard" />;
 }

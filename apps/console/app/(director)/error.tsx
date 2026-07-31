@@ -8,5 +8,5 @@ export default function DirectorError(props: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  return <RouteError {...props} surface="oversight" />;
+  return <RouteError {...props} surface="director oversight" />;
 }
