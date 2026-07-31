@@ -291,7 +291,13 @@ a {
 */
 .shell {
   display: grid;
-  grid-template-columns: 1fr;
+  /*
+    `minmax(0, 1fr)`, never `1fr`. A grid item's default `min-width: auto` refuses to shrink below
+    its content's min-content width, so one wide table inside `main` widened the TRACK and the
+    whole page scrolled sideways — 696px of layout in a 375px viewport — while the table's own
+    `overflow-x: auto` container sat there unused.
+  */
+  grid-template-columns: minmax(0, 1fr);
   min-height: 100vh;
 }
 .rail {
@@ -392,6 +398,7 @@ a {
 }
 .shell__main {
   width: 100%;
+  min-width: 0;
   margin: 0 auto;
   padding: var(--space-4);
 }
@@ -414,14 +421,20 @@ a {
 
 @media (min-width: 768px) {
   .shell {
-    grid-template-columns: 64px 1fr;
+    /*
+      §5.2 specifies 64px icon-only here. The console ships NO icon set until P4.6 — the wordmark
+      is the `◐` character — so a 64px rail at this breakpoint truncates every label to three or
+      four characters and folds the org badge to one letter per line. A readable text rail is the
+      honest intermediate; the 64px variant lands with the icons it depends on.
+    */
+    grid-template-columns: 200px minmax(0, 1fr);
   }
   .rail {
     flex-direction: column;
     align-items: stretch;
     flex-wrap: nowrap;
     gap: var(--space-6);
-    padding: var(--space-4) var(--space-2);
+    padding: var(--space-4) var(--space-3);
     border-bottom: 0;
     border-right: 1px solid var(--border-default);
     /* The rail stays put while a 400-row queue scrolls past it: a fixed anchor is most of what
@@ -429,16 +442,19 @@ a {
     position: sticky;
     top: 0;
     align-self: start;
+    /* Exactly the viewport, not the length of its own content: a rail that stops halfway down a
+       400-row queue draws a hard edge across the page and stops reading as an anchor. `min` and
+       `max` together, because sticky needs `align-self: start` and that opts out of stretching. */
+    min-height: 100vh;
     max-height: 100vh;
     overflow-y: auto;
   }
   .rail__head {
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--space-1);
   }
-  /* At this width the rail is icon-width; the wordmark's glyph carries it and the surface name
-     would not fit legibly. The name is still announced by the nav's own label. */
+  /* The surface name returns at 1024px, where the head has room for it beside the wordmark. */
   .rail__surface {
     display: none;
   }
@@ -468,7 +484,7 @@ a {
 
 @media (min-width: 1024px) {
   .shell {
-    grid-template-columns: 232px 1fr;
+    grid-template-columns: 232px minmax(0, 1fr);
   }
   .rail {
     padding: var(--space-6) var(--space-4);
