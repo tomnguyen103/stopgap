@@ -59,6 +59,9 @@
 
   /* ---- Scale: the spacing, radius and type steps the stylesheet was already using ---------- */
   --space-1: 2px;
+  /* `.ds-gates` has read `--space-3` since ticket 14 with nothing defining it, so its `gap` was an
+     invalid declaration and collapsed to 0. Defined here at the step the 2px base implies. */
+  --space-3: 6px;
   --space-4: 8px;
   --space-5: 10px;
   --space-6: 12px;
