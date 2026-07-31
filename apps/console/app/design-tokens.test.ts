@@ -121,3 +121,54 @@ describe("contrast", () => {
     ).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+/**
+ * Colour is reserved for clinical meaning.
+ *
+ * One decorative blue used to do the work of six: button fill, link, lifecycle-status text, active
+ * filter chip, focus ring, and one of the two trend-chart series. It also sat six hex digits from
+ * `--severity-low` on the same ramp — a brand blue and a clinical blue, side by side — so a
+ * `critical` badge had to compete with a blue button, a blue link, a blue chip and a blue line.
+ */
+describe("the achromatic chrome", () => {
+  const chroma = (hex: string) => Math.max(...rgb(hex)) - Math.min(...rgb(hex));
+
+  it("fills a primary action with platinum, not a hue", () => {
+    expect(resolve("--interactive")).toBe(resolve("--pt-900"));
+  });
+
+  it("has a quiet interactive step for link text", () => {
+    expect(resolve("--interactive-quiet")).toBe(resolve("--pt-700"));
+  });
+
+  it("leaves no decorative accent behind, declared or referenced", () => {
+    expect(css).not.toMatch(/--accent\b/);
+  });
+
+  it.each([
+    "--interactive",
+    "--interactive-quiet",
+    "--focus-ring",
+    "--surface-page",
+    "--surface-raised",
+    "--text-default",
+    "--text-subtle",
+  ])("%s stays near-neutral, so nothing in the chrome reads as a signal", (token) => {
+    // The ink and platinum ramps carry a faint cool cast on purpose, so the bound is not zero.
+    // For scale: `--pt-500` sits at 27, the old `--accent` (#4da3ff) at 178, and
+    // `--severity-low` (#74c0fc) at 136. Nothing saturated survives this.
+    expect(chroma(resolve(token))).toBeLessThanOrEqual(30);
+  });
+
+  // The five surfaces the remap moves at once. Each is asserted where it is spelled, because
+  // "verify all five" is not a thing a future change can re-run by hand.
+  it.each([
+    ["--button-bg", /--button-bg:\s*var\(--interactive\);/],
+    [".ds-chip--on", /\.ds-chip--on\s*\{[^}]*var\(--interactive\)/],
+    [".ds-table td.is-status", /\.ds-table td\.is-status\s*\{[^}]*var\(--interactive\)/],
+    [".ds-badge--status", /\.ds-badge--status\s*\{[^}]*var\(--interactive\)/],
+    [".ds-chart__key--cases", /\.ds-chart__key--cases\s*\{[^}]*var\(--interactive\)/],
+  ])("%s resolves through --interactive", (_name, pattern) => {
+    expect(css).toMatch(pattern);
+  });
+});

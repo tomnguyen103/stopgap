@@ -8,7 +8,13 @@ import { Card } from "./ui/card";
  * tenant, or the caller has switched organizations since the link was made — because a 404 in a
  * multi-tenant console is far more often the second than a typo.
  */
-export function RouteNotFound({ title, home }: { title: string; home?: { href: string; label: string } }) {
+export function RouteNotFound({
+  title,
+  home,
+}: {
+  title: string;
+  home?: { href: string; label: string };
+}) {
   return (
     <main>
       <h1>{title}</h1>
@@ -19,7 +25,9 @@ export function RouteNotFound({ title, home }: { title: string; home?: { href: s
         </p>
         {home ? (
           <p>
-            <Link href={home.href}>{home.label}</Link>
+            <Link className="ds-link" href={home.href}>
+              {home.label}
+            </Link>
           </p>
         ) : null}
       </Card>

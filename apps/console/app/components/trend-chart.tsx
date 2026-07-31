@@ -11,11 +11,11 @@ import type { DailyCount } from "@stopgap/db";
  * honestly; a second y-axis would let the two lines cross wherever the scales were chosen to make
  * them cross, which is the most reliable way to draw a relationship that is not in the data.
  *
- * The two hues are the console's own `--accent` and `--high`. They separate by ΔE 26 under protan
- * and 32 in normal vision (checked, not eyeballed), so the pair is legible to a colourblind reader
- * — and identity is carried by the legend and the end labels as well as by colour, never by colour
- * alone. They sit lighter than the reference palette's dark-mode lightness band; the console's
- * palette is the locked design system here and is not re-picked for one chart.
+ * The two series are `--interactive` (platinum, from P1.5) and `--severity-high` (amber). That
+ * pair separates further than the blue/amber it replaces under both normal and protan vision, and
+ * it keeps the system's one colour rule intact: the alerts line is amber because alerts ARE the
+ * warning series, not because two colours were needed. Identity is carried by the legend and the
+ * end labels as well as by colour, never by colour alone.
  *
  * Every day in the window is plotted, including the empty ones: a series drawn only from days that
  * had activity slopes straight through a quiet week, which reads as steady work rather than none.

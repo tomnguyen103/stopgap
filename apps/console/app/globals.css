@@ -63,8 +63,6 @@
   --mod: #ffd43b;
   --low: #74c0fc;
   --ok: #51cf66;
-  /* Retired in P1.5, when `--interactive` moves to platinum. Still read by legacy rules below. */
-  --accent: #4da3ff;
   --tint-info: #12202c;
   --tint-warn: #2a1e12;
   --tint-warn-hover: #35260f;
@@ -81,6 +79,8 @@
   --muted: var(--pt-500);
   --sunken: var(--ink-050);
   --row-hover: var(--ink-200);
+  /* The label on a primary action's fill. Named for the fill, not for a hue — the fill is
+     platinum from P1.5, and the token means "legible on top of --interactive". */
   --on-accent: var(--ink-000);
 
   /* ---- Semantic: what a colour is FOR ------------------------------------------------------ */
@@ -100,7 +100,18 @@
   --text-subtle: var(--muted);
   --text-faint: var(--pt-300);
   --text-on-accent: var(--on-accent);
-  --interactive: var(--accent);
+  /*
+    ---- Semantic: interaction, achromatic ----------------------------------------------------
+    One decorative blue used to be the button fill, the link colour, the lifecycle-status text,
+    the active filter chip, the focus ring AND one of the two trend-chart series — and it sat six
+    hex digits from `--severity-low` on the same ramp. A `critical` badge had to compete with a
+    blue button, a blue link, a blue chip and a blue line for the reader's attention.
+
+    Saturated colour on this screen now means severity or status and nothing else. A primary
+    action is platinum on ink; its affordance is weight, not hue.
+  */
+  --interactive: var(--pt-900);
+  --interactive-quiet: var(--pt-700);
 
   /*
     ---- Semantic: elevation ------------------------------------------------------------------
@@ -349,7 +360,7 @@ tr:hover td {
   border-color: var(--low);
 }
 .status {
-  color: var(--accent);
+  color: var(--interactive);
 }
 .empty {
   padding: 40px;
@@ -374,9 +385,32 @@ tr:hover td {
 .kv dt {
   color: var(--muted);
 }
-.back {
-  color: var(--muted);
-  font-size: 13px;
+/*
+  A link's affordance is weight and an underline, not a hue (§3.3). The underline sits in
+  `--line-strong` and thickens to the text colour on hover, so the control reads as a control
+  without spending the one thing this console reserves for clinical meaning.
+*/
+.back,
+.ds-link {
+  color: var(--interactive-quiet);
+  font-size: var(--text-small);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.12em;
+  text-decoration-color: var(--line-strong);
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    text-decoration-color var(--dur-fast) var(--ease-out);
+}
+.back:hover,
+.ds-link:hover {
+  color: var(--text-default);
+  text-decoration-color: currentcolor;
+}
+.back:focus-visible,
+.ds-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 .audit {
   font-family: var(--font-mono);
@@ -451,7 +485,7 @@ h2 {
   margin-top: 12px;
 }
 button {
-  background: var(--accent);
+  background: var(--interactive);
   color: var(--text-on-accent);
   border: 0;
   border-radius: 8px;
