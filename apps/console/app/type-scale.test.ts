@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readGlobalsCss } from "./design-test-helpers";
 
-const css = readFileSync(fileURLToPath(new URL("./globals.css", import.meta.url)), "utf8");
+const css = readGlobalsCss();
 
 /**
  * Every declaration that lands on a selector, concatenated.
@@ -26,13 +25,13 @@ function rule(selector: string): string {
 
 describe("the type scale", () => {
   it.each([
-    ["--text-display", "32px"],
-    ["--text-title", "22px"],
-    ["--text-heading", "16px"],
-    ["--text-subhead", "14px"],
-    ["--text-body", "14px"],
-    ["--text-small", "13px"],
-    ["--text-micro", "11px"],
+    ["--type-display", "32px"],
+    ["--type-title", "22px"],
+    ["--type-heading", "16px"],
+    ["--type-subhead", "14px"],
+    ["--type-body", "14px"],
+    ["--type-small", "13px"],
+    ["--type-micro", "11px"],
   ])("defines %s as %s", (token, value) => {
     expect(css).toMatch(new RegExp(`${token}:\\s*${value};`));
   });
@@ -40,8 +39,8 @@ describe("the type scale", () => {
   it("has a display step far enough above body to be a different kind of thing", () => {
     // The old scale ran 12/13/15 plus one 28px figure: a KPI and a table cell were one step
     // apart, so nothing on a page could be the headline. Numbers are what this product sells.
-    const display = Number(/--text-display:\s*(\d+)px/.exec(css)?.[1]);
-    const body = Number(/--text-body:\s*(\d+)px/.exec(css)?.[1]);
+    const display = Number(/--type-display:\s*(\d+)px/.exec(css)?.[1]);
+    const body = Number(/--type-body:\s*(\d+)px/.exec(css)?.[1]);
     expect(display / body).toBeGreaterThanOrEqual(2);
   });
 });

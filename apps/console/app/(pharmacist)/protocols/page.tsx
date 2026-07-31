@@ -1,5 +1,4 @@
 import { getProtocols } from "../../lib/data";
-import { Button, Card, Table } from "../../components/ui";
 import { requireGroup } from "../../lib/group-guard";
 import {
   diffLines,
@@ -9,6 +8,7 @@ import {
 } from "../../lib/version-diff";
 import { ApproveVersionButton } from "./approve-version";
 import { WithdrawVersionButton } from "./withdraw-version";
+import { Button, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
  *
  * Rebuilt on the shared primitives (ticket 02) and deliberately UNCHANGED on screen. The markup
  * this page used to hand-write — `<section className="card">`, a bare `<table>`, a
- * `<td className="status">` — resolves to the same tokens through `Card` and `Table`, so
+ * `<td className="is-status">` — resolves to the same tokens through `Card` and `Table`, so
  * the rebuild is a proof that the two styling systems coexist rather than a redesign.
  */
 /**
@@ -173,7 +173,7 @@ export default async function ProtocolsPage({
                   >
                     {comparison.diff.map((line, i) => (
                       <tr key={`${String(i)}:${line.text}`}>
-                        <td className="sub">
+                        <td className="is-subtle">
                           {/* A symbol AND a colour, the same pair the approvals diff uses: a diff
                             that separates added from removed by colour alone is unreadable to a
                             reader who cannot see the difference — and this one is read to decide

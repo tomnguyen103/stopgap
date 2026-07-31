@@ -2,11 +2,8 @@
 
 import { useState, useTransition } from "react";
 import type { Role } from "@stopgap/core";
-import { Toggle } from "../../../components/ui/toggle";
 import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../../lib/actions";
-import { Table } from "../../../components/ui/table";
-import { Card } from "../../../components/ui/card";
-import { Button } from "../../../components/ui/button";
+import { Button, Card, Table, Toggle } from "../../../components/ui";
 
 /**
  * Role management UI (PHASE6 §6.1). A thin client over the admin server actions — each role is a

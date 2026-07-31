@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
 
-import { Badge, Button, Card, Table } from "../../components/ui";
 import { DemoPanel } from "../../demo-panel";
 import { getCaseQueue, getFeedFreshness } from "../../lib/data";
 import { formatUtc } from "../../lib/format";
@@ -9,6 +8,7 @@ import { requireGroup } from "../../lib/group-guard";
 import { isException, parseCaseQueueParams, CASE_QUEUE_SCHEMA } from "../../lib/case-queue";
 import { filterValue, listHref, pageCount, sortHref, toggleFilterHref } from "../../lib/list-href";
 import { bandSeverity } from "../../lib/signal-list";
+import { Badge, Button, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -181,7 +181,7 @@ export default async function CaseQueuePage({
                     </>
                   )}
                 </td>
-                <td className="sub">{row.updatedAt.toISOString().slice(0, 10)}</td>
+                <td className="is-subtle">{row.updatedAt.toISOString().slice(0, 10)}</td>
               </tr>
             ))}
           </Table>

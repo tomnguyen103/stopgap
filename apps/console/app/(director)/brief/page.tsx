@@ -1,8 +1,7 @@
 import { DEGRADED_REASONS, type DegradedReason } from "@stopgap/db";
 import { getDailyBriefs } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
-import { Table } from "../../components/ui/table";
-import { Badge } from "../../components/ui/badge";
+import { Badge, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -112,7 +111,7 @@ export default async function BriefPage() {
                   )}
                 </td>
                 <td>{brief.signalKeys.length}</td>
-                <td className="sub">{brief.model ?? "—"}</td>
+                <td className="is-subtle">{brief.model ?? "—"}</td>
               </tr>
             ))}
           </Table>

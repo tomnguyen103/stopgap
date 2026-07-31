@@ -1,7 +1,6 @@
 import { getShadowDashboard, getShadowRuns } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
-import { Table } from "../../components/ui/table";
-import { asSeverity, Badge } from "../../components/ui/badge";
+import { asSeverity, Badge, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -56,8 +55,8 @@ export default async function ShadowPage() {
               <td>{(stats.meanAgreement * 100).toFixed(0)}%</td>
               <td>{(stats.severityAgreementRate * 100).toFixed(0)}%</td>
               <td>{(stats.underEscalationRate * 100).toFixed(0)}%</td>
-              <td className="status">{decision.stage}</td>
-              <td className="sub">{decision.blockedBy.join("; ") || "—"}</td>
+              <td className="is-status">{decision.stage}</td>
+              <td className="is-subtle">{decision.blockedBy.join("; ") || "—"}</td>
             </tr>
           ))}
         </Table>
@@ -84,7 +83,7 @@ export default async function ShadowPage() {
               </td>
               <td>{(Number(run.agreement) * 100).toFixed(0)}%</td>
               <td>{run.latencyMs} ms</td>
-              <td className="sub">{run.modelId}</td>
+              <td className="is-subtle">{run.modelId}</td>
             </tr>
           ))}
         </Table>

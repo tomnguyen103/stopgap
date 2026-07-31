@@ -2,11 +2,11 @@ import Link from "next/link";
 import { getEnv } from "@stopgap/core";
 import { ladderPosition } from "@stopgap/workflows";
 
-import { Badge, Card, Table } from "../../components/ui";
 import { TrendChart } from "../../components/trend-chart";
 import { getOversight, getShadowDashboard } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
 import { diffLines, summarizeDiff } from "../../lib/version-diff";
+import { Badge, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +79,9 @@ export default async function OversightPage() {
                 </td>
                 <td>v{version.version}</td>
                 <td>{version.authoredBy}</td>
-                <td className="sub">{summarizeDiff(diffLines(previousBody, version.body))}</td>
+                <td className="is-subtle">
+                  {summarizeDiff(diffLines(previousBody, version.body))}
+                </td>
               </tr>
             ))}
           </Table>
@@ -105,13 +107,13 @@ export default async function OversightPage() {
                   </Link>{" "}
                   <Badge severity="critical">critical</Badge>
                 </td>
-                <td className="sub">{row.openedAt.toISOString().slice(0, 10)}</td>
+                <td className="is-subtle">{row.openedAt.toISOString().slice(0, 10)}</td>
                 <td>
                   {row.hoursOpen < 24
                     ? `${String(row.hoursOpen)} hour${row.hoursOpen === 1 ? "" : "s"}`
                     : `${String(Math.floor(row.hoursOpen / 24))} day${row.hoursOpen < 48 ? "" : "s"}`}
                 </td>
-                <td className="sub">
+                <td className="is-subtle">
                   {/* WHO THE POLICY HAS ALREADY CALLED FOR, read from elapsed time. Every row here
                       comes off an anti-join and has no acknowledgment at all, so a tier taken from
                       `acknowledgments` would read "not yet escalated" for all of them however long
@@ -179,7 +181,7 @@ export default async function OversightPage() {
                 <td>
                   <Badge tone="status">{decision.stage}</Badge>
                 </td>
-                <td className="sub">
+                <td className="is-subtle">
                   {/* EVERY gate for the stage this class is working towards, met and unmet alike,
                       with the reading behind each. Naming only the failures answers "why not yet"
                       and nothing else: a class one gate short reads the same as one that is four

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { isDemoMode } from "@stopgap/demo";
 
-import { Badge, Button, Card, Table } from "../../../components/ui";
 import { isActionAllowed } from "../../../lib/authz";
 import { unavailableReason } from "../../../lib/case-queue";
 import {
@@ -22,6 +21,7 @@ import {
 } from "../../../lib/list-href";
 import { resolvePrincipal } from "../../../lib/principal";
 import { ImportPanel } from "./import-panel";
+import { Badge, Button, Card, Table } from "../../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -140,7 +140,7 @@ export default async function CatalogPage({
                   <Link href={`/admin/catalog/${encodeURIComponent(row.sku)}`}>{row.name}</Link>
                   {row.genericName ? <div className="sub">{row.genericName}</div> : null}
                 </td>
-                <td className="sub">{row.sku}</td>
+                <td className="is-subtle">{row.sku}</td>
                 <td>
                   {row.supplierSiteCount}
                   {isSoleSourced(row.supplierSiteCount) ? (

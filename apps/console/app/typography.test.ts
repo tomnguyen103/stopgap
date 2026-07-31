@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readGlobalsCss } from "./design-test-helpers";
 
 /**
  * The type layer, asserted at its two seams.
@@ -11,7 +12,7 @@ import { describe, expect, it } from "vitest";
  * pressure. `next/font` self-hosts and inlines, so the assertion worth making is that the font
  * arrives through it and that no rule bypasses the token to restate a family literal.
  */
-const css = readFileSync(fileURLToPath(new URL("./globals.css", import.meta.url)), "utf8");
+const css = readGlobalsCss();
 const layout = readFileSync(fileURLToPath(new URL("./layout.tsx", import.meta.url)), "utf8");
 
 describe("typography", () => {

@@ -1,7 +1,7 @@
 import { getAuditIntegrity } from "../../lib/data";
 import { formatUtc } from "../../lib/format";
 import { requireGroup } from "../../lib/group-guard";
-import { Table } from "../../components/ui/table";
+import { Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +57,7 @@ export default async function AuditPage() {
         >
           {anchors.map((a) => (
             <tr key={a.id}>
-              <td className="sub">{formatUtc(a.ts)}</td>
+              <td className="is-subtle">{formatUtc(a.ts)}</td>
               <td>#{String(a.maxAuditId)}</td>
               <td className="mono" title={a.headHash}>
                 {a.headHash.slice(0, 12)}…

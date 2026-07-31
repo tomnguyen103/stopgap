@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { approveProtocolVersionAction } from "../../lib/actions";
-import { Button } from "../../components/ui/button";
+import { Button } from "../../components/ui";
 
 /**
  * Approve a drafted protocol version (ticket 14).

@@ -1,13 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Field } from "../../../components/ui/field";
-import { Toggle } from "../../../components/ui/toggle";
 import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
-import { Table } from "../../../components/ui/table";
-import { Badge } from "../../../components/ui/badge";
-import { Card } from "../../../components/ui/card";
-import { Button } from "../../../components/ui/button";
+import { Badge, Button, Card, Field, Table, Toggle } from "../../../components/ui";
 
 /**
  * API key management UI (PHASE6 §6.7). A thin client over the admin server actions, which re-check

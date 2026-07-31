@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readGlobalsCss } from "./design-test-helpers";
 
 /**
  * The token graph, resolved and measured.
@@ -13,7 +12,7 @@ import { describe, expect, it } from "vitest";
  * Both are asserted here rather than eyeballed, because §9 of the design direction requires a
  * contrast audit and an audit nobody can re-run is a claim, not a check.
  */
-const css = readFileSync(fileURLToPath(new URL("./globals.css", import.meta.url)), "utf8");
+const css = readGlobalsCss();
 
 /** The `:root` block only — component-scoped overrides are variants, not the palette. */
 function rootDeclarations(source: string): Map<string, string> {

@@ -46,8 +46,8 @@ export function RoleGatedButton({
       aria-disabled={!allowed || undefined}
       title={allowed ? undefined : reason}
       aria-label={allowed ? undefined : label}
-      // Dropping the handler is not enough to refuse the control. `Button` renders a bare
-      // `<Button>`, which inside a form is `type="submit"` by default, so a denied button would
+      // Dropping the handler is not enough to refuse the control. `Button` renders a real
+      // `<button>`, which inside a form is `type="submit"` by default, so a denied button would
       // still submit the form it sits in — by click and by Enter on focus. `aria-disabled` refuses
       // it to assistive tech but, unlike `disabled`, does not stop the native action.
       //

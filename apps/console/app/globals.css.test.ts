@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readGlobalsCss } from "./design-test-helpers";
 
 /**
  * The stylesheet's own integrity, asserted rather than assumed.
@@ -13,7 +12,7 @@ import { describe, expect, it } from "vitest";
  *
  * The only reliable guard is a test that resolves every reference against every definition.
  */
-const css = readFileSync(fileURLToPath(new URL("./globals.css", import.meta.url)), "utf8");
+const css = readGlobalsCss();
 
 /** Every `--name:` that appears in a declaration position. */
 function definedProperties(source: string): Set<string> {

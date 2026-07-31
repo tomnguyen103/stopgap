@@ -96,9 +96,7 @@
   --border-default: var(--line);
   --border-strong: var(--line-strong);
   --text-default: var(--text);
-  --text-secondary: var(--pt-700);
   --text-subtle: var(--muted);
-  --text-faint: var(--pt-300);
   --text-on-accent: var(--on-accent);
   /*
     ---- Semantic: interaction, achromatic ----------------------------------------------------
@@ -166,34 +164,38 @@
   --radius-pill: 999px;
   /*
     ---- Scale: type --------------------------------------------------------------------------
+    Named `--type-*`, not `--text-*`: the colour layer already owns `--text-default` /
+    `--text-subtle`, and one namespace holding both a colour and a font-size puts `--text-subtle`
+    one letter from `--text-small` while meaning a different KIND of thing.
+
     Eight steps, from §4 of the design direction. The old scale was three sizes (12/13/15) plus a
     lone 28px figure, so a KPI and a table cell sat one step apart and nothing on a page could be
     the headline. Each step carries its own leading and tracking, because a 32px figure set at
     body leading is not the same typeface decision as a 14px paragraph.
   */
-  --text-display: 32px;
+  --type-display: 32px;
   --leading-display: 1.15;
   --tracking-display: -0.02em;
 
-  --text-title: 22px;
+  --type-title: 22px;
   --leading-title: 1.25;
   --tracking-title: -0.015em;
 
-  --text-heading: 16px;
+  --type-heading: 16px;
   --leading-heading: 1.35;
   --tracking-heading: -0.01em;
 
-  --text-subhead: 14px;
+  --type-subhead: 14px;
   --leading-subhead: 1.4;
   --tracking-subhead: -0.005em;
 
-  --text-body: 14px;
+  --type-body: 14px;
   --leading-body: 1.55;
 
-  --text-small: 13px;
+  --type-small: 13px;
   --leading-small: 1.5;
 
-  --text-micro: 11px;
+  --type-micro: 11px;
   --leading-micro: 1.4;
   --tracking-micro: 0.08em;
 
@@ -202,7 +204,7 @@
     protocol draft and the resolution body. A 20,000-character draft set at UI body size is a
     document being read through a form field.
   */
-  --text-prose: 15px;
+  --type-prose: 15px;
   --leading-prose: 1.65;
 
   /*
@@ -212,10 +214,10 @@
   --font-numeric: tabular-nums slashed-zero;
 
   /* The previous three names, repointed at their nearest step rather than kept as a second scale
-     beside the first. `--text-sm` was the uppercase eyebrow size, `--text-lg` the card title. */
-  --text-sm: var(--text-micro);
-  --text-md: var(--text-small);
-  --text-lg: var(--text-heading);
+     beside the first. `--type-sm` was the uppercase eyebrow size, `--type-lg` the card title. */
+  --type-sm: var(--type-micro);
+  --type-md: var(--type-small);
+  --type-lg: var(--type-heading);
   /* Geist Sans and Geist Mono, self-hosted by `next/font` and put on <html> by the root layout.
      A true grotesk with a narrower cut than Inter — the default of every dark admin panel since
      2021 — real tabular figures, and a mono sibling drawn on the same skeleton, which is what
@@ -256,13 +258,15 @@
 
   --input-bg: var(--surface-sunken);
   --input-fg: var(--text-default);
-  --input-border: var(--border-default);
+  /* §5.3 `--elev-inset`: a recessed well takes the SUBTLE hairline. A default-weight border on a
+     darker fill reads as a raised edge, which is the opposite of recessed. */
+  --input-border: var(--border-subtle);
   --input-radius: var(--radius-md);
   --input-invalid-border: var(--status-bad);
 
   /* Toggle — a granted scope and a withheld one, told apart without reading a glyph. Both values
      go through the semantic layer so the P1 ink/platinum remap carries them without a second edit. */
-  --toggle-on-bg: var(--surface-hover);
+  --toggle-on-bg: var(--surface-selected);
   --toggle-on-border: var(--text-default);
   --toggle-on-fg: var(--text-default);
   --toggle-off-border: var(--border-default);
@@ -290,7 +294,7 @@ body {
   margin: 0;
   background: var(--surface-page);
   color: var(--text-default);
-  font: var(--text-body) / var(--leading-body) var(--font-body);
+  font: var(--type-body) / var(--leading-body) var(--font-body);
 }
 a {
   color: inherit;
@@ -333,11 +337,11 @@ a {
 .rail__brand {
   font-weight: 600;
   letter-spacing: -0.01em;
-  font-size: var(--text-heading);
+  font-size: var(--type-heading);
 }
 .rail__surface {
   color: var(--text-subtle);
-  font-size: var(--text-micro);
+  font-size: var(--type-micro);
   line-height: var(--leading-micro);
   letter-spacing: var(--tracking-micro);
   text-transform: uppercase;
@@ -364,7 +368,7 @@ a {
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   color: var(--text-subtle);
-  font-size: var(--text-small);
+  font-size: var(--type-small);
   transition:
     color var(--dur-fast) var(--ease-out),
     background var(--dur-fast) var(--ease-out);
@@ -405,7 +409,7 @@ a {
 .rail__principal {
   margin: 0;
   color: var(--text-subtle);
-  font-size: var(--text-micro);
+  font-size: var(--type-micro);
   line-height: var(--leading-micro);
   letter-spacing: var(--tracking-micro);
   text-transform: uppercase;
@@ -414,6 +418,7 @@ a {
 .shell__main {
   width: 100%;
   min-width: 0;
+  max-width: 1280px;
   margin: 0 auto;
   padding: var(--space-4);
 }
@@ -427,9 +432,6 @@ a {
   A 20,000-character draft at 1080px runs about 150 characters to the line. Nobody reads that
   accurately, and this one is a substitution protocol for a hospital floor.
 */
-.shell__main {
-  max-width: 1280px;
-}
 .ds-prose {
   max-width: 720px;
 }
@@ -525,7 +527,7 @@ h2 {
   min-width: 0;
 }
 h1 {
-  font-size: var(--text-title);
+  font-size: var(--type-title);
   line-height: var(--leading-title);
   letter-spacing: var(--tracking-title);
   font-weight: 600;
@@ -534,7 +536,7 @@ h1 {
 .sub {
   color: var(--muted);
   margin: 0 0 var(--space-5);
-  font-size: var(--text-small);
+  font-size: var(--type-small);
   line-height: var(--leading-small);
 }
 .status {
@@ -559,7 +561,7 @@ h1 {
 }
 .kv dt {
   color: var(--muted);
-  font-size: var(--text-micro);
+  font-size: var(--type-micro);
   line-height: var(--leading-micro);
   letter-spacing: var(--tracking-micro);
   text-transform: uppercase;
@@ -585,7 +587,7 @@ h1 {
 .back,
 .ds-link {
   color: var(--interactive-quiet);
-  font-size: var(--text-small);
+  font-size: var(--type-small);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.12em;
@@ -606,7 +608,7 @@ h1 {
 }
 .audit {
   font-family: var(--font-mono);
-  font-size: var(--text-small);
+  font-size: var(--type-small);
   font-variant-numeric: var(--font-numeric);
 }
 .audit li {
@@ -618,8 +620,17 @@ h1 {
 }
 
 /* Phase 3: protocol/shadow views. */
+/* §4 Subhead — h3 and table group headers. The step existed with no consumer, so `h3` rendered at
+   the browser default and sat LARGER than the `h2` above it. */
+h3 {
+  font-size: var(--type-subhead);
+  line-height: var(--leading-subhead);
+  letter-spacing: var(--tracking-subhead);
+  font-weight: 600;
+  margin: var(--space-6) 0 var(--space-2);
+}
 h2 {
-  font-size: var(--text-heading);
+  font-size: var(--type-heading);
   line-height: var(--leading-heading);
   letter-spacing: var(--tracking-heading);
   font-weight: 600;
@@ -634,7 +645,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   white-space: pre-wrap;
-  font: var(--text-prose) / var(--leading-prose) var(--font-body);
+  font: var(--type-prose) / var(--leading-prose) var(--font-body);
   color: var(--text);
 }
 
@@ -652,7 +663,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-3);
-  font: var(--text-prose) / var(--leading-prose) var(--font-body);
+  font: var(--type-prose) / var(--leading-prose) var(--font-body);
 }
 .actions {
   display: flex;
@@ -663,7 +674,7 @@ h2 {
 }
 .error {
   color: var(--crit);
-  font-size: var(--text-small);
+  font-size: var(--type-small);
   margin: var(--space-3) 0 0;
 }
 
@@ -672,7 +683,7 @@ h2 {
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
   margin: 0 0 var(--space-5);
-  font-size: var(--text-body);
+  font-size: var(--type-body);
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: var(--elev-raised);
@@ -694,14 +705,14 @@ h2 {
 /* Identifiers only — ids, hashes, key prefixes, NDCs. Slashed zero so a 0 cannot read as an O. */
 .mono {
   font-family: var(--font-mono);
-  font-size: var(--text-small);
+  font-size: var(--type-small);
   font-variant-numeric: var(--font-numeric);
 }
 
 /* Phase 5: demo mode. */
 .demo-banner {
   padding: var(--space-2) var(--space-4);
-  font-size: var(--text-small);
+  font-size: var(--type-small);
   color: var(--text);
   background: var(--surface-info);
   border-bottom: 1px solid var(--line);
@@ -738,7 +749,7 @@ h2 {
   border: 1px solid var(--high);
   background: var(--surface-warn);
   color: var(--high);
-  font-size: var(--text-micro);
+  font-size: var(--type-micro);
   /* `nowrap` was what pushed the old top bar past a phone's width. In the rail it has a column to
      wrap inside, so it can. */
   overflow-wrap: anywhere;
@@ -758,7 +769,7 @@ h2 {
 .active-org-badge__slug {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: var(--text-micro);
+  font-size: var(--type-micro);
 }
 
 /*
@@ -781,7 +792,7 @@ h2 {
   display: inline-block;
   padding: var(--badge-pad-y) var(--badge-pad-x);
   border-radius: var(--badge-radius);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   border: 1px solid var(--badge-border);
   color: var(--badge-fg);
 }
@@ -841,7 +852,7 @@ h2 {
 }
 .ds-field__label {
   color: var(--text-subtle);
-  font-size: var(--text-micro);
+  font-size: var(--type-micro);
   line-height: var(--leading-micro);
   font-weight: 600;
   text-transform: uppercase;
@@ -849,7 +860,7 @@ h2 {
 }
 .ds-field__hint {
   color: var(--text-subtle);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   margin: 0;
 }
 
@@ -867,7 +878,7 @@ h2 {
   gap: var(--space-1);
   padding: var(--badge-pad-y) var(--badge-pad-x);
   border-radius: var(--radius-pill);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   font-family: inherit;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out);
@@ -904,7 +915,7 @@ h2 {
   border-radius: var(--button-radius);
   padding: var(--button-pad-y) var(--button-pad-x);
   min-height: var(--button-min-height);
-  font: 600 var(--text-md) / 1 var(--font-body);
+  font: 600 var(--type-md) / 1 var(--font-body);
   cursor: pointer;
   transition: filter var(--dur-fast) var(--ease-out);
 }
@@ -966,12 +977,12 @@ h2 {
 /* Matches the global `h2` rule exactly — a card rebuilt on the primitive must not shift. */
 .ds-card__title {
   margin: var(--space-6) 0 var(--space-2);
-  font-size: var(--text-lg);
+  font-size: var(--type-lg);
 }
 .ds-card__sub {
   color: var(--text-subtle);
   margin: 0 0 var(--space-5);
-  font-size: var(--text-md);
+  font-size: var(--type-md);
 }
 
 /* Input — same eight states, same reason. */
@@ -983,7 +994,7 @@ h2 {
   border-radius: var(--input-radius);
   padding: var(--space-2) var(--space-3);
   min-height: var(--control-height);
-  font: var(--text-body) / var(--leading-body) var(--font-body);
+  font: var(--type-body) / var(--leading-body) var(--font-body);
 }
 .ds-input:hover:not(:disabled) {
   border-color: var(--text-subtle);
@@ -1036,7 +1047,7 @@ h2 {
 .ds-table th {
   color: var(--table-header-fg);
   font-weight: 600;
-  font-size: var(--text-micro);
+  font-size: var(--type-micro);
   line-height: var(--leading-micro);
   text-transform: uppercase;
   letter-spacing: var(--tracking-micro);
@@ -1047,7 +1058,7 @@ h2 {
 /* Same pair `.sub` applies when it lands on a cell: recede, and drop one type step. */
 .ds-table td.is-subtle {
   color: var(--text-subtle);
-  font-size: var(--text-md);
+  font-size: var(--type-md);
 }
 /* The accent-coloured lifecycle state, as `.status` has always rendered it. */
 .ds-table td.is-status {
@@ -1082,7 +1093,7 @@ h2 {
   box-shadow: var(--elev-raised);
 }
 .ds-figure__value {
-  font-size: var(--text-display);
+  font-size: var(--type-display);
   line-height: var(--leading-display);
   letter-spacing: var(--tracking-display);
   font-weight: 600;
@@ -1106,7 +1117,7 @@ h2 {
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
   padding: var(--badge-pad-y) var(--badge-pad-x);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--text-default);
   text-decoration: none;
 }
@@ -1122,6 +1133,9 @@ h2 {
 .ds-chip--on {
   border-color: var(--interactive);
   color: var(--interactive);
+  /* §3.3: a hairline PLUS a fill. Border-and-text alone is still an outline chip, just an
+     achromatic one — and an outline is what a hover already looks like. */
+  background: var(--surface-selected);
 }
 .ds-pager {
   display: flex;
@@ -1235,7 +1249,7 @@ h2 {
   display: grid;
   gap: var(--space-2);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--type-sm);
   color: var(--status-bad);
   max-height: 320px;
   overflow-y: auto;

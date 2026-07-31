@@ -2,9 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { setActiveOrgAction } from "../../../lib/actions";
-import { Table } from "../../../components/ui/table";
-import { Card } from "../../../components/ui/card";
-import { Button } from "../../../components/ui/button";
+import { Button, Card, Table } from "../../../components/ui";
 
 /**
  * The admin active-org switch (PHASE6 §6.5) — a thin client over `setActiveOrgAction`.
@@ -45,7 +43,7 @@ export function OrgSwitcher({ orgs, activeOrgId }: { orgs: OrgOption[]; activeOr
           return (
             <tr key={org.id}>
               <td>{org.name}</td>
-              <td className="sub">{org.slug}</td>
+              <td className="is-subtle">{org.slug}</td>
               <td>
                 {active ? (
                   <span className="status">current</span>

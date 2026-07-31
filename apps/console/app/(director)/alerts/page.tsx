@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { isDemoMode } from "@stopgap/demo";
 
-import { Badge, Card, Table } from "../../components/ui";
 import { isActionAllowed } from "../../lib/authz";
 import { unavailableReason } from "../../lib/case-queue";
 import { getAlertHistory, getAlertRules } from "../../lib/data";
@@ -10,6 +9,7 @@ import { filterValue, listHref, pageCount, toggleFilterHref } from "../../lib/li
 import { parseListParams, type ListParamsSchema } from "../../lib/list-params";
 import { resolvePrincipal } from "../../lib/principal";
 import { RulesPanel } from "./rules-panel";
+import { Badge, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -122,7 +122,7 @@ export default async function AlertsPage({
           <Table label="Alert history" head={["Fired", "Rule", "Outcome", "Matched", "Delivered"]}>
             {history.rows.map(({ event, ruleName }) => (
               <tr key={event.id}>
-                <td className="sub">
+                <td className="is-subtle">
                   {event.firedAt.toISOString().replace("T", " ").slice(0, 16)}
                 </td>
                 <td>{ruleName ?? <span className="sub">deleted rule</span>}</td>

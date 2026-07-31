@@ -1,10 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Field } from "../../../components/ui/field";
 import { resolveExceptionCase, reviewCase } from "../../../lib/actions";
-import { Card } from "../../../components/ui/card";
-import { Button } from "../../../components/ui/button";
+import { Button, Card, Field } from "../../../components/ui";
 
 /**
  * The HITL gate (PROJECT_PLAN §2). A case sitting in `awaiting_review` blocks its workflow

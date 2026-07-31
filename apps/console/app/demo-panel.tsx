@@ -2,8 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { startDemoShortage } from "./lib/actions";
-import { Card } from "./components/ui/card";
-import { Button } from "./components/ui/button";
+import { Button, Card } from "./components/ui";
 
 /**
  * "Run a shortage" (PROJECT_PLAN §11). Each button starts a real durable case through the

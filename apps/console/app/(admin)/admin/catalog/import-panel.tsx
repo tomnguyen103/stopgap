@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 
 import { importCatalogAction } from "../../../lib/actions";
 import { MAX_UPLOAD_BYTES } from "../../../lib/upload-limit";
-import { Button } from "../../../components/ui/button";
+import { Button } from "../../../components/ui";
 
 /**
  * Upload a catalog file, and read back what was wrong with it (ticket 17).

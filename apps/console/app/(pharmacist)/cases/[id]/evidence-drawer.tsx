@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Button } from "../../../components/ui/button";
+import { Button } from "../../../components/ui";
 
 export interface EvidenceEntry {
   id: string;

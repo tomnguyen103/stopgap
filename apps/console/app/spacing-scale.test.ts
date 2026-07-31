@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { readGlobalsCss } from "./design-test-helpers";
 
-const css = readFileSync(fileURLToPath(new URL("./globals.css", import.meta.url)), "utf8");
+const css = readGlobalsCss();
 
 function px(token: string): number {
   const m = new RegExp(`${token}:\\s*(\\d+)px;`).exec(css);
@@ -54,9 +53,9 @@ describe("the spacing scale", () => {
     // spacing step to name it (44 = 11 x 4, and there is no `--space-11`). What the old `9px` and
     // `18px` were is OFF the base — values nothing else in the system can line up with.
     const componentBlock = /---- Component:([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
-    const offBase = Array.from(componentBlock.matchAll(/:\s*(\d+)px;/g), (m) => Number(m[1])).filter(
-      (n) => n % 4 !== 0,
-    );
+    const offBase = Array.from(componentBlock.matchAll(/:\s*(\d+)px;/g), (m) =>
+      Number(m[1]),
+    ).filter((n) => n % 4 !== 0);
     expect(offBase).toEqual([]);
   });
 });

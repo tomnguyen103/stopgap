@@ -3,8 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { createAlertRuleAction, updateAlertRuleAction } from "../../lib/actions";
-import { Table } from "../../components/ui/table";
-import { Button } from "../../components/ui/button";
+import { Button, Table } from "../../components/ui";
 
 export interface RuleView {
   id: string;
@@ -116,7 +115,7 @@ export function RulesPanel({
       >
         {rules.length === 0 ? (
           <tr>
-            <td colSpan={6} className="sub">
+            <td colSpan={6} className="is-subtle">
               No rules yet. Nothing is being alerted on.
             </td>
           </tr>
@@ -166,7 +165,7 @@ export function RulesPanel({
                   <span className="sub"> · no webhook set — this rule pages nobody</span>
                 ) : null}
               </td>
-              <td className="sub">{rule.lastFired ?? "never"}</td>
+              <td className="is-subtle">{rule.lastFired ?? "never"}</td>
               <td>
                 <Button
                   type="button"

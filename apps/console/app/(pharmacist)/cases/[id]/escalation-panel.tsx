@@ -4,8 +4,7 @@ import { useState, useTransition } from "react";
 import type { EscalationEvent } from "@stopgap/workflows";
 import { acknowledgeCase } from "../../../lib/actions";
 import { formatUtc } from "../../../lib/format";
-import { Card } from "../../../components/ui/card";
-import { Button } from "../../../components/ui/button";
+import { Button, Card } from "../../../components/ui";
 
 /**
  * The per-case escalation timeline + acknowledge control (PHASE6 §6.3). Shows the ladder as it

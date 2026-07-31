@@ -13,7 +13,7 @@ import { resolvePrincipal } from "../../../lib/principal";
 import { EscalationPanel } from "./escalation-panel";
 import { ReviewPanel } from "./review-panel";
 import { requireGroup } from "../../../lib/group-guard";
-import { Card } from "../../../components/ui/card";
+import { Card } from "../../../components/ui";
 
 export const dynamic = "force-dynamic";
 

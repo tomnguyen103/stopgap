@@ -1,9 +1,9 @@
 import Link from "next/link";
 
-import { Badge, Button, Card, Table } from "../../components/ui";
 import { getSignalsPage, getViewerOverview } from "../../lib/data";
 import { resolvePrincipal } from "../../lib/principal";
 import { requireGroup } from "../../lib/group-guard";
+import { Badge, Button, Card, Table } from "../../components/ui";
 import {
   bandSeverity,
   filterValue,
