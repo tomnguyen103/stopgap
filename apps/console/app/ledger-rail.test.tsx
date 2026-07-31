@@ -45,7 +45,14 @@ describe("the Ledger Rail", () => {
 
   it("carries the same rail onto a state-bearing table row", () => {
     // A `tr` cannot host an absolutely-positioned pseudo-element reliably, so the first cell does.
-    expect(css).toMatch(/\.ds-table tr\[data-state\] td:first-child\s*\{\s*position: relative/);
+    expect(css).toMatch(/\.ds-table td:first-child\s*\{\s*position: relative/);
+    expect(css).toMatch(/\.ds-table tr\[data-state\] td:first-child::before/);
+  });
+
+  it("lets a row's own state win over its hover tint", () => {
+    // Both set `--rail`, and a hovered exception row must stay amber rather than dropping to the
+    // hover hairline — the state is the reason the row is worth finding.
+    expect(css).toMatch(/\.ds-table tbody tr\[data-state="attention"\]:hover/);
   });
 
   it("keeps the nav's current-page rail achromatic", () => {
