@@ -8,13 +8,13 @@ The pure role-to-landing-route resolution and the pure list-state module already
 
 **Blocked by:** 01 (need a real sign-in to land anywhere), 02 (need primitives for the shells)
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
-- [ ] Four dashboard groups exist, each with its own layout and navigation
-- [ ] Signing in redirects to the landing route of the caller's highest role
-- [ ] A multi-role user lands on their highest role's dashboard
-- [ ] An anonymous demo visitor reaches the viewer dashboard without authentication and without a redirect loop
-- [ ] The root layout remains static — session state is read only within a group layout, never above it
-- [ ] Every page and every server action still performs its own authorization check; reaching a route grants nothing
-- [ ] Navigating directly to another role's route is refused server-side, identically to an unauthenticated request
-- [ ] Controls for actions above the caller's role render disabled and state the required role, rather than being hidden
+- [x] Four dashboard groups exist, each with its own layout and navigation
+- [x] Signing in redirects to the landing route of the caller's highest role
+- [x] A multi-role user lands on their highest role's dashboard
+- [x] An anonymous demo visitor reaches the viewer dashboard without authentication and without a redirect loop
+- [x] The root layout remains static — session state is read only within a group layout, never above it
+- [x] Every page and every server action still performs its own authorization check; reaching a route grants nothing
+- [x] Navigating directly to another role's route is refused server-side, identically to an unauthenticated request
+- [x] Controls for actions above the caller's role render disabled and state the required role, rather than being hidden

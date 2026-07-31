@@ -6,14 +6,14 @@ PR batch: C
 
 **Blocked by:** 03, 12, 13
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #37 (batch C); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
-- [ ] The director lands on pending approvals and facility trend figures
-- [ ] Protocol versions can be approved or superseded, and version history shows what changed between versions
-- [ ] Shadow-mode agreement against human decisions is shown, broken down by cohort
-- [ ] Promotion gates state which criteria are met and which are not
-- [ ] Alert rules can be created and tuned from the dashboard, and alert history is browsable with list state in the page address
-- [ ] The escalation ladder for unacknowledged critical cases is visible
-- [ ] Key figures are shown over time, not only as current values
-- [ ] Model spend against the configured cap is visible
-- [ ] Actions above the director role render disabled and name the required role
+- [x] The director lands on pending approvals and facility trend figures
+- [x] Protocol versions can be approved or superseded, and version history shows what changed between versions
+- [x] Shadow-mode agreement against human decisions is shown, broken down by cohort
+- [x] Promotion gates state which criteria are met and which are not
+- [x] Alert rules can be created and tuned from the dashboard, and alert history is browsable with list state in the page address
+- [x] The escalation ladder for unacknowledged critical cases is visible
+- [x] Key figures are shown over time, not only as current values
+- [x] Model spend against the configured cap is visible
+- [x] Actions above the director role render disabled and name the required role

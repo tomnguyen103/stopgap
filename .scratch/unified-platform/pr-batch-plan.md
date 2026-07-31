@@ -255,3 +255,38 @@ The browser tier needs a seeded DRAFTED protocol version to satisfy `e2e/auth/la
 nothing in batch B seeds one, so that suite is red on a fresh database. It is off the gate
 (`pnpm gate` is lint+typecheck+test+build and excludes `e2e/**`), so it blocks nothing, but
 it is a real gap. `e2e/` is now typechecked by `pnpm typecheck:e2e`.
+
+## PROGRAMME CLOSEOUT 2026-07-30 — the DEFERRED block above is now settled
+
+Branch `feat/programme-closeout`, migration 0022. Both deferred findings from the batch A review
+(lines 137-140) are resolved here, and neither is still open:
+
+**Finding 11 — retention predicate unindexed for 4 of 5 kinds. CLOSED.** The sweep filters
+`(org_id, <age column>)`. Each of the four tables carried an index leading with `org_id` whose
+SECOND column the sweep does not filter on, so the age range fell back to a scan of the tenant's
+whole table on every cleanup. Migration 0022 adds `risk_signals_retention_idx`,
+`alert_events_retention_idx`, `inventory_snapshots_retention_idx` and
+`procurement_events_retention_idx`, each `(org_id, <age column>)` matching `retention.ts` exactly.
+`risk_score_snapshots` is the fifth and needed nothing — `risk_score_snapshots_rank_idx` is
+`(org_id, computed_at, score)`, which already serves it.
+
+**Finding 13 — count(*) + ILIKE per page view. HALF FIXED, HALF DECLINED.**
+
+- Fixed: `browseCatalog` ran the same CTE twice per page view, once for `count(*)` and once for the
+  page. `count(*) over ()` carries the total out with the page — one pass. The only case that still
+  costs a second statement is a page past the end, where a window count returns nothing because
+  there are no rows to carry it. Five new cases in `catalog.e2e.test.ts` cover it; the function had
+  no coverage at all before, which is a poor place to change paging from.
+- **Declined:** `ILIKE '%term%'` still cannot use a btree index. The standard fix is a `pg_trgm` GIN
+  index, and `pg_trgm` is a deployment-level Postgres extension this programme has never required.
+  Adding one is an operator's decision about what the database must provide, not a side effect of a
+  performance patch — so it is recorded here rather than taken. The scan is bounded by one tenant's
+  item count, and every other predicate in the query is indexed.
+
+**Ticket 17's connector-health criterion** also landed here (migration 0022, `connector_runs`), and
+**ticket 20's absorption record** landed as `docs/absorption.md`. Ticket 17's spend-cap criterion is
+closed BY DECISION — see the ticket file. The archive of `medical-supply-monitor` is prepared and
+handed to the repository owner; it is an account-level action on another repository.
+
+With this, tickets 01-21 are settled: every criterion is either met with evidence, or closed by a
+recorded decision. Programme complete.

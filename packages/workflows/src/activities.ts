@@ -30,6 +30,8 @@ import {
   listRoleRecipients,
   recordFeedRecords,
   dedupeByKey,
+  recordConnectorRuns,
+  type ConnectorRunInput,
   recordEvidence,
   listAlertRules,
   lastFiredByRule,
@@ -432,6 +434,14 @@ interface FeedResult {
    * open.
    */
   attested: boolean;
+  /**
+   * The fetch failure, when there was one — carried so the per-tenant connector row (ticket 17) can
+   * SAY what went wrong rather than just that something did. Absent on a fetch that resolved.
+   *
+   * Distinct from `attested`: a feed that answered `[]` fetched fine and is simply unattested, and
+   * an administrator reading the health panel needs those two apart.
+   */
+  fetchError?: string;
 }
 
 /** Fetch every feed once for the deployment. Required feeds still throw; additive ones do not. */
@@ -444,15 +454,118 @@ async function fetchFeeds(): Promise<FeedResult[]> {
       } catch (err) {
         if (required) throw err;
         incrementCounter("stopgap_feed_fetch_failures_total");
+        const message = err instanceof Error ? err.message : String(err);
         console.error(
-          `[poll] ${feed.source} fetch failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          `[poll] ${feed.source} fetch failed: ${message}. ` +
             "The poll continues without that feed. Its existing signals are left alone - they are " +
             "NOT counted as missing, because an outage is not the feed saying the hazard ended.",
         );
-        return { source: feed.source, rows: [], normalize: feed.normalize, attested: false };
+        return {
+          source: feed.source,
+          rows: [],
+          normalize: feed.normalize,
+          attested: false,
+          fetchError: message,
+        };
       }
     }),
   );
+}
+
+/**
+ * Record a REQUIRED feed's fetch failure against every tenant, on the path where the poll itself
+ * does not run.
+ *
+ * Every source is marked `fetch_failed`, not just the one that threw: `fetchFeeds` runs the four
+ * fetches under `Promise.all`, which reports the first rejection and discards which of them it was.
+ * Claiming to know would be a guess, and "the poll could not fetch" is the true statement about all
+ * four for this cycle.
+ *
+ * Best-effort by construction. It runs on a path that is already failing, so a database problem
+ * here must not replace the fetch error the caller is about to rethrow — that error is the one an
+ * operator needs.
+ */
+async function recordFetchOutage(cause: unknown): Promise<void> {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const ranAt = new Date();
+  let orgs: { id: string }[];
+  try {
+    orgs = await withBypassDb(() => listOrganizations());
+  } catch (err) {
+    // Nothing to write against. Its own step rather than part of the loop's guard, because "no
+    // tenant list" and "one tenant's write failed" are different problems with different logs.
+    console.error(
+      `[poll] could not list organizations to record the fetch outage: ` +
+        `${err instanceof Error ? err.message : String(err)}. The fetch failure itself follows.`,
+    );
+    return;
+  }
+  for (const org of orgs) {
+    // PER ORG, INSIDE the loop — the same containment the poll's own tenant loop applies, and for
+    // the same reason. A guard around the whole loop means the first tenant whose write fails takes
+    // every LATER tenant's outage row with it, so a deployment-wide outage would be recorded on an
+    // arbitrary prefix of its hospitals and be invisible on the rest.
+    try {
+      await withOrgDb(org.id, (db) =>
+        recordConnectorRuns(
+          db,
+          org.id,
+          ranAt,
+          POLLED_FEEDS.map(({ feed }) => ({
+            source: feed.source,
+            outcome: "fetch_failed" as const,
+            signalCount: 0,
+            detail,
+          })),
+        ),
+      );
+    } catch (err) {
+      console.error(
+        `[poll] could not record the fetch outage for org ${org.id}: ` +
+          `${err instanceof Error ? err.message : String(err)}. ` +
+          "Its panel shows the previous run; every other tenant is still recorded.",
+      );
+    }
+  }
+}
+
+/**
+ * What each connector did FOR ONE TENANT this poll (ticket 17).
+ *
+ * Pure, and derived from the two things that already exist — the deployment's fetch results and
+ * this tenant's normalized signals — rather than counted a second time as the poll runs. A separate
+ * tally maintained alongside the writes is a tally that eventually disagrees with them.
+ *
+ * `persistError` collapses every source to `persist_failed`: the tenant's write is ONE transaction
+ * covering all four feeds, so when it fails no connector delivered anything to this hospital, and
+ * reporting three of them as `ok` because their fetch worked would be the faked success this
+ * codebase refuses.
+ */
+function connectorRunsForOrg(
+  feeds: FeedResult[],
+  signals: NormalizedSignal[],
+  persistError: string | undefined,
+): ConnectorRunInput[] {
+  return feeds.map((feed) => {
+    const signalCount = signals.filter((s) => s.source === feed.source).length;
+    if (persistError !== undefined) {
+      return {
+        source: feed.source,
+        outcome: "persist_failed" as const,
+        signalCount: 0,
+        detail: persistError,
+      };
+    }
+    if (feed.fetchError !== undefined) {
+      return {
+        source: feed.source,
+        outcome: "fetch_failed" as const,
+        signalCount: 0,
+        detail: feed.fetchError,
+      };
+    }
+    return { source: feed.source, outcome: "ok" as const, signalCount };
+  });
 }
 
 /**
@@ -763,7 +876,18 @@ export async function pollAndOpenCases(): Promise<{
   // `ShortageRecord` path that opens cases, and the normalized-signal path (ticket 06) that
   // persists per tenant. Fetching twice for the two shapes would double every provider call to
   // store the same bytes.
-  const feeds = await fetchFeeds();
+  let feeds: FeedResult[];
+  try {
+    feeds = await fetchFeeds();
+  } catch (err) {
+    // A REQUIRED feed threw, so this poll does not run at all and no org loop below executes.
+    // Record it for every tenant before rethrowing: an openFDA or ASHP outage is the exact case
+    // ticket 17's panel exists to surface, and without this the panel keeps showing the last good
+    // run and only turns quiet 36 hours later — the slow version of the same news. The throw is
+    // preserved, so the activity still fails loudly and Temporal still retries it.
+    await recordFetchOutage(err);
+    throw err;
+  }
   const rowsOf = (source: string) => feeds.find((f) => f.source === source)?.rows ?? [];
   const openFdaRaw = rowsOf(openFdaShortageConnector.source) as OpenFdaResult[];
   const ashpRaw = rowsOf(ashpShortageConnector.source) as AshpEntry[];
@@ -823,9 +947,16 @@ export async function pollAndOpenCases(): Promise<{
       // ON CONFLICT DO UPDATE refuses to touch twice in one statement. Collapsing at the source
       // means they cannot disagree about how many signals this poll saw, and a later consumer
       // inherits the list rather than the bug.
+      //
+      // OUTSIDE the containment below, deliberately. Normalization is pure and depends on the
+      // fetched payloads rather than on this tenant, so a normalizer that throws throws for EVERY
+      // org — containing it here would turn one poll-wide bug into a `persist_failed` row per
+      // tenant and a poll that still reports success, which is the loud failure made quiet.
       const signals = dedupeByKey(
         normalizeForOrg(feeds, { orgId: org.id, fetchedAt: pollTimestamp }),
       );
+      /** The tenant's own WRITE failing — and nothing else. See the alert block below. */
+      let persistError: string | undefined;
       // ONE TENANT'S SIGNAL WRITE MUST NOT STOP THE POLL — the containment the resolution loop
       // below already applies per case, and the reason `fetchFeeds` contains an additive feed's
       // failure. Unguarded, one org's write error means every LATER org gets no case opened this
@@ -864,18 +995,67 @@ export async function pollAndOpenCases(): Promise<{
           // and notified outside it.
           scoredForAlerts = pairScored(signals, persisted, snapshots);
         });
-        // Ticket 12 — decide what is worth telling someone about, and tell them. Outside the write
-        // transaction above on purpose: the sends are network calls, and a transaction held across
-        // one pins a pooled connection for the duration of somebody else's SMTP.
-        await evaluateAndNotify(org.id, scoredForAlerts, pollTimestamp);
       } catch (err) {
         incrementCounter("stopgap_signal_persist_failures_total");
+        persistError = err instanceof Error ? err.message : String(err);
         console.error(
-          `[poll] signal persistence failed for org ${org.id}: ` +
-            `${err instanceof Error ? err.message : String(err)}. ` +
+          `[poll] signal persistence failed for org ${org.id}: ${persistError}. ` +
             "That tenant keeps its previous signals and its miss counters are unchanged, so the " +
             "next poll retries it; case opening for this org and every later one continues.",
         );
+      }
+
+      // Ticket 17 — what each connector did FOR THIS TENANT, so the administrator's health panel
+      // can answer "is my feed quiet" rather than only "has this deployment heard from openFDA".
+      // Its own scope, AFTER the block above and outside it: a run that failed is the one most
+      // worth recording, and writing it inside the transaction that just failed would roll it back
+      // with everything else.
+      try {
+        await withOrgDb(org.id, (db) =>
+          recordConnectorRuns(
+            db,
+            org.id,
+            new Date(pollTimestamp),
+            connectorRunsForOrg(feeds, signals, persistError),
+          ),
+        );
+      } catch (err) {
+        // CONTAINED, like every other per-tenant failure in this loop. Health bookkeeping must not
+        // be the thing that stops a poll: losing one tenant's connector row costs an administrator
+        // a stale panel, while letting it escape costs every LATER org its whole cycle.
+        console.error(
+          `[poll] connector health write failed for org ${org.id}: ` +
+            `${err instanceof Error ? err.message : String(err)}. ` +
+            "The panel shows this tenant's previous run until the next poll succeeds.",
+        );
+      }
+
+      // Ticket 12 — decide what is worth telling someone about, and tell them. Outside the write
+      // transaction on purpose: the sends are network calls, and a transaction held across one pins
+      // a pooled connection for the duration of somebody else's SMTP.
+      //
+      // AND OUTSIDE THE CONNECTOR ROW ABOVE, which is the reason it is its own block rather than
+      // the tail of the write's `try`. `sendChat` and `sendEmail` reject on a webhook timeout or an
+      // SMTP outage — neither of which says anything about whether a FEED delivered. Sharing the
+      // catch marked all four connectors `persist_failed` with `signalCount: 0` after a signal
+      // write that had already committed, so a mail outage rendered four healthy feeds as broken
+      // and put the mail server's error text on the administrator's page.
+      //
+      // Skipped when the write failed, which is what the shared `try` did by construction: there is
+      // nothing to notify about when nothing was scored.
+      if (persistError === undefined) {
+        try {
+          await evaluateAndNotify(org.id, scoredForAlerts, pollTimestamp);
+        } catch (err) {
+          // The SAME counter the shared block incremented, deliberately: this split is about which
+          // failure the connector row reports, not about changing what the metrics say.
+          incrementCounter("stopgap_signal_persist_failures_total");
+          console.error(
+            `[poll] alert evaluation or delivery failed for org ${org.id}: ` +
+              `${err instanceof Error ? err.message : String(err)}. ` +
+              "This tenant's signals and scores are written; the firing is retried next poll.",
+          );
+        }
       }
 
       const { existingWorkflowIds, openCases } = await withOrgDb(org.id, async (db) => {

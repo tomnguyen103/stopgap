@@ -6,12 +6,12 @@ PR batch: A
 
 **Blocked by:** 06, 15
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #15 (batch A); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
-- [ ] A scheduled job removes records past their retention window across the high-volume tables
-- [ ] Retention windows are configurable per record type
-- [ ] Cleanup is tenant-scoped and cannot remove another tenant's rows
-- [ ] Audit chain integrity survives cleanup — anchored history is never orphaned or broken
-- [ ] A cleanup run is recorded, so it is visible whether it ran and what it removed
-- [ ] The job runs on the durable workflow runtime; no second orchestrator is introduced
-- [ ] A cleanup interrupted midway leaves the database consistent
+- [x] A scheduled job removes records past their retention window across the high-volume tables
+- [x] Retention windows are configurable per record type
+- [x] Cleanup is tenant-scoped and cannot remove another tenant's rows
+- [x] Audit chain integrity survives cleanup — anchored history is never orphaned or broken
+- [x] A cleanup run is recorded, so it is visible whether it ran and what it removed
+- [x] The job runs on the durable workflow runtime; no second orchestrator is introduced
+- [x] A cleanup interrupted midway leaves the database consistent

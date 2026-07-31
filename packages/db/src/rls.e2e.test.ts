@@ -102,6 +102,8 @@ const ID = {
   invB: "bbbb0020-0000-0000-0000-000000000020",
   procA: "aaaa0021-0000-0000-0000-000000000021",
   procB: "bbbb0021-0000-0000-0000-000000000021",
+  runA: "aaaa0022-0000-0000-0000-000000000022",
+  runB: "bbbb0022-0000-0000-0000-000000000022",
 } as const;
 
 /**
@@ -203,6 +205,7 @@ async function seedOrg(
     facId: string;
     invId: string;
     procId: string;
+    runId: string;
   },
   suffix: string,
 ) {
@@ -282,6 +285,11 @@ async function seedOrg(
     await tx`insert into procurement_events (id, org_id, facility_id, item_id, supplier_id, ordered_at, quantity)
              values (${ids.procId}, ${orgId}, ${ids.facId}, ${ids.itemId}, ${ids.suppId},
                      '2026-07-01T00:00:00Z', 10)`;
+    // Ticket 17 — one connector run per tenant, seeded from inside this org's own scope like the
+    // rest of the fixture. A connector run is this hospital's OWN account of what a feed did for
+    // it, which is why it is here and not beside `feed_records`.
+    await tx`insert into connector_runs (id, org_id, source, ran_at, outcome, signal_count, last_ok_at)
+             values (${ids.runId}, ${orgId}, 'openfda_shortage', now(), 'ok', 1, now())`;
   });
 }
 
@@ -350,6 +358,21 @@ const TENANT_TABLES: TenantTable[] = [
     updateOthers: (tx) =>
       tx`update alert_events set outcome = 'hijacked' where id = ${ID.alertB} returning id`,
     deleteOthers: (tx) => tx`delete from alert_events where id = ${ID.alertB} returning id`,
+  },
+
+  {
+    name: "connector_runs",
+    readOthers: (tx) => tx`select id from connector_runs where id = ${ID.runB}`,
+    insertAs: (tx, org) =>
+      // A DIFFERENT source from the seeded one, because `connector_runs_source_uq` is
+      // `(org_id, source)`: reusing `openfda_shortage` would collide on the org's own row and the
+      // insert would fail for a reason that has nothing to do with the policy.
+      tx`insert into connector_runs (org_id, source, ran_at, outcome, signal_count)
+         values (${org}, 'ashp_shortage', now(), 'ok', 0)`,
+    readAll: (tx) => tx`select id from connector_runs`,
+    updateOthers: (tx) =>
+      tx`update connector_runs set outcome = 'hijacked' where id = ${ID.runB} returning id`,
+    deleteOthers: (tx) => tx`delete from connector_runs where id = ${ID.runB} returning id`,
   },
 
   {
@@ -625,6 +648,7 @@ beforeAll(async () => {
       facId: ID.facA,
       invId: ID.invA,
       procId: ID.procA,
+      runId: ID.runA,
     },
     "a",
   );
@@ -653,6 +677,7 @@ beforeAll(async () => {
       facId: ID.facB,
       invId: ID.invB,
       procId: ID.procB,
+      runId: ID.runB,
     },
     "b",
   );
@@ -677,6 +702,7 @@ afterAll(async () => {
       await tx`delete from alert_events where org_id = ${org}`;
       await tx`delete from alert_rules where org_id = ${org}`;
       await tx`delete from daily_briefs where org_id = ${org}`;
+      await tx`delete from connector_runs where org_id = ${org}`;
       await tx`delete from risk_score_snapshots where org_id = ${org}`;
       await tx`delete from risk_signals where org_id = ${org}`;
       // Catalog teardown runs child-first: the FKs cascade, but an explicit order keeps the

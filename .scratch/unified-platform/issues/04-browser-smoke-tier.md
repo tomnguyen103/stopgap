@@ -6,12 +6,12 @@ PR batch: B
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
-- [ ] A browser test tier exists and runs on demand, separately from the default offline gate
-- [ ] Signing in as each of the four seeded role users succeeds
-- [ ] Each role lands on its own dashboard
-- [ ] A control for an action above the signed-in role renders disabled and names the required role
-- [ ] The anonymous demo path reaches the viewer dashboard and cannot mutate
-- [ ] The tier asserts none of: table sorting, filtering, searching or pagination — those stay covered by the pure list-state tests
-- [ ] The default gate remains fully offline and does not require a browser
+- [x] A browser test tier exists and runs on demand, separately from the default offline gate
+- [x] Signing in as each of the four seeded role users succeeds
+- [x] Each role lands on its own dashboard
+- [x] A control for an action above the signed-in role renders disabled and names the required role
+- [x] The anonymous demo path reaches the viewer dashboard and cannot mutate
+- [x] The tier asserts none of: table sorting, filtering, searching or pagination — those stay covered by the pure list-state tests
+- [x] The default gate remains fully offline and does not require a browser

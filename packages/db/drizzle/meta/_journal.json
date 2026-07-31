@@ -155,6 +155,13 @@
       "when": 1785425221426,
       "tag": "0021_peaceful_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785462712725,
+      "tag": "0022_breezy_lord_tyger",
+      "breakpoints": true
     }
   ]
 }

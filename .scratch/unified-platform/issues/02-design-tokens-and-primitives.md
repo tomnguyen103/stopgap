@@ -6,11 +6,11 @@ PR batch: B
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #34 (batch B); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
-- [ ] The existing palette is the token source; no second palette is introduced and no colour is hard-coded beside a token
-- [ ] Primitives exist for badge, button, card, input and table, all consuming tokens
-- [ ] One existing console page is rebuilt on the primitives and is visually unchanged, proving old and new styling coexist without drift
-- [ ] Every other existing page continues to render correctly against the current stylesheet, untouched
-- [ ] Severity styling resolves from the same tokens the existing severity classes use, so a critical case looks identical either way
-- [ ] The build gate stays green and the production bundle does not regress materially
+- [x] The existing palette is the token source; no second palette is introduced and no colour is hard-coded beside a token
+- [x] Primitives exist for badge, button, card, input and table, all consuming tokens
+- [x] One existing console page is rebuilt on the primitives and is visually unchanged, proving old and new styling coexist without drift
+- [x] Every other existing page continues to render correctly against the current stylesheet, untouched
+- [x] Severity styling resolves from the same tokens the existing severity classes use, so a critical case looks identical either way
+- [x] The build gate stays green and the production bundle does not regress materially

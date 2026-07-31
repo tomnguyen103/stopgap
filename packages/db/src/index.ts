@@ -157,6 +157,13 @@ export {
   type DailyBriefInput,
 } from "./briefs.js";
 export {
+  recordConnectorRuns,
+  listConnectorRuns,
+  CONNECTOR_RUN_OUTCOMES,
+  type ConnectorRunOutcome,
+  type ConnectorRunInput,
+} from "./connector-runs.js";
+export {
   dedupeByKey,
   upsertSignals,
   bumpSignalFeedMiss,
@@ -233,6 +240,7 @@ export type {
   ShadowRunRow,
   NewShadowRunRow,
   DailyBriefRow,
+  ConnectorRunRow,
 } from "./schema.js";
 export {
   BURN_WINDOW_DAYS,

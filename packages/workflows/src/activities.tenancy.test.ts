@@ -44,6 +44,14 @@ const counters: string[] = [];
 const writtenSignals: { orgId: string; dedupeKeys: string[] }[] = [];
 /** Orgs whose sweep should throw, so the containment assertion has something to contain. */
 const failingSweepOrgs = new Set<string>();
+/** Orgs whose signal write should throw — the `persist_failed` connector outcome (ticket 17). */
+const failingSignalOrgs = new Set<string>();
+/** Orgs whose ALERT evaluation should throw — which must NOT read as a connector failure. */
+const failingAlertOrgs = new Set<string>();
+/** Orgs whose connector-health write should throw, so containment has something to contain. */
+const failingConnectorWriteOrgs = new Set<string>();
+/** Set to make the REQUIRED openFDA fetch reject, the path where the poll never runs. */
+let requiredFetchError: string | null = null;
 /** Retention sweeps performed (ticket 18) — which org, at which instant, under which windows. */
 const sweptOrgs: { orgId: string; at: string; windows: Record<string, number | null> }[] = [];
 /** The sources each org's miss sweep was scoped to, so an outage cannot retire live signals. */
@@ -52,6 +60,12 @@ const missSweeps: { orgId: string; sources: string[] }[] = [];
 const writtenSnapshots: { orgId: string; count: number; scorerVersion: string | undefined }[] = [];
 /** Evidence artifacts written per org (ticket 09) — a pointer and a fingerprint, never content. */
 const writtenEvidence: { orgId: string; entries: Record<string, unknown>[] }[] = [];
+/** Connector runs written per org (ticket 17) — the per-tenant half of feed health. */
+const writtenConnectorRuns: {
+  orgId: string;
+  ranAt: string;
+  runs: { source: string; outcome: string; signalCount: number; detail?: string }[];
+}[] = [];
 
 vi.mock("@stopgap/db", () => ({
   withOrgDb: (orgId: string, fn: (db: unknown) => Promise<unknown>) => {
@@ -79,12 +93,27 @@ vi.mock("@stopgap/db", () => ({
       return row ? [{ ...row, orgId }] : [];
     }),
   upsertSignals: async (_db: unknown, orgId: string, signals: { dedupeKey: string }[]) => {
+    // BEFORE the recorder, not after: a write that threw did not write, and a test fixture that
+    // records it anyway would let a real regression pass.
+    if (failingSignalOrgs.has(orgId)) throw new Error("deadlock detected");
     writtenSignals.push({ orgId, dedupeKeys: signals.map((s) => s.dedupeKey) });
     return signals.map((s, i) => ({ id: `sig-${orgId}-${i}`, dedupeKey: s.dedupeKey }));
   },
   recordEvidence: async (_db: unknown, orgId: string, entries: Record<string, unknown>[]) => {
     writtenEvidence.push({ orgId, entries });
     return entries.length;
+  },
+  // Ticket 17 — the per-tenant connector row. Recorded per org so the assertions below can show
+  // that a poll writes one set per tenant, and that a tenant whose write failed still gets a row
+  // saying so.
+  recordConnectorRuns: async (
+    _db: unknown,
+    orgId: string,
+    ranAt: Date,
+    runs: { source: string; outcome: string; signalCount: number; detail?: string }[],
+  ) => {
+    if (failingConnectorWriteOrgs.has(orgId)) throw new Error("connector write refused");
+    writtenConnectorRuns.push({ orgId, ranAt: ranAt.toISOString(), runs });
   },
   // Ticket 16 — the poll matches each signal against the tenant's catalog before scoring. Stubbed
   // to "this tenant has no catalog", which is the state every existing assertion here was written
@@ -137,7 +166,10 @@ vi.mock("@stopgap/db", () => ({
   totalRemoved: (counts: Record<string, number>) =>
     Object.values(counts).reduce((sum, n) => sum + n, 0),
   RETAINED_FOREVER: null,
-  listAlertRules: async () => [],
+  listAlertRules: async (_db: unknown, orgId: string) => {
+    if (failingAlertOrgs.has(orgId)) throw new Error("smtp relay unreachable");
+    return [];
+  },
   lastFiredByRule: async () => ({}),
   recordAlertEvents: async () => [],
   recordAlertDeliveries: async () => undefined,
@@ -230,6 +262,9 @@ vi.mock("@stopgap/ingest", () => ({
     source: "openfda_shortage",
     fetch: async () => {
       openFdaCalls += 1;
+      // openFDA shortages are a REQUIRED feed, so a rejection here is the path where `fetchFeeds`
+      // rethrows and the per-org loop never runs at all.
+      if (requiredFetchError !== null) throw new Error(requiredFetchError);
       return [{ generic_name: "Heparin" }];
     },
     normalize: (_raw: unknown, ctx: { orgId: string; fetchedAt: string }) =>
@@ -306,12 +341,17 @@ beforeEach(() => {
   caseRows.clear();
   openMonitoringCases.clear();
   unsignalableWorkflowIds.clear();
+  failingSignalOrgs.clear();
+  failingAlertOrgs.clear();
+  failingConnectorWriteOrgs.clear();
+  requiredFetchError = null;
   signalledWorkflowIds.length = 0;
   counters.length = 0;
   writtenSignals.length = 0;
   missSweeps.length = 0;
   writtenSnapshots.length = 0;
   writtenEvidence.length = 0;
+  writtenConnectorRuns.length = 0;
   sweptOrgs.length = 0;
   openFdaCalls = 0;
 });
@@ -434,6 +474,103 @@ describe("the scheduled feed poll (no session, no case)", () => {
     ]);
     expect(entry.type).toBe("provider_record");
     expect(JSON.stringify(entry)).not.toMatch(/payload|"raw"|body/i);
+  });
+
+  /**
+   * TICKET 17 — the per-tenant half of feed health.
+   *
+   * `feed_records` is deployment-wide and only the shortage connectors write it, so the
+   * administrator's panel could say the deployment had heard from openFDA and nothing about whether
+   * THIS hospital got signals out of that poll, or about the recall feeds at all. These two assert
+   * the row that closes both gaps.
+   */
+  it("records what each connector did FOR EACH TENANT, not just for the deployment", async () => {
+    await pollAndOpenCases();
+    expect(writtenConnectorRuns.map((w) => w.orgId)).toEqual([ORG_A, ORG_B]);
+    const runs = writtenConnectorRuns[0]?.runs ?? [];
+    // EVERY polled feed, every poll — including the ones that returned nothing. A connector with no
+    // row is indistinguishable from one that was never asked, and that is the reading a silent feed
+    // sits exactly between.
+    expect(runs.map((r) => r.source).sort()).toEqual([
+      "ashp_shortage",
+      "openfda_device_recall",
+      "openfda_drug_recall",
+      "openfda_shortage",
+    ]);
+    expect(runs.every((r) => r.outcome === "ok")).toBe(true);
+    // Only openFDA shortages returned a row in this fixture, and the count is THIS tenant's.
+    expect(runs.find((r) => r.source === "openfda_shortage")?.signalCount).toBe(1);
+    expect(runs.find((r) => r.source === "ashp_shortage")?.signalCount).toBe(0);
+    // One instant for the whole poll, the same one every other per-tenant write in it uses.
+    expect(new Set(writtenConnectorRuns.map((w) => w.ranAt)).size).toBe(1);
+  });
+
+  it("still records a row for a tenant whose signal write failed, saying which failure it was", async () => {
+    failingSignalOrgs.add(ORG_A);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await pollAndOpenCases();
+    logged.mockRestore();
+
+    const a = writtenConnectorRuns.find((w) => w.orgId === ORG_A);
+    // ALL FOUR, not three-ok-and-one-failed: the tenant's write is one transaction across every
+    // feed, so when it fails no connector delivered anything to this hospital. Reporting the three
+    // whose fetch worked as `ok` would be the faked success this codebase refuses.
+    expect(a?.runs.every((r) => r.outcome === "persist_failed")).toBe(true);
+    expect(a?.runs.every((r) => r.signalCount === 0)).toBe(true);
+    expect(a?.runs[0]?.detail).toContain("deadlock detected");
+    // Containment: the other tenant's poll is untouched by it.
+    const b = writtenConnectorRuns.find((w) => w.orgId === ORG_B);
+    expect(b?.runs.every((r) => r.outcome === "ok")).toBe(true);
+  });
+
+  it("records a REQUIRED feed's outage against every tenant, and still fails the poll", async () => {
+    // The gap the panel was blind to. `fetchFeeds` rethrows for a required feed BEFORE the per-org
+    // loop, so an openFDA outage used to write no row for anybody — and the panel went on showing
+    // the last good run until it aged into "quiet" 36 hours later.
+    requiredFetchError = "openFDA 503";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(pollAndOpenCases()).rejects.toThrow("openFDA 503");
+    logged.mockRestore();
+
+    expect(writtenConnectorRuns.map((w) => w.orgId)).toEqual([ORG_A, ORG_B]);
+    for (const written of writtenConnectorRuns) {
+      // ALL FOUR sources, not just openFDA: `Promise.all` reports the first rejection and discards
+      // which of them it was, so "the poll could not fetch" is the only true statement available.
+      expect(written.runs).toHaveLength(4);
+      expect(written.runs.every((r) => r.outcome === "fetch_failed")).toBe(true);
+      expect(written.runs[0]?.detail).toContain("openFDA 503");
+    }
+  });
+
+  it("keeps recording the outage for later tenants when one tenant's write fails", async () => {
+    // The containment CodeRabbit caught: a `try` around the whole loop meant the first tenant whose
+    // write failed took every LATER tenant's row with it, so a deployment-wide outage would be
+    // recorded on an arbitrary prefix of the hospitals and be invisible on the rest.
+    requiredFetchError = "openFDA 503";
+    failingConnectorWriteOrgs.add(ORG_A);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(pollAndOpenCases()).rejects.toThrow("openFDA 503");
+    logged.mockRestore();
+
+    expect(writtenConnectorRuns.map((w) => w.orgId)).toEqual([ORG_B]);
+  });
+
+  it("does NOT blame the connectors when alert delivery is what failed", async () => {
+    // THE FALSE ALARM THIS SPLIT EXISTS TO PREVENT. `sendChat` and `sendEmail` are network calls,
+    // and they used to share the signal write's catch — so an SMTP outage, arriving AFTER a signal
+    // write that had already committed, marked all four connectors `persist_failed` with
+    // `signalCount: 0` and put the mail server's error text on the administrator's page. Four
+    // healthy feeds rendered as broken is worse than no panel.
+    failingAlertOrgs.add(ORG_A);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await pollAndOpenCases();
+    logged.mockRestore();
+
+    const a = writtenConnectorRuns.find((w) => w.orgId === ORG_A);
+    expect(a?.runs.every((r) => r.outcome === "ok")).toBe(true);
+    expect(a?.runs.every((r) => r.detail === undefined)).toBe(true);
+    // The signals really were written, which is what makes `ok` the honest answer.
+    expect(writtenSignals.map((w) => w.orgId)).toContain(ORG_A);
   });
 
   it("sweeps misses only for feeds that returned something, never for a silent one", async () => {

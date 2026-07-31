@@ -6,12 +6,12 @@ PR batch: A
 
 **Blocked by:** 07, 15
 
-**Status:** ready-for-agent
+**Status:** DONE — shipped in #15 (batch A); every criterion above re-verified against the tree on 2026-07-31 during the programme closeout (#38), which is when these boxes were ticked. They were never a status signal before that.
 
-- [ ] Signals, scores and catalog resources are readable through the versioned API
-- [ ] Access uses the existing scoped-key mechanism, and the organization derives from the presented key
-- [ ] A key lacking the required scope is refused
-- [ ] A key cannot read another organization's data
-- [ ] The generated API description covers the new resources well enough to generate a working client
-- [ ] Responses follow the existing shape and error conventions
-- [ ] List endpoints support the same filtering and pagination vocabulary as the console
+- [x] Signals, scores and catalog resources are readable through the versioned API
+- [x] Access uses the existing scoped-key mechanism, and the organization derives from the presented key
+- [x] A key lacking the required scope is refused
+- [x] A key cannot read another organization's data
+- [x] The generated API description covers the new resources well enough to generate a working client
+- [x] Responses follow the existing shape and error conventions
+- [x] List endpoints support the same filtering and pagination vocabulary as the console
