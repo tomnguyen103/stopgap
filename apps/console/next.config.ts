@@ -16,13 +16,17 @@ const nextConfig: NextConfig = {
    *
    * `api/v1/docs` already names the missing CSP as a known hole, and this rebuild had to be
    * CSP-compatible anyway — which is why it belongs in the same programme rather than in a
-   * separate security ticket. Every style in the console is a stylesheet or a custom property;
-   * nothing sets `style=` on an element, which is what makes `style-src 'self'` shippable.
+   * separate security ticket.
    *
-   * `'unsafe-inline'` for script-src is Next's requirement, not a choice: the App Router inlines
-   * the Flight payload and the bootstrap script. Removing it needs per-request nonces through
-   * middleware, which makes every route dynamic — a real cost on a console whose static shell is
-   * deliberate. Recorded here rather than left implicit.
+   * `'unsafe-inline'` is Next's requirement in BOTH `script-src` and `style-src`, not a choice.
+   * The App Router inlines the Flight payload and the bootstrap script, and `next/font` injects
+   * an inline `<style>` for its `@font-face` block. Removing either needs per-request nonces
+   * through middleware, which makes every route dynamic — a real cost on a console whose static
+   * shell is deliberate.
+   *
+   * What this rebuild DID buy is that no element carries a `style=` attribute (asserted by
+   * `design-system-adoption.test.ts`), so tightening `style-src` later is a config change rather
+   * than a sweep through the markup.
    *
    * HSTS is NOT set here. It belongs at the TLS terminator (Caddy): a header promising HTTPS,
    * served over a connection that may be plain HTTP behind a proxy, is a promise the application

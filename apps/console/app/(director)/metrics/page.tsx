@@ -6,20 +6,23 @@ import { Card, type CardState } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
-/** How a verdict tints its tile's Ledger Rail. `unknown` gets no rail: it is not a failure. */
-const VERDICT_STATE: Record<string, CardState | undefined> = {
-  met: "ok",
-  missed: "critical",
-  unknown: undefined,
-  none: undefined,
-};
+type Verdict = "met" | "missed" | "unknown" | "none";
 
-/** The same verdict in words, because colour never carries meaning alone. */
-const VERDICT_LABEL: Record<string, string> = {
-  met: "met",
-  missed: "missed",
-  unknown: "not enough data yet",
-  none: "",
+/**
+ * How each verdict reads — as a rail tint AND as a word, in one place.
+ *
+ * One table rather than two parallel `Record`s: a fifth verdict added to two maps is a fifth
+ * verdict someone forgets in one of them, and a `Record<Verdict, …>` makes that a type error
+ * rather than an `undefined` at render.
+ *
+ * `unknown` gets no rail. It is not a failure — the deployment simply has no data yet — and
+ * tinting it would make an absent denominator look like a missed target.
+ */
+const VERDICTS: Record<Verdict, { state: CardState | undefined; label: string }> = {
+  met: { state: "ok", label: "met" },
+  missed: { state: "critical", label: "missed" },
+  unknown: { state: undefined, label: "not enough data yet" },
+  none: { state: undefined, label: "" },
 };
 
 function pct(value: number | undefined): string {
@@ -65,7 +68,7 @@ export default async function MetricsPage() {
     metric: string;
     value: string;
     target: string;
-    verdict: "met" | "missed" | "unknown" | "none";
+    verdict: Verdict;
     note: string;
   }[] = [
     {
@@ -132,9 +135,9 @@ export default async function MetricsPage() {
         the target column and the measurement column the same size, so nothing on the page is the
         headline — and the number IS the headline. Display-32 tabular, label beneath in Micro.
       */}
-      <div className="ds-figures">
+      <div className="ds-figures" role="group" aria-label="Programme metrics against target">
         {rows.map((row) => (
-          <Card key={row.metric} state={VERDICT_STATE[row.verdict]} className="ds-figure">
+          <Card key={row.metric} state={VERDICTS[row.verdict].state} className="ds-figure">
             <p className="ds-figure__value">{row.value}</p>
             <p className="ds-figure__label">{row.metric}</p>
             <p className="ds-figure__target">
@@ -144,7 +147,7 @@ export default async function MetricsPage() {
               {row.verdict === "none" ? null : (
                 <>
                   {" · "}
-                  <b>{VERDICT_LABEL[row.verdict]}</b>
+                  <b>{VERDICTS[row.verdict].label}</b>
                 </>
               )}
             </p>

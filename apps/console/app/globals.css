@@ -391,8 +391,11 @@ a {
   flex: none;
   fill: none;
   stroke: currentColor;
-  /* 1.25px on a 24px grid, round caps and joins — the Phosphor Light specification §8 names. */
-  stroke-width: 1.25;
+  /*
+    §8 asks for a 1.25px stroke at 20px. The paths are drawn on a 24-unit grid, so a `stroke-width`
+    of 1.25 would be scaled down with them and paint ~1.04px. 1.5 on the grid is 1.25 on screen.
+  */
+  stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -519,10 +522,11 @@ a {
   }
   /*
     Hidden from the eye, present for everything else. `display: none` would take the item's
-    accessible NAME with it and leave a link announced as a picture, so the label is clipped
-    instead — the same technique as `.ds-sr-only`, applied at one breakpoint.
+    accessible NAME with it and leave a link announced as a picture, so both are CLIPPED instead —
+    `.ds-sr-only`'s technique, in one rule rather than restated per selector.
   */
-  .rail__label {
+  .rail__label,
+  .rail__wordmark {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -539,15 +543,6 @@ a {
     hospital's records" — is the last thing that may become unreachable, so it keeps its name in
     the accessibility tree at every width.
   */
-  .rail__wordmark {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-  }
   .active-org-badge {
     justify-content: center;
     width: 40px;
@@ -599,7 +594,8 @@ a {
     justify-content: flex-start;
     padding: var(--space-2) var(--space-3);
   }
-  .rail__label {
+  .rail__label,
+  .rail__wordmark {
     position: static;
     width: auto;
     height: auto;
@@ -608,13 +604,7 @@ a {
     clip-path: none;
     text-overflow: ellipsis;
   }
-  .rail__wordmark {
-    position: static;
-    width: auto;
-    height: auto;
-    margin: 0;
-    clip-path: none;
-  }
+
   .active-org-badge {
     justify-content: flex-start;
     width: auto;
@@ -1290,9 +1280,15 @@ h2 {
 .ds-table tbody tr[data-state="ok"]:hover {
   --rail: var(--status-ok);
 }
-/* Rows with no state show the hover rail; the ones above keep their own. */
-.ds-table tr[data-state] td:first-child::before,
-.ds-table tbody tr:hover td:first-child::before {
+/*
+  EVERY row carries the rail, at rest as well as on hover. §7 says the row's rail "tints from
+  `--line-subtle` to `--line-default`", and a rail that only exists while hovered does not tint —
+  it appears, which is a different and noisier thing on a 400-row queue.
+
+  The inset is `--space-2` rather than the card's `--space-3`: a 40px row inset 12px top and
+  bottom leaves a 16px mark, which reads as a dash rather than a rail.
+*/
+.ds-table tbody tr td:first-child::before {
   content: "";
   position: absolute;
   left: 0;
@@ -1300,7 +1296,7 @@ h2 {
   bottom: var(--space-2);
   width: 2px;
   border-radius: var(--radius-pill);
-  background: var(--rail, transparent);
+  background: var(--rail, var(--line-subtle));
   transition: background var(--dur-fast) var(--ease-out);
 }
 .ds-table td:first-child {
@@ -1381,7 +1377,8 @@ h2 {
   max-width: 96px;
   height: 20px;
 }
-.ds-figure__target {
+.ds-figure__target,
+.ds-figure__caption {
   margin: var(--space-2) 0 0;
   color: var(--text-subtle);
   font-size: var(--type-small);

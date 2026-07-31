@@ -16,6 +16,30 @@
  * differently on Windows, macOS and Android, and is read aloud by a screen reader as whatever
  * Unicode named it.
  */
+/**
+ * Every id the sprite defines.
+ *
+ * A union and not `string`: a typo in a nav definition would otherwise render an empty `<use>`
+ * silently, with no type error and nothing on screen — and the icon is the ONLY visible label at
+ * the 768–1023 breakpoint.
+ */
+export type IconName =
+  | "overview"
+  | "queue"
+  | "protocols"
+  | "shadow"
+  | "oversight"
+  | "alerts"
+  | "approvals"
+  | "brief"
+  | "metrics"
+  | "setup"
+  | "catalog"
+  | "users"
+  | "keys"
+  | "orgs"
+  | "audit";
+
 export function IconSprite() {
   return (
     <svg
@@ -101,7 +125,7 @@ export function IconSprite() {
  * breakpoint the label is still in the DOM — visually hidden, not removed — so nothing depends on
  * the picture to be readable.
  */
-export function Icon({ name }: { name: string }) {
+export function Icon({ name }: { name: IconName }) {
   return (
     <svg className="ds-icon" aria-hidden="true" focusable="false">
       <use href={`#i-${name}`} />

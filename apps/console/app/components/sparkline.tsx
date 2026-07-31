@@ -5,16 +5,16 @@
  * the adapter that would wire a library into a server component, and it ships no JavaScript for a
  * picture that never changes after render.
  *
- * IT IS NOT THE FIGURE'S OWN HISTORY, and the caption says so. "Open cases" is a level — how many
- * are open right now — while `DailyCount.casesOpened` is a flow, how many opened each day. Drawing
- * a flow under a level and letting the reader assume they are the same series is the most common
- * way a sparkline lies. The `label` names which series this is.
+ * IT IS NOT THE FIGURE'S OWN HISTORY, and the caller's caption says so. "Open cases" is a level —
+ * how many are open right now — while `DailyCount.casesOpened` is a flow, how many opened each
+ * day. Drawing a flow under a level and letting the reader assume they are the same series is the
+ * most common way a sparkline lies.
  *
- * `aria-hidden`, because the caption beneath the figure already carries the same range in words.
- * A second announcement of the same fact is noise to a screen reader, and a fourteen-point
- * polyline has nothing to announce that the range does not.
+ * `aria-hidden` and NO `title`: the caption beneath the figure already carries the same words, so
+ * a tooltip and an announcement would both repeat it. A fourteen-point polyline has nothing to
+ * say that its caption does not.
  */
-export function Sparkline({ points, label }: { points: number[]; label: string }) {
+export function Sparkline({ points }: { points: number[] }) {
   if (points.length < 2) return null;
 
   const width = 96;
@@ -29,7 +29,7 @@ export function Sparkline({ points, label }: { points: number[]; label: string }
     .join(" ");
 
   return (
-    <span className="ds-spark" title={label}>
+    <span className="ds-spark">
       <svg viewBox={`0 0 ${width} ${height}`} aria-hidden="true" focusable="false">
         <path d={path} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
       </svg>

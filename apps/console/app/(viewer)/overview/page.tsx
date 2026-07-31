@@ -5,6 +5,7 @@ import { resolvePrincipal } from "../../lib/principal";
 import { requireGroup } from "../../lib/group-guard";
 import { FilterChips } from "../../components/filter-chips";
 import { sortHead } from "../../components/sort-link";
+import { Figure } from "../../components/figure";
 import { Badge, Button, Card, Table } from "../../components/ui";
 import {
   bandSeverity,
@@ -242,15 +243,5 @@ export default async function OverviewPage({
         </nav>
       </Card>
     </>
-  );
-}
-
-function Figure({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="ds-figure">
-      <div className="ds-figure__value">{value}</div>
-      {/* §6's second-order mark: label BENEATH in Micro uppercase, not a `.sub` caption. */}
-      <div className="ds-figure__label">{label}</div>
-    </div>
   );
 }

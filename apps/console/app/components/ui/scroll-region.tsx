@@ -25,8 +25,12 @@ export function ScrollRegion({ label, children }: { label: string; children: Rea
       setScrollable(node.scrollWidth > node.clientWidth);
     };
     measure();
+    // The CONTAINER and its content. A table whose columns grow without the container resizing
+    // starts scrolling with no size change on the box being watched, and the tab stop would then
+    // be wrong until the next window resize.
     const observer = new ResizeObserver(measure);
     observer.observe(node);
+    if (node.firstElementChild) observer.observe(node.firstElementChild);
     return () => {
       observer.disconnect();
     };

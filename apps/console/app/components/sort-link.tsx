@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { sortable, type SortableHead } from "./ui/table";
+import { sortable, type SortableHead } from "./ui";
 
 /**
  * A sortable column heading.

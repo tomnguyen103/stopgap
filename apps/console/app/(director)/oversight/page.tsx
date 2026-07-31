@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getEnv } from "@stopgap/core";
 import { ladderPosition } from "@stopgap/workflows";
 
-import { Sparkline } from "../../components/sparkline";
+import { Figure } from "../../components/figure";
 import { TrendChart } from "../../components/trend-chart";
 import { getOversight, getShadowDashboard } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
@@ -222,37 +222,5 @@ export default async function OversightPage() {
         )}
       </Card>
     </>
-  );
-}
-
-/**
- * The second-order mark (§6): the number gets the largest type on the page and the label sits
- * beneath it in Micro uppercase — not a 28px figure over a 13px sentence, which reads as a caption
- * under a heading rather than as a measurement.
- */
-function Figure({
-  label,
-  value,
-  spark,
-  sparkLabel,
-}: {
-  label: string;
-  value: number;
-  /** A 14-day series, when one exists for this figure. */
-  spark?: number[];
-  /** Names which series the sparkline draws — it is rarely the figure's own history. */
-  sparkLabel?: string;
-}) {
-  return (
-    <div className="ds-figure">
-      <div className="ds-figure__value">{value}</div>
-      <div className="ds-figure__label">{label}</div>
-      {spark && sparkLabel ? (
-        <>
-          <Sparkline points={spark} label={sparkLabel} />
-          <p className="ds-figure__target">{sparkLabel}</p>
-        </>
-      ) : null}
-    </div>
   );
 }
