@@ -19,9 +19,15 @@ PostgresError: relation "connector_runs" does not exist
       Tests  200 skipped (200)
 ```
 
-After migration 0022 the tier is green at 249 (was 241): the eight new tests are the four
-cross-tenant probes — SELECT, INSERT `WITH CHECK`, UPDATE, DELETE — plus the unscoped and
-recycled-connection reads, run for the new table.
+After migration 0022 the isolation suite is green at 200 tests, up eight: the four cross-tenant
+probes for the new table — SELECT, INSERT `WITH CHECK`, UPDATE, DELETE — plus the unscoped and
+recycled-connection reads, where SELECT and UPDATE each contribute two cases rather than one.
+
+`migrations.e2e.test.ts` asserts the other half, under the OWNER: that `connector_runs` arrives with
+row-level security FORCED, not merely enabled. `rls.e2e.test.ts` cannot answer that — it runs as
+`stopgap_app`, which the policy applies to either way.
+
+Whole tier `pnpm test:rls` 254 passed; `pnpm gate` green at 719.
 
 - [x] The administrator lands on a setup checklist and system health
 - [x] Catalog files can be uploaded from the dashboard, with per-row failures shown clearly enough to correct the file
