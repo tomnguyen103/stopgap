@@ -1,10 +1,12 @@
 /*
   Ticket 02 — the console's design system, in three layers.
 
-  PRIMITIVE (below) is the palette this console has always had. It is NOT re-picked here: a second
-  palette beside the first is how a codebase ends up with two blues that are almost the same, and
-  every page rendered before this ticket still reads these exact variables. Nothing is renamed,
-  nothing is removed.
+  PRIMITIVE (below) is the palette. The chrome's three greys were replaced in P1.1 by an ordered
+  ink ramp and a platinum text ramp; the SIGNAL ramp — the four severity steps and two status
+  states — was not touched, because those hexes are clinically load-bearing and already checked
+  for protan/deutan separation. The old primitive names survive as aliases onto the new ramps
+  rather than as a second palette beside the first, which is how a codebase ends up with two
+  blues that are almost the same.
 
   SEMANTIC names the JOB a colour does — "the edge of a surface", "text that recedes" — so a
   primitive can be retuned in one place without a search for every literal that meant it.
@@ -14,38 +16,101 @@
   a sweep. Every layer aliases the layer above it; no layer introduces a colour of its own.
 */
 :root {
-  /* ---- Primitive: the existing palette, unchanged ---------------------------------------- */
-  --bg: #0b0e14;
-  --panel: #141a24;
-  --line: #232c3a;
-  --text: #e6edf3;
-  --muted: #8b98a9;
-  --accent: #4da3ff;
+  /*
+    ---- Primitive: ink -----------------------------------------------------------------------
+    Six steps of a faintly cool near-black, ordered by lightness so that "sits on top of" and
+    "is lighter than" are the same statement. Depth in a dark UI is read from where light catches
+    an edge; a surface that is meant to sit on another and is darker than it swaps places
+    optically however correct its hex is on its own. The previous three greys had exactly that
+    inversion — a hovered table row (#10151d) was darker than the card it sat inside (#141a24).
+  */
+  --ink-000: #04060a; /* page floor               */
+  --ink-050: #080b10; /* recessed: input well     */
+  --ink-100: #0d1117; /* raised: card, banner     */
+  --ink-150: #12171f; /* overlay: drawer, popover */
+  --ink-200: #171d26; /* hover fill on raised     */
+  --ink-300: #202836; /* pressed / selected fill  */
+
+  /*
+    ---- Primitive: platinum ------------------------------------------------------------------
+    The text ramp, and — from ticket P1.5 — the primary action fill. Four steps rather than two,
+    so "strong secondary" and "subtle" stop being the same colour.
+  */
+  --pt-900: #f2f5f9; /* primary text            */
+  --pt-700: #c6ceda; /* strong secondary text   */
+  --pt-500: #929dad; /* subtle text             */
+  --pt-300: #5f6976; /* faint text, disabled    */
+
+  /*
+    ---- Primitive: hairlines -----------------------------------------------------------------
+    Alpha over whatever is beneath, never an opaque grey. An opaque #232c3a border reads correctly
+    on the page floor and disappears against a card; the same alpha reads on both, so a card on a
+    card still separates.
+  */
+  --line-subtle: rgb(255 255 255 / 0.06);
+  --line-default: rgb(255 255 255 / 0.1);
+  --line-strong: rgb(255 255 255 / 0.18);
+  --line-highlight: rgb(255 255 255 / 0.05); /* the inset top edge that makes a surface raised */
+
+  /*
+    ---- Primitive: the signal ramp -----------------------------------------------------------
+    NOT re-picked. These hexes are clinically load-bearing, already checked for protan/deutan
+    separation, and asserted by a suite. What changes around them is that nothing else on screen
+    is allowed to be saturated.
+  */
   --crit: #ff6b6b;
   --high: #ffa94d;
   --mod: #ffd43b;
   --low: #74c0fc;
   --ok: #51cf66;
-  /* Already in use below as literals before this ticket; named here so they stop being literals. */
-  --sunken: #0d1219;
-  --row-hover: #10151d;
-  --on-accent: #06121f;
+  /* Retired in P1.5, when `--interactive` moves to platinum. Still read by legacy rules below. */
+  --accent: #4da3ff;
   --tint-info: #12202c;
   --tint-warn: #2a1e12;
   --tint-warn-hover: #35260f;
+
+  /*
+    The palette's previous primitive names, repointed at the ramps above rather than deleted. Every
+    hand-written page rule still reads these, so repointing moves the whole console onto the new
+    palette in one edit instead of a sweep — and P2.4 deletes the rules, not the names.
+  */
+  --bg: var(--ink-000);
+  --panel: var(--ink-100);
+  --line: var(--line-default);
+  --text: var(--pt-900);
+  --muted: var(--pt-500);
+  --sunken: var(--ink-050);
+  --row-hover: var(--ink-200);
+  --on-accent: var(--ink-000);
 
   /* ---- Semantic: what a colour is FOR ------------------------------------------------------ */
   --surface-page: var(--bg);
   --surface-raised: var(--panel);
   --surface-sunken: var(--sunken);
   --surface-hover: var(--row-hover);
+  --surface-overlay: var(--ink-150);
+  --surface-selected: var(--ink-300);
   /* The dimming behind a modal surface. A colour, so it belongs to the token layer. */
   --surface-scrim: rgb(0 0 0 / 0.55);
+  --border-subtle: var(--line-subtle);
   --border-default: var(--line);
+  --border-strong: var(--line-strong);
   --text-default: var(--text);
+  --text-secondary: var(--pt-700);
   --text-subtle: var(--muted);
+  --text-faint: var(--pt-300);
   --text-on-accent: var(--on-accent);
   --interactive: var(--accent);
+
+  /*
+    ---- Semantic: elevation ------------------------------------------------------------------
+    A hairline plus a 1px inner top highlight, not a heavier border and not a drop shadow. On a
+    #04060a floor a black shadow is invisible and a soft one is mud; what actually reads as raised
+    is the edge the light catches. The overlay keeps a real cast shadow because it has to separate
+    from arbitrary content beneath it, not from a known surface.
+  */
+  --elev-raised: inset 0 1px 0 var(--line-highlight);
+  --elev-overlay: inset 0 1px 0 var(--line-highlight), 0 16px 48px -12px rgb(0 0 0 / 0.7);
   --severity-critical: var(--crit);
   --severity-high: var(--high);
   --severity-moderate: var(--mod);
@@ -228,6 +293,7 @@ tr:hover td {
   border-radius: 10px;
   padding: 18px 20px;
   margin-bottom: 16px;
+  box-shadow: var(--elev-raised);
 }
 .kv {
   display: grid;
@@ -345,6 +411,7 @@ button.danger {
   font-size: 14px;
   border: 1px solid var(--line);
   background: var(--panel);
+  box-shadow: var(--elev-raised);
 }
 .banner.ok {
   border-color: var(--ok);
@@ -622,6 +689,7 @@ button.danger {
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
   margin-bottom: var(--space-7);
+  box-shadow: var(--elev-raised);
 }
 /* Matches the global `h2` rule exactly — a card rebuilt on the primitive must not shift. */
 .ds-card__title {
@@ -732,6 +800,7 @@ button.danger {
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
+  box-shadow: var(--elev-raised);
 }
 .ds-figure__value {
   font-size: 28px;
@@ -799,9 +868,10 @@ button.danger {
   are the platform's rather than this stylesheet's. Only the surface is styled.
 */
 .ds-drawer {
-  background: var(--surface-raised);
+  background: var(--surface-overlay);
   color: var(--text-default);
-  border: 1px solid var(--border-default);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--elev-overlay);
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
   /* Wide enough to read a source URL without wrapping it to death, and never wider than the
