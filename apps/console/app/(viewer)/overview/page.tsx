@@ -3,6 +3,8 @@ import Link from "next/link";
 import { getSignalsPage, getViewerOverview } from "../../lib/data";
 import { resolvePrincipal } from "../../lib/principal";
 import { requireGroup } from "../../lib/group-guard";
+import { FilterChips } from "../../components/filter-chips";
+import { sortHead } from "../../components/sort-link";
 import { Badge, Button, Card, Table } from "../../components/ui";
 import {
   bandSeverity,
@@ -63,6 +65,15 @@ export default async function OverviewPage({
   // the scorer can fill is a property of its inputs, and sampling a row makes the notice vanish the
   // moment that row is unscored.
   const notice = partialScoreNotice(overview.latestComponents);
+
+  /** A sortable column heading for this list, carrying `aria-sort` on the cell. */
+  const head = (key: string, label: string) =>
+    sortHead({
+      href: sortHref(params, key),
+      label,
+      active: params.sort === key,
+      dir: params.dir,
+    });
 
   return (
     <>
@@ -150,24 +161,13 @@ export default async function OverviewPage({
         </form>
 
         {Object.entries(SIGNAL_LIST_SCHEMA.filters).map(([key, allowed]) => (
-          <div className="ds-chips" key={key}>
-            <span className="sub">{key}</span>
-            {allowed.map((value) => {
-              const active = (params.filters[key] ?? []).includes(value);
-              return (
-                <Link
-                  key={value}
-                  className={active ? "ds-chip ds-chip--on" : "ds-chip"}
-                  href={toggleFilterHref(params, key, value)}
-                  /* A link is not a button: aria-pressed is not valid on role=link, and what is
-                     being announced is "this is the view you are on". */
-                  aria-current={active ? "true" : undefined}
-                >
-                  {value}
-                </Link>
-              );
-            })}
-          </div>
+          <FilterChips
+            key={key}
+            groupKey={key}
+            allowed={allowed}
+            active={params.filters[key] ?? []}
+            hrefFor={(value) => toggleFilterHref(params, key, value)}
+          />
         ))}
 
         {signals.rows.length === 0 ? (
@@ -178,11 +178,11 @@ export default async function OverviewPage({
           <Table
             label="Risk signals"
             head={[
-              <SortLink key="entity" params={params} sortKey="entity" label="Product" />,
+              head("entity", "Product"),
               "Source",
               "Domain",
-              <SortLink key="severity" params={params} sortKey="severity" label="Severity" />,
-              <SortLink key="published" params={params} sortKey="published" label="Published" />,
+              head("severity", "Severity"),
+              head("published", "Published"),
               "Freshness",
               "Score",
             ]}
@@ -249,25 +249,8 @@ function Figure({ label, value }: { label: string; value: number }) {
   return (
     <div className="ds-figure">
       <div className="ds-figure__value">{value}</div>
-      <div className="sub">{label}</div>
+      {/* §6's second-order mark: label BENEATH in Micro uppercase, not a `.sub` caption. */}
+      <div className="ds-figure__label">{label}</div>
     </div>
-  );
-}
-
-function SortLink({
-  params,
-  sortKey,
-  label,
-}: {
-  params: ReturnType<typeof parseSignalListParams>;
-  sortKey: string;
-  label: string;
-}) {
-  const active = params.sort === sortKey;
-  return (
-    <Link href={sortHref(params, sortKey)}>
-      {label}
-      {active ? <span aria-hidden="true">{params.dir === "asc" ? " ↑" : " ↓"}</span> : null}
-    </Link>
   );
 }
