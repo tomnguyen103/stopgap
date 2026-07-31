@@ -51,7 +51,16 @@ edit hiding inside the fourth.
 
 | Tenant tables (RLS enforced) | Global tables (no `org_id`) |
 | --- | --- |
-| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs`, `alert_rules`, `alert_events`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events`, `audit_anchors` (asymmetric: SELECT only — see below) | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
+| `cases`, `protocols`, `protocol_versions`, `shadow_runs`, `audit_log`, `users`, `demo_runs`, `acknowledgments`, `api_keys`, `risk_signals`, `risk_score_snapshots`, `signal_evidence`, `daily_briefs`, `connector_runs`, `alert_rules`, `alert_events`, `items`, `item_identifiers`, `suppliers`, `supplier_sites`, `item_suppliers`, `facilities`, `inventory_snapshots`, `procurement_events`, `audit_anchors` (asymmetric: SELECT only — see below) | `feed_records`, `llm_spend`, `escalation_policies`, `user_roles`, `api_key_requests`, `organizations` |
+
+`connector_runs` (ticket 17, migration 0022) sits one row away from `feed_records` and lands on the
+other side of the test, which is worth stating because the pair looks redundant. A feed RECORD is
+one physical fact about the drug supply — one openFDA snapshot, identical for every hospital — and
+is global. A connector RUN is what that fetch produced FOR ONE TENANT: the fetch is shared, but
+normalization, dedup and persistence happen per organization and can fail for one hospital while
+every other one succeeds. Two orgs genuinely disagree about the row, so it is tenant data. It is
+also why the administrator's feed panel could say the deployment had heard from openFDA and could
+not say whether this facility got anything out of that poll.
 
 `risk_signals` and `risk_score_snapshots` (ticket 06) are the sharpest illustration of the test.
 `feed_records` beside them is GLOBAL: one openFDA snapshot is a single physical fact about the drug
