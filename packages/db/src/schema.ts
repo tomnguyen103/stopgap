@@ -887,6 +887,11 @@ export const riskSignals = pgTable(
     uniqueIndex("risk_signals_org_id_uq").on(t.orgId, t.id),
     index("risk_signals_domain_idx").on(t.orgId, t.riskDomain, t.publishedAt),
     index("risk_signals_entity_idx").on(t.orgId, t.entityIdentifier),
+    // THE RETENTION SWEEP'S PREDICATE, exactly (`retention.ts` — `(org_id, updatedAt)`). Not served
+    // by `risk_signals_domain_idx`: that one's second column is `risk_domain`, so an age range over
+    // it is a full scan of the tenant's signals. The sweep is the one query that runs against the
+    // whole table rather than a page of it, and it runs on every scheduled cleanup.
+    index("risk_signals_retention_idx").on(t.orgId, t.updatedAt),
   ],
 );
 
@@ -1155,6 +1160,10 @@ export const alertEvents = pgTable(
     // `outcome` and `delivered_any` lead because the cooldown lookup filters on both before it
     // orders; without them it walks every event the rule ever produced.
     index("alert_events_rule_idx").on(t.orgId, t.ruleId, t.outcome, t.deliveredAny, t.firedAt),
+    // The retention sweep's predicate, `(org_id, firedAt)`. `alert_events_rule_idx` carries
+    // `fired_at` as its FIFTH column behind three equality filters the sweep does not apply, so it
+    // cannot serve an age range on its own.
+    index("alert_events_retention_idx").on(t.orgId, t.firedAt),
     // Composite, for the reason spelled out on the snapshot and evidence tables: a plain foreign
     // key proves the rule exists, not that it belongs to this tenant.
     foreignKey({
@@ -1244,6 +1253,56 @@ export const dailyBriefs = pgTable(
 );
 
 export type DailyBriefRow = typeof dailyBriefs.$inferSelect;
+
+/**
+ * What each connector did FOR THIS TENANT on its most recent poll (ticket 17). A TENANT table.
+ *
+ * THE TENANT/GLOBAL CALL, because it is not the obvious one. `feed_records` beside it is global —
+ * one openFDA snapshot is one physical fact about the drug supply and is stored once for the whole
+ * deployment. A connector RUN is not that fact: the fetch is shared, but normalization, dedup and
+ * persistence happen per organization and can fail for one tenant while succeeding for every other.
+ * Applying §6.5's test — would two orgs disagree about this row — they genuinely would, so it is
+ * tenant data. It is also why the administrator's feed panel could not answer "is MY feed healthy"
+ * from `feed_records` alone: that table can only say the deployment heard from a source.
+ *
+ * ONE ROW PER (org, source), UPSERTED — the LATEST run, not a history. Bounded at tenants × feeds,
+ * so it never becomes a high-volume table and needs no retention window; a growing run log would
+ * have needed both, to answer a question ("is this feed quiet") that only ever asks about the last
+ * run. `alert_events` is where per-firing history belongs, and this is deliberately not a second
+ * one of those.
+ *
+ * TWO TIMESTAMPS, deliberately. `ranAt` is the last ATTEMPT and moves whether or not it worked;
+ * `lastOkAt` only moves when the run succeeded. One column would force a choice between "the poll
+ * is running" and "the feed is delivering", and a connector failing every poll for a week is
+ * exactly the case where those two answers differ and the difference is the whole point.
+ */
+export const connectorRuns = pgTable(
+  "connector_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** A `SignalSource` from the ingest contract — `openfda_shortage`, `openfda_drug_recall`, … */
+    source: text("source").notNull(),
+    /** The last attempt, successful or not. */
+    ranAt: timestamp("ran_at", { withTimezone: true }).notNull(),
+    /** `ok` | `fetch_failed` | `persist_failed` — see `ConnectorRunOutcome`. */
+    outcome: text("outcome").notNull(),
+    /** Normalized signals this connector produced for this tenant on that run. */
+    signalCount: integer("signal_count").notNull().default(0),
+    /** The last run that succeeded. NULL when this connector has never had one. */
+    lastOkAt: timestamp("last_ok_at", { withTimezone: true }),
+    /** The failure, when there was one. NULL on an ordinary run — never an empty string. */
+    detail: text("detail"),
+  },
+  (t) => [
+    // The upsert target. Org-leading, so it doubles as this table's org-filter index.
+    uniqueIndex("connector_runs_source_uq").on(t.orgId, t.source),
+  ],
+);
+
+export type ConnectorRunRow = typeof connectorRuns.$inferSelect;
 
 
 /**
@@ -1472,6 +1531,9 @@ export const inventorySnapshots = pgTable(
     // rather than add a second one — the natural key of a snapshot is when it was taken.
     uniqueIndex("inventory_snapshots_point_uq").on(t.orgId, t.facilityId, t.itemId, t.capturedAt),
     index("inventory_snapshots_item_idx").on(t.orgId, t.itemId, t.capturedAt),
+    // The retention sweep's predicate, `(org_id, capturedAt)`. The index above leads with `item_id`,
+    // which the sweep does not filter on, so it walks the tenant's whole inventory history instead.
+    index("inventory_snapshots_retention_idx").on(t.orgId, t.capturedAt),
     // COMPOSITE (ticket 21), delete behaviour preserved from the plain keys these replace: a
     // snapshot is a count of one item at one facility, and means nothing once either is gone.
     foreignKey({
@@ -1528,6 +1590,9 @@ export const procurementEvents = pgTable(
     // Same reason as `item_suppliers_site_idx`: the supplier key nulls rows on delete, and this is
     // the pair it looks them up by. This is the largest table in the catalog.
     index("procurement_events_supplier_idx").on(t.orgId, t.supplierId),
+    // The retention sweep's predicate, `(org_id, orderedAt)` — same shape, same reason as the
+    // inventory one: `procurement_events_item_idx` leads with `item_id`.
+    index("procurement_events_retention_idx").on(t.orgId, t.orderedAt),
     // COMPOSITE (ticket 21), delete behaviour preserved from the plain keys these replace.
     foreignKey({
       columns: [t.orgId, t.facilityId],
