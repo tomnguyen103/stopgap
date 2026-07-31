@@ -97,6 +97,9 @@ ignore red. `pnpm gate` stays deterministic; `pnpm eval` reports the real signal
   that forked.
 - [Portfolio page copy](docs/portfolio.md) — problem, before/after, what is measured and what
   is explicitly not claimed.
+- [Design direction](docs/design-direction.md) — the console's visual source of truth:
+  positioning, tokens, the Ledger Rail signature, motion rules, and the priority-ordered
+  plan to get there. Proposed, not yet implemented.
 
 ## `shadow-ledger`
 
