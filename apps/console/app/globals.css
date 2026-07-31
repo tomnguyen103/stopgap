@@ -233,10 +233,18 @@
   --badge-pad-y: var(--space-1);
   --badge-pad-x: var(--space-2);
 
+  /*
+    One height for every control that can sit in a row with another (§ slop gate 39). A 48px input
+    beside a 29px button is the most common form-tuning tell, and 29px is also under the 44px
+    pointer-target floor. Padding is expressed against this rather than the other way round.
+  */
+  --control-height: 44px;
+
   --button-bg: var(--interactive);
   --button-fg: var(--text-on-accent);
   --button-radius: var(--radius-md);
   --button-pad-y: var(--space-2);
+  --button-min-height: var(--control-height);
   --button-pad-x: var(--space-4);
   --button-disabled-opacity: 0.45;
 
@@ -268,6 +276,13 @@
 }
 * {
   box-sizing: border-box;
+}
+/* `clip`, never `hidden`: `hidden` on a scroll container silently disables `position: sticky` on
+   every descendant, and the rail is sticky. Measured clean 320–1920 without this; it is here so a
+   later rule cannot reintroduce the sideways scroll unnoticed. */
+html,
+body {
+  overflow-x: clip;
 }
 /* The one place the three-layer token system was bypassed outright: a 14px literal with the whole
    family stack restated, so the body face could not be changed from the token layer at all. */
@@ -502,6 +517,13 @@ a {
     padding: var(--space-7);
   }
 }
+h1,
+h2 {
+  /* Generic drug names run long and hyphen-free — "Methylprednisolone", "Hydroxyprogesterone".
+     Without a last-resort break they overflow a 320px column. */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
 h1 {
   font-size: var(--text-title);
   line-height: var(--leading-title);
@@ -519,11 +541,11 @@ h1 {
   color: var(--interactive);
 }
 .empty {
-  padding: 40px;
+  padding: var(--space-8);
   text-align: center;
   color: var(--muted);
   border: 1px dashed var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 /*
   Key/value pairs. STACKED by default and two-column only when there is room: at 375px the fixed
@@ -588,7 +610,7 @@ h1 {
   font-variant-numeric: var(--font-numeric);
 }
 .audit li {
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
   color: var(--muted);
 }
 .audit b {
@@ -635,22 +657,22 @@ h2 {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: center;
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 .error {
   color: var(--crit);
-  font-size: 13px;
-  margin: 10px 0 0;
+  font-size: var(--text-small);
+  margin: var(--space-3) 0 0;
 }
 
 /* Phase 6: audit-integrity verification banner. */
 .banner {
-  border-radius: 10px;
-  padding: 14px 18px;
-  margin: 0 0 20px;
-  font-size: 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-body);
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: var(--elev-raised);
@@ -678,8 +700,8 @@ h2 {
 
 /* Phase 5: demo mode. */
 .demo-banner {
-  padding: 8px 24px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-small);
   color: var(--text);
   background: var(--surface-info);
   border-bottom: 1px solid var(--line);
@@ -688,13 +710,13 @@ h2 {
   background: var(--surface-warn);
 }
 .card-title {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-2);
 }
 .sub-tight {
   margin: 0;
 }
 .sub-note {
-  margin: 10px 0 0;
+  margin: var(--space-3) 0 0;
 }
 .feed-line {
   display: block;
@@ -881,6 +903,7 @@ h2 {
   border: 0;
   border-radius: var(--button-radius);
   padding: var(--button-pad-y) var(--button-pad-x);
+  min-height: var(--button-min-height);
   font: 600 var(--text-md) / 1 var(--font-body);
   cursor: pointer;
   transition: filter var(--dur-fast) var(--ease-out);
@@ -958,7 +981,8 @@ h2 {
   color: var(--input-fg);
   border: 1px solid var(--input-border);
   border-radius: var(--input-radius);
-  padding: var(--space-3) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  min-height: var(--control-height);
   font: var(--text-body) / var(--leading-body) var(--font-body);
 }
 .ds-input:hover:not(:disabled) {
@@ -1173,7 +1197,7 @@ h2 {
    alone — the same reason the diff below carries a + and a − as well as a tint. */
 .ds-chart__key {
   display: inline-block;
-  width: 10px;
+  width: var(--space-3);
   height: 2px;
   vertical-align: middle;
   margin-right: var(--space-2);

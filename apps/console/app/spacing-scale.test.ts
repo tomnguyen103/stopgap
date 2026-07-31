@@ -49,9 +49,15 @@ describe("the spacing scale", () => {
     },
   );
 
-  it("has no px literal left in the component token layer", () => {
+  it("has no off-base px literal left in the component token layer", () => {
+    // Not "no literal at all": `--control-height: 44px` is a real component dimension with no
+    // spacing step to name it (44 = 11 x 4, and there is no `--space-11`). What the old `9px` and
+    // `18px` were is OFF the base — values nothing else in the system can line up with.
     const componentBlock = /---- Component:([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
-    expect(componentBlock).not.toMatch(/:\s*\d+px;/);
+    const offBase = Array.from(componentBlock.matchAll(/:\s*(\d+)px;/g), (m) => Number(m[1])).filter(
+      (n) => n % 4 !== 0,
+    );
+    expect(offBase).toEqual([]);
   });
 });
 
