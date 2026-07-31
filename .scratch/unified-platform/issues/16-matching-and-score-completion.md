@@ -10,11 +10,11 @@ This is the convergence point of the programme. It is blocked by the most and ga
 
 **Status:** ready-for-agent
 
-- [ ] Signals match tenant catalog items via their identifiers, using the contract's match hints
-- [ ] Matching and scoring resolve their default confidence from the same shared constant
-- [ ] Stock-level and supplier-concentration score components activate and contribute
-- [ ] Scores are complete, and the console no longer reports components as unavailable
-- [ ] A previously scored signal rescored after catalog import produces a higher-or-equal total, never lower
-- [ ] Impact assessment reads the real catalog; the simulated formulary and inventory are removed
-- [ ] Items sourced from a single supplier are identifiable
-- [ ] No case or signal is lost or orphaned in the transition
+- [x] Signals match tenant catalog items via their identifiers, using the contract's match hints
+- [x] Matching and scoring resolve their default confidence from the same shared constant
+- [x] Stock-level and supplier-concentration score components activate and contribute
+- [x] Scores are complete, and the console no longer reports components as unavailable
+- [x] A previously scored signal rescored after catalog import produces a higher-or-equal total, never lower
+- [x] Impact assessment reads the real catalog; the simulated formulary and inventory are removed
+- [x] Items sourced from a single supplier are identifiable
+- [x] No case or signal is lost or orphaned in the transition

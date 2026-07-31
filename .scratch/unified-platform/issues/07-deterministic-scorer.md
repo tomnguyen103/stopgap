@@ -8,11 +8,11 @@ The score is code, never a model output, per the deterministic-spine decision. L
 
 **Status:** ready-for-agent
 
-- [ ] Each signal produces a persisted snapshot carrying a per-component breakdown
-- [ ] Identical inputs and an identical evaluation timestamp produce identical output
-- [ ] Adding a matched signal never lowers a total; adding a matched risk domain never lowers a total; a source-resolved hazard is decayed rather than dropped and still contributes non-negatively
-- [ ] A scoring version is pinned into every snapshot, and any change to weights or formula bumps it
-- [ ] Inputs are captured for audit without retaining raw provider payloads
-- [ ] The scorer is a pure module — no database, no network, no framework — and is tested directly
-- [ ] The components that depend on stock levels and supplier concentration are reported as unavailable, not as zero, while catalog data is absent
-- [ ] Scores are produced by the durable poll workflow; no second orchestrator is introduced
+- [x] Each signal produces a persisted snapshot carrying a per-component breakdown
+- [x] Identical inputs and an identical evaluation timestamp produce identical output
+- [x] Adding a matched signal never lowers a total; adding a matched risk domain never lowers a total; a source-resolved hazard is decayed rather than dropped and still contributes non-negatively
+- [x] A scoring version is pinned into every snapshot, and any change to weights or formula bumps it
+- [x] Inputs are captured for audit without retaining raw provider payloads
+- [x] The scorer is a pure module — no database, no network, no framework — and is tested directly
+- [x] The components that depend on stock levels and supplier concentration are reported as unavailable, not as zero, while catalog data is absent
+- [x] Scores are produced by the durable poll workflow; no second orchestrator is introduced

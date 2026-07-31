@@ -8,10 +8,10 @@ Note the deliberate asymmetry with existing feed storage: a feed record is one p
 
 **Status:** ready-for-agent
 
-- [ ] Signals and snapshots persist as tenant tables, each carrying an organization reference and a row-level policy keyed to it
-- [ ] Every read passes through the organization-scoped transaction helper
-- [ ] Query helpers also carry an explicit organization predicate, so a query that loses its scope returns nothing rather than everything
-- [ ] The tenant-versus-global decision and its reasoning are recorded beside each table definition
-- [ ] Isolation coverage proves each new table is unreadable and unwritable from another tenant's scope, running as a role the policies actually apply to
-- [ ] The scheduled feed poll, which has no organization in its context, continues to enumerate organizations and do a full pass per tenant rather than inventing one
-- [ ] Migrations apply cleanly as the role a real deployment migrates as
+- [x] Signals and snapshots persist as tenant tables, each carrying an organization reference and a row-level policy keyed to it
+- [x] Every read passes through the organization-scoped transaction helper
+- [x] Query helpers also carry an explicit organization predicate, so a query that loses its scope returns nothing rather than everything
+- [x] The tenant-versus-global decision and its reasoning are recorded beside each table definition
+- [x] Isolation coverage proves each new table is unreadable and unwritable from another tenant's scope, running as a role the policies actually apply to
+- [x] The scheduled feed poll, which has no organization in its context, continues to enumerate organizations and do a full pass per tenant rather than inventing one
+- [x] Migrations apply cleanly as the role a real deployment migrates as

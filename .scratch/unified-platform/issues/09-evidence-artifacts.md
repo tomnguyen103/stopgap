@@ -6,8 +6,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] Evidence persists per signal as a tenant table with an organization reference and a row-level policy
-- [ ] Each artifact records its type, its origin, and when it was captured
-- [ ] Evidence is retrievable for a given signal and links to the originating source record
-- [ ] Retention captures what is needed for audit without storing content that could carry protected information
-- [ ] Isolation coverage proves the table is unreadable from another tenant's scope
+- [x] Evidence persists per signal as a tenant table with an organization reference and a row-level policy
+- [x] Each artifact records its type, its origin, and when it was captured
+- [x] Evidence is retrievable for a given signal and links to the originating source record
+- [x] Retention captures what is needed for audit without storing content that could carry protected information
+- [x] Isolation coverage proves the table is unreadable from another tenant's scope

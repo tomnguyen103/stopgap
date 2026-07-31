@@ -10,12 +10,12 @@ Crucially, this ships while the score is still incomplete, and says so. Stock-le
 
 **Status:** ready-for-agent
 
-- [ ] Open cases are ranked by risk score rather than by creation time
-- [ ] Headline counts show open, awaiting-review and exception-queue cases
-- [ ] Signals can be searched by drug name or identifier, and filtered by risk domain, severity and freshness
-- [ ] Sorting and pagination work, and every list interaction is reflected in the page address so a view can be bookmarked or shared
-- [ ] A hand-edited or malformed address degrades to sensible defaults rather than erroring
-- [ ] Opening a signal shows its evidence, including a link to the originating source record and when it was last fetched
-- [ ] A score displays its component breakdown, so its ranking is legible rather than asserted
-- [ ] The dashboard states plainly which score components are unavailable pending catalog data
-- [ ] An anonymous demo visitor can use the whole surface read-only and cannot mutate anything
+- [x] Open cases are ranked by risk score rather than by creation time
+- [x] Headline counts show open, awaiting-review and exception-queue cases
+- [x] Signals can be searched by drug name or identifier, and filtered by risk domain, severity and freshness
+- [x] Sorting and pagination work, and every list interaction is reflected in the page address so a view can be bookmarked or shared
+- [x] A hand-edited or malformed address degrades to sensible defaults rather than erroring
+- [x] Opening a signal shows its evidence, including a link to the originating source record and when it was last fetched
+- [x] A score displays its component breakdown, so its ranking is legible rather than asserted
+- [x] The dashboard states plainly which score components are unavailable pending catalog data
+- [x] An anonymous demo visitor can use the whole surface read-only and cannot mutate anything

@@ -8,11 +8,11 @@ The brief is drafted by a model but is built on the existing provider path, so i
 
 **Status:** ready-for-agent
 
-- [ ] A brief is generated on a schedule and is readable in the console
-- [ ] It summarises what changed since the previous brief and what needs review
-- [ ] It is produced through structured output with schema validation, not free-form text parsing
-- [ ] It runs on the existing provider registry with health-check failover, and a provider outage degrades rather than fails the brief
-- [ ] Every model call emits a trace carrying provider, model, token counts, cost and latency
-- [ ] Generated text passes the compliance guard before it is stored or displayed
-- [ ] Briefs are tenant-scoped
-- [ ] Generation runs on the durable workflow runtime; no second orchestrator is introduced
+- [x] A brief is generated on a schedule and is readable in the console
+- [x] It summarises what changed since the previous brief and what needs review
+- [x] It is produced through structured output with schema validation, not free-form text parsing
+- [x] It runs on the existing provider registry with health-check failover, and a provider outage degrades rather than fails the brief
+- [x] Every model call emits a trace carrying provider, model, token counts, cost and latency
+- [x] Generated text passes the compliance guard before it is stored or displayed
+- [x] Briefs are tenant-scoped
+- [x] Generation runs on the durable workflow runtime; no second orchestrator is introduced

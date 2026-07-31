@@ -8,11 +8,11 @@ Cooldowns are a correctness requirement, not a refinement. One recorded ingestio
 
 **Status:** ready-for-agent
 
-- [ ] Alert rules can be created, edited and deleted, scoped to items, categories and severities
-- [ ] Each rule carries a cooldown, and a burst of matching signals within that window produces one notification rather than many
-- [ ] Rule evaluation triggers; the escalation ladder owns ownership, acknowledgment and escalation on silence — the two do not duplicate each other
-- [ ] Alert events are recorded with their outcome, so rules can be tuned against what actually fired
-- [ ] Notifications deliver to a team chat channel as well as by email
-- [ ] Delivery is idempotent — a retried send does not double-notify
-- [ ] A missing chat credential is recorded as unconfigured and never faked as delivered
-- [ ] Rules, events and delivery state are tenant-scoped with isolation coverage
+- [x] Alert rules can be created, edited and deleted, scoped to items, categories and severities
+- [x] Each rule carries a cooldown, and a burst of matching signals within that window produces one notification rather than many
+- [x] Rule evaluation triggers; the escalation ladder owns ownership, acknowledgment and escalation on silence — the two do not duplicate each other
+- [x] Alert events are recorded with their outcome, so rules can be tuned against what actually fired
+- [x] Notifications deliver to a team chat channel as well as by email
+- [x] Delivery is idempotent — a retried send does not double-notify
+- [x] A missing chat credential is recorded as unconfigured and never faked as delivered
+- [x] Rules, events and delivery state are tenant-scoped with isolation coverage
