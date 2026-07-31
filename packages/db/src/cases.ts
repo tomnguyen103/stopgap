@@ -68,7 +68,11 @@ export function workflowIdForKey(orgId: string, key: string): string {
  * Insert the case row for a newly detected shortage, or return the existing row if a case
  * for this key already exists (idempotent — the workflow may replay this).
  */
-export async function upsertCaseForRecord(db: Db, orgId: string, record: ShortageRecord): Promise<CaseRow> {
+export async function upsertCaseForRecord(
+  db: Db,
+  orgId: string,
+  record: ShortageRecord,
+): Promise<CaseRow> {
   // KEY FIRST, id second (PHASE6 §6.5 pass 2). A case row written before the workflow-id format
   // changed holds the old `case-<key>` id, so arbitrating only on the NEWLY computed
   // `org-<orgId>-case-<key>` would find no conflict for it. Migration 0014's `cases_key_uq` — UNIQUE
@@ -132,7 +136,11 @@ export async function getCaseByWorkflowId(
  * convention that `upsertCaseForRecord` reads before it writes, and two concurrent detections
  * interleaving would have made this return an arbitrary one of two rows, differing between calls.
  */
-export async function getCaseByKey(db: Db, orgId: string, key: string): Promise<CaseRow | undefined> {
+export async function getCaseByKey(
+  db: Db,
+  orgId: string,
+  key: string,
+): Promise<CaseRow | undefined> {
   const [row] = await db
     .select()
     .from(cases)
@@ -183,7 +191,12 @@ export async function updateCaseStatus(
 }
 
 export async function listCases(db: Db, orgId: string, limit = 100): Promise<CaseRow[]> {
-  return db.select().from(cases).where(eq(cases.orgId, orgId)).orderBy(desc(cases.updatedAt)).limit(limit);
+  return db
+    .select()
+    .from(cases)
+    .where(eq(cases.orgId, orgId))
+    .orderBy(desc(cases.updatedAt))
+    .limit(limit);
 }
 
 /** A monitoring case as the feed-resolution diff needs it (PHASE6 §6.6). */
@@ -202,7 +215,10 @@ export interface OpenMonitoringCase {
 }
 
 /** Open cases in a monitoring status, for the poll's resolution diff. */
-export async function listOpenMonitoringCases(db: Db, orgId: string): Promise<OpenMonitoringCase[]> {
+export async function listOpenMonitoringCases(
+  db: Db,
+  orgId: string,
+): Promise<OpenMonitoringCase[]> {
   return db
     .select({
       caseId: cases.id,
@@ -223,7 +239,12 @@ export async function listOpenMonitoringCases(db: Db, orgId: string): Promise<Op
  * no-op (the run already bumped this case) while a genuinely later poll still increments.
  * Without the guard, a retry after a partial failure would double-count and resolve early.
  */
-export async function bumpFeedMiss(db: Db, orgId: string, caseId: string, runId: string): Promise<void> {
+export async function bumpFeedMiss(
+  db: Db,
+  orgId: string,
+  caseId: string,
+  runId: string,
+): Promise<void> {
   // Counter-only writes deliberately leave `updatedAt` alone: a silent miss-count is not a
   // case state change, and touching it would bubble every monitoring case to the top of the
   // console's newest-first list on every 15-minute poll.
@@ -241,7 +262,10 @@ export async function bumpFeedMiss(db: Db, orgId: string, caseId: string, runId:
 
 /** Reset a case's miss counter to zero (key reappeared, or resolution fired). */
 export async function resetFeedMiss(db: Db, orgId: string, caseId: string): Promise<void> {
-  await db.update(cases).set({ feedMissCount: 0 }).where(and(eq(cases.orgId, orgId), eq(cases.id, caseId)));
+  await db
+    .update(cases)
+    .set({ feedMissCount: 0 })
+    .where(and(eq(cases.orgId, orgId), eq(cases.id, caseId)));
 }
 
 /**

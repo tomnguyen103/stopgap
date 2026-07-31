@@ -167,7 +167,10 @@ export async function listSignalsPageForApi(
       .orderBy(orderBy(SIGNAL_SORTS, riskSignals.publishedAt, options), desc(riskSignals.id))
       .limit(options.limit)
       .offset(options.offset),
-    db.select({ total: sql<number>`count(*)::int` }).from(riskSignals).where(where),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(riskSignals)
+      .where(where),
   ]);
   return { rows, total: counted?.total ?? 0 };
 }
@@ -301,11 +304,7 @@ export async function listCatalogItemsPage(
   if (options.q) {
     const term = likeTerm(options.q);
     predicates.push(
-      or(
-        ilike(items.sku, term),
-        ilike(items.name, term),
-        ilike(items.genericName, term),
-      ) as SQL,
+      or(ilike(items.sku, term), ilike(items.name, term), ilike(items.genericName, term)) as SQL,
     );
   }
   const where = and(...predicates);
@@ -323,7 +322,10 @@ export async function listCatalogItemsPage(
       .orderBy(orderBy(ITEM_SORTS, items.sku, options), desc(items.id))
       .limit(options.limit)
       .offset(options.offset),
-    db.select({ total: sql<number>`count(*)::int` }).from(items).where(where),
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(items)
+      .where(where),
   ]);
   return { rows, total: counted?.total ?? 0 };
 }

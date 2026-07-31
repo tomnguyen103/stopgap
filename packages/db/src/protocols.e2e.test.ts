@@ -47,7 +47,14 @@ afterAll(async () => {
 async function draft(body: string) {
   return withOrgDb(ORG, (db) =>
     draftProtocolVersion(
-      { orgId: ORG, key: KEY, title: "Heparin conservation", body, alternatives: [], authoredBy: "agent" },
+      {
+        orgId: ORG,
+        key: KEY,
+        title: "Heparin conservation",
+        body,
+        alternatives: [],
+        authoredBy: "agent",
+      },
       db,
     ),
   );

@@ -84,12 +84,8 @@
           "name": "acknowledgments_case_id_cases_id_fk",
           "tableFrom": "acknowledgments",
           "tableTo": "cases",
-          "columnsFrom": [
-            "case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["case_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -97,12 +93,8 @@
           "name": "acknowledgments_user_id_users_id_fk",
           "tableFrom": "acknowledgments",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -316,12 +308,8 @@
           "name": "audit_log_case_id_cases_id_fk",
           "tableFrom": "audit_log",
           "tableTo": "cases",
-          "columnsFrom": [
-            "case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["case_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -329,12 +317,8 @@
           "name": "audit_log_actor_user_id_users_id_fk",
           "tableFrom": "audit_log",
           "tableTo": "users",
-          "columnsFrom": [
-            "actor_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["actor_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -866,12 +850,8 @@
           "name": "protocol_versions_protocol_id_protocols_id_fk",
           "tableFrom": "protocol_versions",
           "tableTo": "protocols",
-          "columnsFrom": [
-            "protocol_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["protocol_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -879,12 +859,8 @@
           "name": "protocol_versions_source_case_id_cases_id_fk",
           "tableFrom": "protocol_versions",
           "tableTo": "cases",
-          "columnsFrom": [
-            "source_case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_case_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -892,12 +868,8 @@
           "name": "protocol_versions_authored_by_user_id_users_id_fk",
           "tableFrom": "protocol_versions",
           "tableTo": "users",
-          "columnsFrom": [
-            "authored_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["authored_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -905,12 +877,8 @@
           "name": "protocol_versions_approved_by_user_id_users_id_fk",
           "tableFrom": "protocol_versions",
           "tableTo": "users",
-          "columnsFrom": [
-            "approved_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["approved_by_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1223,12 +1191,8 @@
           "name": "user_roles_user_id_users_id_fk",
           "tableFrom": "user_roles",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

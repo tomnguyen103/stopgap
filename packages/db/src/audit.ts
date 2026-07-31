@@ -8,7 +8,9 @@ import { auditLog } from "./schema.js";
 function canonical(value: unknown): string {
   return JSON.stringify(value, (_k, v) =>
     v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      ? Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)),
+        )
       : v,
   );
 }
@@ -151,7 +153,12 @@ export function computeAuditHash(
     return createHmac("sha256", hmacKey).update(prevHash).update(payload).digest("hex");
   }
   // v1: keep the original narrow payload byte-for-byte.
-  const payload = canonical({ caseId: e.caseId ?? null, actor: e.actor, action: e.action, detail: e.detail });
+  const payload = canonical({
+    caseId: e.caseId ?? null,
+    actor: e.actor,
+    action: e.action,
+    detail: e.detail,
+  });
   return createHash("sha256").update(prevHash).update(payload).digest("hex");
 }
 
@@ -189,7 +196,9 @@ export async function appendAudit(db: Db, entry: AuditEntry): Promise<{ hash: st
     // Bound the wait: a stalled lock holder must not back up every appendAudit caller in this
     // org and exhaust the connection pool.
     await tx.execute(sql`set local lock_timeout = '5s'`);
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('audit_log_chain:' || ${entry.orgId}))`);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext('audit_log_chain:' || ${entry.orgId}))`,
+    );
 
     if (entry.caseId) {
       const [existing] = await tx
@@ -306,7 +315,12 @@ export interface ChainVerification {
   /** Id of the first row whose link fails, if any. */
   brokenAtId?: number;
   /** Why it failed. */
-  reason?: "prev-hash-mismatch" | "hash-mismatch" | "missing-hmac-key" | "scheme-downgrade" | "unknown-scheme";
+  reason?:
+    | "prev-hash-mismatch"
+    | "hash-mismatch"
+    | "missing-hmac-key"
+    | "scheme-downgrade"
+    | "unknown-scheme";
 }
 
 /**

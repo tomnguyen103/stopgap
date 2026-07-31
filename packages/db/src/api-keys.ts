@@ -175,7 +175,9 @@ export async function revokeApiKey(orgId: string, id: string, db: Db = getDb()):
  * the caller already presented. "Unscoped" here means "not yet scoped" — the org it returns is
  * precisely what the REST layer opens its `withOrgDb` scope with.
  */
-export async function findActiveApiKeyByPlaintext(plaintext: string): Promise<ApiKeyRow | undefined> {
+export async function findActiveApiKeyByPlaintext(
+  plaintext: string,
+): Promise<ApiKeyRow | undefined> {
   return withBypassDb(async (db) => {
     const [row] = await db
       .select()
@@ -241,7 +243,9 @@ export async function reserveApiKeyRequest(
   const windowMs = Math.max(0, Date.now() - since.getTime());
   const pruneBefore = new Date(since.getTime() - windowMs);
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(${API_RATE_LIMIT_LOCK}, hashtext(${apiKeyId}))`);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${API_RATE_LIMIT_LOCK}, hashtext(${apiKeyId}))`,
+    );
     // Before the count, not after: a key that is AT its limit returns early, and that is precisely
     // the key with the most accumulated rows — pruning after the decision would never reach it.
     await tx

@@ -117,12 +117,8 @@
           "name": "audit_log_case_id_cases_id_fk",
           "tableFrom": "audit_log",
           "tableTo": "cases",
-          "columnsFrom": [
-            "case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["case_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -484,12 +480,8 @@
           "name": "protocol_versions_protocol_id_protocols_id_fk",
           "tableFrom": "protocol_versions",
           "tableTo": "protocols",
-          "columnsFrom": [
-            "protocol_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["protocol_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -497,12 +489,8 @@
           "name": "protocol_versions_source_case_id_cases_id_fk",
           "tableFrom": "protocol_versions",
           "tableTo": "cases",
-          "columnsFrom": [
-            "source_case_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_case_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

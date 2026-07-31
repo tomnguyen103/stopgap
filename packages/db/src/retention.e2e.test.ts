@@ -28,7 +28,10 @@ const ORG_B = "bbbbbbbb-0000-0000-0000-00000000018b";
 
 const raw = postgres(DATABASE_URL, { max: 2, onnotice: () => undefined });
 
-async function asOrg<T>(orgId: string, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+async function asOrg<T>(
+  orgId: string,
+  fn: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
   return raw.begin(async (tx) => {
     await tx`select set_config('app.current_org', ${orgId}, true)`;
     return fn(tx);

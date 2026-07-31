@@ -33,7 +33,10 @@ const ORG_B = "bbbbbbbb-0000-0000-0000-00000000019b";
 
 const raw = postgres(DATABASE_URL, { max: 2, onnotice: () => undefined });
 
-async function asOrg<T>(orgId: string, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+async function asOrg<T>(
+  orgId: string,
+  fn: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
   return raw.begin(async (tx) => {
     await tx`select set_config('app.current_org', ${orgId}, true)`;
     return fn(tx);
@@ -132,13 +135,17 @@ describe("the public API's list queries are tenant-scoped", () => {
   });
 
   it("lists only this tenant's catalog items, including under a search term", async () => {
-    const a = await withOrgDb(ORG_A, (db) => listCatalogItemsPage(db, ORG_A, { ...page, q: "cefazolin" }));
+    const a = await withOrgDb(ORG_A, (db) =>
+      listCatalogItemsPage(db, ORG_A, { ...page, q: "cefazolin" }),
+    );
     expect(a.rows.map((r) => r.sku)).toEqual(["alpha-SKU"]);
     expect(a.total).toBe(1);
   });
 
   it("treats a `%` search term as a literal, not as a wildcard matching every row", async () => {
-    const wildcard = await withOrgDb(ORG_A, (db) => listCatalogItemsPage(db, ORG_A, { ...page, q: "%" }));
+    const wildcard = await withOrgDb(ORG_A, (db) =>
+      listCatalogItemsPage(db, ORG_A, { ...page, q: "%" }),
+    );
     expect(wildcard.rows).toHaveLength(0);
   });
 });

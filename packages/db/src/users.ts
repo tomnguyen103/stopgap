@@ -89,8 +89,13 @@ async function upsertUserByOidcOn(db: Db, input: UpsertUserInput): Promise<UserR
   if (row) return row;
   // A partial unique index can leave `onConflictDoUpdate` without a matched row in edge cases;
   // fall back to a direct read so a successful sign-in never returns undefined.
-  const [existing] = await db.select().from(users).where(eq(users.oidcSubject, input.oidcSubject)).limit(1);
-  if (!existing) throw new Error(`upsertUserByOidc: user vanished for subject ${input.oidcSubject}`);
+  const [existing] = await db
+    .select()
+    .from(users)
+    .where(eq(users.oidcSubject, input.oidcSubject))
+    .limit(1);
+  if (!existing)
+    throw new Error(`upsertUserByOidc: user vanished for subject ${input.oidcSubject}`);
   return existing;
 }
 
@@ -206,7 +211,12 @@ export async function getRolesForUsers(
  *
  * Throws if `userId` does not belong to `orgId` — see the note above `assertUserInOrg`.
  */
-export async function assignRole(db: Db, orgId: string, userId: string, role: Role): Promise<boolean> {
+export async function assignRole(
+  db: Db,
+  orgId: string,
+  userId: string,
+  role: Role,
+): Promise<boolean> {
   await assertUserInOrg(db, orgId, userId);
   const inserted = await db
     .insert(userRoles)
@@ -220,7 +230,12 @@ export async function assignRole(db: Db, orgId: string, userId: string, role: Ro
  * Revoke a role. Returns whether a row was actually deleted (`false` = the user never held it).
  * Throws if `userId` does not belong to `orgId`.
  */
-export async function revokeRole(db: Db, orgId: string, userId: string, role: Role): Promise<boolean> {
+export async function revokeRole(
+  db: Db,
+  orgId: string,
+  userId: string,
+  role: Role,
+): Promise<boolean> {
   await assertUserInOrg(db, orgId, userId);
   const deleted = await db
     .delete(userRoles)
@@ -229,16 +244,31 @@ export async function revokeRole(db: Db, orgId: string, userId: string, role: Ro
   return deleted.length > 0;
 }
 
-/** Active (non-disabled) users in one org, with their roles, for the admin management page. */
-export async function listUsers(orgId: string, db: Db = getDb()): Promise<(UserRow & { roles: Role[] })[]> {
-  const rows = await db
-    .select()
-    .from(users)
-    .where(and(eq(users.orgId, orgId), isNull(users.disabledAt)))
-    .orderBy(asc(users.createdAt));
+/**
+ * Users in one org, with their roles, for the admin management page.
+ *
+ * Active only by default. `includeDisabled` exists because disabling was otherwise a ONE-WAY
+ * DOOR: `setUserDisabled` has always taken a boolean and re-enables correctly, but a row this
+ * function filtered out could not be listed, selected or undone from the console, so recovery
+ * meant someone with database credentials writing an `update` by hand — in a product whose claim
+ * is that privileged actions are auditable through the application.
+ */
+export async function listUsers(
+  orgId: string,
+  db: Db = getDb(),
+  options: { includeDisabled?: boolean } = {},
+): Promise<(UserRow & { roles: Role[] })[]> {
+  const scope = options.includeDisabled
+    ? eq(users.orgId, orgId)
+    : and(eq(users.orgId, orgId), isNull(users.disabledAt));
+  const rows = await db.select().from(users).where(scope).orderBy(asc(users.createdAt));
   // ONE role query on the handle we were given, not one per user on a fresh connection — see
   // `getRolesForUsers` for the deadlock that shape produced.
-  const roles = await getRolesForUsers(db, orgId, rows.map((u) => u.id));
+  const roles = await getRolesForUsers(
+    db,
+    orgId,
+    rows.map((u) => u.id),
+  );
   return rows.map((u) => ({ ...u, roles: roles.get(u.id) ?? [] }));
 }
 

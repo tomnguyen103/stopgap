@@ -81,8 +81,7 @@ export async function getKpis(orgId: string, db: Db = getDb()): Promise<Kpis> {
     exceptionCases: Number(counts?.exceptions ?? 0),
     terminalCases: Number(counts?.terminal ?? 0),
     droppedCases: Number(counts?.dropped ?? 0),
-    medianHoursToApproval:
-      latency?.median_hours == null ? undefined : Number(latency.median_hours),
+    medianHoursToApproval: latency?.median_hours == null ? undefined : Number(latency.median_hours),
     draftAcceptanceRate: reviewed === 0 ? undefined : Number(review?.unedited ?? 0) / reviewed,
     reviewedCases: reviewed,
   };

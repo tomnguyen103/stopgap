@@ -11,12 +11,19 @@ import type { NewShadowRunRow, ShadowRunRow } from "./schema.js";
  * `NewShadowRunRow` and the type checker refuses a run with no tenant.
  */
 
-export async function recordShadowRun(run: NewShadowRunRow, db: Db = getDb()): Promise<ShadowRunRow> {
+export async function recordShadowRun(
+  run: NewShadowRunRow,
+  db: Db = getDb(),
+): Promise<ShadowRunRow> {
   const [row] = await db.insert(shadowRuns).values(run).returning();
   return row!;
 }
 
-export async function listShadowRuns(orgId: string, limit = 100, db: Db = getDb()): Promise<ShadowRunRow[]> {
+export async function listShadowRuns(
+  orgId: string,
+  limit = 100,
+  db: Db = getDb(),
+): Promise<ShadowRunRow[]> {
   return db
     .select()
     .from(shadowRuns)
@@ -42,7 +49,10 @@ export interface ShadowClassStats {
  * Per-drug-class aggregates — the input to the promotion gates. Aggregating in SQL rather
  * than in Node keeps the dashboard query O(classes) instead of pulling the whole ledger.
  */
-export async function shadowStatsByClass(orgId: string, db: Db = getDb()): Promise<ShadowClassStats[]> {
+export async function shadowStatsByClass(
+  orgId: string,
+  db: Db = getDb(),
+): Promise<ShadowClassStats[]> {
   const rows = await db
     .select({
       drugClass: shadowRuns.drugClass,

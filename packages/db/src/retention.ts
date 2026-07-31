@@ -82,7 +82,9 @@ export function retentionPlan(now: Date, windows: RetentionWindows): RetentionPl
     if (!Number.isFinite(days) || days < 0) {
       // A negative window puts the cutoff in the FUTURE, which sweeps rows that have not aged yet
       // — in practice, all of them. Refusing loudly beats a job that silently empties a table.
-      throw new Error(`retention window for ${kind} must be a non-negative number of days, got ${days}`);
+      throw new Error(
+        `retention window for ${kind} must be a non-negative number of days, got ${days}`,
+      );
     }
     plan.push({ kind, cutoff: new Date(now.getTime() - days * DAY_MS) });
   }
@@ -112,14 +114,24 @@ export type RetentionCounts = Record<RetentionKind, number>;
  * recreate them with their miss counters reset — churn that looks like retention working.
  */
 const RETENTION_TABLES = {
-  riskSignals: { table: riskSignals, id: riskSignals.id, org: riskSignals.orgId, at: riskSignals.updatedAt },
+  riskSignals: {
+    table: riskSignals,
+    id: riskSignals.id,
+    org: riskSignals.orgId,
+    at: riskSignals.updatedAt,
+  },
   riskScoreSnapshots: {
     table: riskScoreSnapshots,
     id: riskScoreSnapshots.id,
     org: riskScoreSnapshots.orgId,
     at: riskScoreSnapshots.computedAt,
   },
-  alertEvents: { table: alertEvents, id: alertEvents.id, org: alertEvents.orgId, at: alertEvents.firedAt },
+  alertEvents: {
+    table: alertEvents,
+    id: alertEvents.id,
+    org: alertEvents.orgId,
+    at: alertEvents.firedAt,
+  },
   inventorySnapshots: {
     table: inventorySnapshots,
     id: inventorySnapshots.id,
@@ -170,21 +182,24 @@ async function sweepKind(
         .where(and(eq(columns.org, orgId), lt(columns.at, cutoff)))
         .limit(RETENTION_BATCH_SIZE);
       if (doomed.length === 0) return { selected: 0, deleted: 0 };
-      const gone = await db.delete(columns.table).where(
-        and(
-          eq(columns.org, orgId),
-          // The AGE PREDICATE IS RESTATED HERE, not just the ids the select returned. Between the
-          // two statements a row can be touched — a signal re-fetched, an alert event amended —
-          // and its age column moved forward past the cutoff. Deleting on ids alone would then
-          // remove a row that is no longer expired, which is the one thing a retention sweep must
-          // never do: it deletes on a fact it checked before that fact changed.
-          lt(columns.at, cutoff),
-          inArray(
-            columns.id,
-            doomed.map((row) => row.id),
+      const gone = await db
+        .delete(columns.table)
+        .where(
+          and(
+            eq(columns.org, orgId),
+            // The AGE PREDICATE IS RESTATED HERE, not just the ids the select returned. Between the
+            // two statements a row can be touched — a signal re-fetched, an alert event amended —
+            // and its age column moved forward past the cutoff. Deleting on ids alone would then
+            // remove a row that is no longer expired, which is the one thing a retention sweep must
+            // never do: it deletes on a fact it checked before that fact changed.
+            lt(columns.at, cutoff),
+            inArray(
+              columns.id,
+              doomed.map((row) => row.id),
+            ),
           ),
-        ),
-      ).returning({ id: columns.id });
+        )
+        .returning({ id: columns.id });
       // Two numbers, deliberately. `deleted` is what was REMOVED and is what the audit entry and
       // the counters report; `selected` is what the page held and is what decides whether the
       // table is drained. They differ exactly when a row aged out from under the sweep, and
@@ -252,22 +267,24 @@ export async function sweepOrgRetention(
     // the caller would diagnose the wrong failure. Losing the audit row is bad; losing the reason
     // the sweep died is worse, so the audit failure is logged and the original error propagates.
     try {
-    await withOrgDb(orgId, (db) =>
-      appendAudit(db, {
-        orgId,
-        actor: "system:retention",
-        action: "retention.sweep",
-        detail: {
-          sweptAt: now.toISOString(),
-          runToken,
-          counts,
-          cutoffs: Object.fromEntries(plan.map((entry) => [entry.kind, entry.cutoff.toISOString()])),
-        },
-        // NOT deduped: `appendAudit` only applies its idempotency lookup to case-scoped entries,
-        // and this has no case. The key is a stable label, not a guarantee of one entry per run.
-        eventKey: `retention:${orgId}:${runToken}`,
-      }),
-    );
+      await withOrgDb(orgId, (db) =>
+        appendAudit(db, {
+          orgId,
+          actor: "system:retention",
+          action: "retention.sweep",
+          detail: {
+            sweptAt: now.toISOString(),
+            runToken,
+            counts,
+            cutoffs: Object.fromEntries(
+              plan.map((entry) => [entry.kind, entry.cutoff.toISOString()]),
+            ),
+          },
+          // NOT deduped: `appendAudit` only applies its idempotency lookup to case-scoped entries,
+          // and this has no case. The key is a stable label, not a guarantee of one entry per run.
+          eventKey: `retention:${orgId}:${runToken}`,
+        }),
+      );
     } catch (auditErr) {
       console.error(`[retention] org ${orgId}: sweep audit entry failed to write`, auditErr);
     }

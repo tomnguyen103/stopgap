@@ -728,7 +728,9 @@ afterAll(async () => {
   // `allSettled`, not four sequential awaits: a pool that refuses to drain within the timeout must
   // not stop the other three from closing, or vitest hangs on the open handles rather than
   // reporting whatever actually went wrong.
-  await Promise.allSettled([db, neverScoped, recycled, maint].map((pool) => pool.end({ timeout: 5 })));
+  await Promise.allSettled(
+    [db, neverScoped, recycled, maint].map((pool) => pool.end({ timeout: 5 })),
+  );
 });
 
 describe("cross-tenant SELECT returns zero rows", () => {
