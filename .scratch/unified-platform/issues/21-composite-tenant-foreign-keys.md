@@ -15,7 +15,7 @@ What is still plain: `acknowledgments.case_id` and `audit_log.case_id` both refe
 **Verification receipt (red before green).** `packages/db/src/tenant-keys.e2e.test.ts` was written
 first and run against the schema as it stood:
 
-```
+```text
 × refuses an acknowledgment of another tenant's case
   → promise resolved "[]" instead of rejecting
 ```
