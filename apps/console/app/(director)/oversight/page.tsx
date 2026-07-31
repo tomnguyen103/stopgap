@@ -60,6 +60,9 @@ export default async function OversightPage() {
       </Card>
 
       <Card
+        // Amber when something is waiting on this director, a hairline when nothing is. A card
+        // that is always tinted reports nothing.
+        state={oversight.pendingVersions.length > 0 ? "attention" : "ok"}
         title="Waiting for your approval"
         sub={`${oversight.pendingVersions.length} drafted protocol version${
           oversight.pendingVersions.length === 1 ? "" : "s"
@@ -89,6 +92,9 @@ export default async function OversightPage() {
       </Card>
 
       <Card
+        // Critical, not amber: an unanswered critical case is the most serious thing this page
+        // can report, and it is the reason a director opens it.
+        state={oversight.unacknowledged.length > 0 ? "critical" : "ok"}
         title="Unacknowledged critical cases"
         sub="Critical cases the escalation ladder has not got an answer for"
       >
