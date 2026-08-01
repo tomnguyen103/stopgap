@@ -33,6 +33,8 @@ const nextConfig: NextConfig = {
    * cannot keep.
    */
   headers: () => {
+    const isDev = process.env.NODE_ENV !== "production";
+
     /*
       The IdP's origin, from the issuer the deployment is actually configured with.
 
@@ -65,7 +67,17 @@ const nextConfig: NextConfig = {
       // `next/font` self-hosts and inlines its @font-face, so no font host is needed at all.
       "font-src 'self'",
       "style-src 'self' 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline'",
+      /*
+        `'unsafe-eval'` in DEVELOPMENT ONLY, and it is not optional there: webpack's dev build
+        evaluates module code as strings for its source maps, so a policy without it stops React
+        hydrating at all — every button, toggle and dialog in the console is inert under
+        `pnpm dev`. The production build emits no `eval`, so the shipped policy stays tight.
+
+        Found by pressing Enter on a scope toggle and watching nothing happen:
+        "Evaluating a string as JavaScript violates the following Content Security Policy
+        directive because 'unsafe-eval' is not an allowed source of script".
+      */
+      `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
       "connect-src 'self'",
     ]
       .filter(Boolean)
