@@ -32,3 +32,9 @@ Thumbs.db
 # test artifacts
 playwright-report/
 test-results/
+
+# Scratch API dumps from tooling — never source.
+/c.json
+/cr.json
+/rv.json
+/ci.json
