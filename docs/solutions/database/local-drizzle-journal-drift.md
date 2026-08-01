@@ -19,5 +19,8 @@ history drift, not a defect in the new `demo_runs.visitor_id` SQL.
 Do not rewrite migration history or rerun the full folder blindly against this preserved dev
 database. Apply the exact generated `0023_lyrical_thor_girl.sql` statements idempotently to the
 local database (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`).
-Production deployments still use the normal migrator against a database whose journal is created
-from this repository's migration chain.
+This manual repair deliberately leaves `drizzle.__drizzle_migrations` unsupported for the
+preserved fixture: do not run the normal migrator against this local database afterward, because
+it can replay `0023` against objects that already exist. This procedure repairs only this local
+fixture. Production deployments still use the normal migrator against a database whose journal is
+created from this repository's migration chain.

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb, type Db } from "./client.js";
 import { shadowRuns } from "./schema.js";
 import type { NewShadowRunRow, ShadowRunRow } from "./schema.js";
@@ -19,10 +19,12 @@ export async function recordShadowRun(
   const [row] = await db
     .insert(shadowRuns)
     .values({ ...run, replayDay })
-    // The replay-day index is partial so legacy duplicate rows can retain a NULL day. An
-    // unqualified DO NOTHING lets PostgreSQL infer that index without relying on a conflict-target
-    // predicate unsupported by this Drizzle version; the generated id has no other conflict path.
-    .onConflictDoNothing()
+    // The replay-day index is partial so legacy duplicate rows can retain a NULL day. Target the
+    // exact index so unrelated unique conflicts cannot be swallowed by the idempotency fallback.
+    .onConflictDoNothing({
+      target: [shadowRuns.orgId, shadowRuns.corpusId, shadowRuns.replayDay],
+      where: isNotNull(shadowRuns.replayDay),
+    })
     .returning();
   if (row) return row;
 

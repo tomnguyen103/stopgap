@@ -74,23 +74,15 @@ claims can be made; they are not missing repo work.
 
 ## Historical deferred CodeRabbit findings (PR #1; closed by Phase 6)
 
-- **Closed in Phase 6 PR #6 — audit chain is tamper-evident, not tamper-proof (CWE-345).**
-  `packages/db/src/audit.ts`'s
-  SHA-256 hash chain detects accidental corruption/bugs (verified: manually deleting a row
-  makes `verifyAuditChain` correctly report the break) but anyone with DB write access can
-  recompute the whole chain after editing rows — there's no secret key or external anchor.
-  Phase 1's threat model is internal correctness (concurrent writers, retries), not a
-  compromised DB. Before this is a real compliance control, add either a keyed HMAC (secret
-  outside the DB) or anchor the chain head to an external append-only store.
-- **Closed in Phase 6 PR #6 — monitoring doesn't auto-detect feed resolution.**
-  `pollFeedsWorkflow`/`pollAndOpenCases`
-  only opens cases for `current` shortages; it never checks whether a case already in
-  `monitoring` has dropped off the feed (i.e. resolved) and doesn't call `markResolved` for
-  it. Today resolution requires an external caller (console action, ops script) to signal
-  the case — the weekly tick just re-checks the deadline, not the feed. Wiring
-  `pollAndOpenCases` to also cross-check open `monitoring` cases against the latest feed
-  snapshot and signal resolution is real feature work (Phase 2/3 territory: it needs a
-  feed-diff strategy, not just a poll), deferred rather than bolted on here.
+- **Closed in Phase 6 PR #6 — the audit-chain limitation was resolved.** The old SHA-256-only
+  chain in `packages/db/src/audit.ts` is now protected by versioned HMAC rows, and the anchor
+  activities/routes plus `verifyAnchors` compare the head with an append-only external anchor.
+  See the current implementation and receipts in `PROGRESS.md`.
+- **Closed in Phase 6 PR #6 — feed resolution is now detected by monitoring.**
+  `pollFeedsWorkflow`/`pollAndOpenCases` now use consecutive feed misses or an explicit resolved
+  status to auto-resolve monitoring cases, record audit evidence, and reopen cases when a feed key
+  reappears. See `packages/workflows/src/activities.ts` and `PROGRESS.md` for the current
+  implementation.
 - **Build gate builds only the packages that have a build.** `pnpm gate`'s build step
   produces output for `apps/console` and `shadow-ledger` (the publishable library) — `packages/*` are
   consumed as workspace TS source directly (via `tsx`/Temporal's bundler/Next's transpiler),

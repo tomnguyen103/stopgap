@@ -63,6 +63,7 @@ describe("runShadowEntry", () => {
 
     await runShadowEntry("org-1", entry, "2026-08-01");
 
+    expect(mocks.routeModel).toHaveBeenCalledWith("ollama", { allowFailover: false });
     expect(mocks.recordShadowRun).toHaveBeenCalledWith(
       expect.objectContaining({ corpusId: "corpus-1", replayDay: "2026-08-01", provider: "ollama" }),
       expect.anything(),

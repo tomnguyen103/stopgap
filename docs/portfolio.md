@@ -112,4 +112,4 @@ Insurance against live-demo downtime; script, not yet recorded.
    the resolution becomes v1.
 5. **2:15–2:45 — shadow + evals.** `/shadow` with the real per-class agreement numbers and why
    nothing is promoted yet; the eval failures shown, not skipped.
-6. **2:45–3:00 — what is not built.** No auth, no frontier comparison, no live host.
+6. **2:45–3:00 — what is not built.** No public authentication proof, no frontier comparison, no live host.

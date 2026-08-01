@@ -24,7 +24,7 @@ export async function runShadowEntry(
   // Validate the provider once, then pin both agent calls to it. A second independent health
   // check is allowed to fail, but it must fail the replay rather than silently charging a paid
   // provider to a ledger row whose cost is recorded as zero.
-  const routed = await routeModel();
+  const routed = await routeModel("ollama", { allowFailover: false });
   if (routed.info.usdPer1mInput !== 0 || routed.info.usdPer1mOutput !== 0) {
     throw new Error(
       `shadow replay is local-provider only (routed to ${routed.info.name}/${routed.info.modelId}): ` +
