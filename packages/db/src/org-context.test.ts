@@ -102,7 +102,12 @@ describe("withOrgDb", () => {
     expect(handle).toHaveProperty("execute");
   });
 
-  for (const bad of ["", "not-a-uuid", "00000000-0000-0000-0000-0000000000a", "'; drop table cases; --"]) {
+  for (const bad of [
+    "",
+    "not-a-uuid",
+    "00000000-0000-0000-0000-0000000000a",
+    "'; drop table cases; --",
+  ]) {
     it(`rejects a non-uuid org (${JSON.stringify(bad)}) before touching the database`, async () => {
       transaction.mockClear();
       executed.length = 0;

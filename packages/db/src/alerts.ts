@@ -61,7 +61,9 @@ function assertRuleVocabulary(input: AlertRuleInput, effectiveWebhookUrl: string
     );
   }
   if (input.channels.length === 0) {
-    throw new Error("alert rule must name at least one channel — one that reaches nobody is not a rule");
+    throw new Error(
+      "alert rule must name at least one channel — one that reaches nobody is not a rule",
+    );
   }
   for (const channel of input.channels) {
     if (!(ALLOWED_CHANNELS as readonly string[]).includes(channel)) {
@@ -163,26 +165,26 @@ export async function updateAlertRule(
       input.chatWebhookUrl === undefined ? existing.chatWebhookUrl : input.chatWebhookUrl,
     );
     const [row] = await tx
-    .update(alertRules)
-    .set({
-      name: input.name,
-      enabled: input.enabled ?? true,
-      riskDomain: input.riskDomain ?? null,
-      entityContains: input.entityContains ?? null,
-      minSeverity: input.minSeverity,
-      cooldownMinutes: assertCooldown(input.cooldownMinutes),
-      channels: input.channels,
-      // OMITTED MEANS UNCHANGED, and only an explicit null clears it.
-      //
-      // A chat webhook is a bearer credential: whoever holds the URL can post into the room. With
-      // `?? null` every editor had to send the stored secret back to keep it, which meant handing
-      // it to whatever client was doing the editing. Preserving it here is what lets a console
-      // tune a cooldown without ever being given the credential.
-      ...(input.chatWebhookUrl === undefined ? {} : { chatWebhookUrl: input.chatWebhookUrl }),
-      updatedAt: new Date(),
-    })
-    .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
-    .returning();
+      .update(alertRules)
+      .set({
+        name: input.name,
+        enabled: input.enabled ?? true,
+        riskDomain: input.riskDomain ?? null,
+        entityContains: input.entityContains ?? null,
+        minSeverity: input.minSeverity,
+        cooldownMinutes: assertCooldown(input.cooldownMinutes),
+        channels: input.channels,
+        // OMITTED MEANS UNCHANGED, and only an explicit null clears it.
+        //
+        // A chat webhook is a bearer credential: whoever holds the URL can post into the room. With
+        // `?? null` every editor had to send the stored secret back to keep it, which meant handing
+        // it to whatever client was doing the editing. Preserving it here is what lets a console
+        // tune a cooldown without ever being given the credential.
+        ...(input.chatWebhookUrl === undefined ? {} : { chatWebhookUrl: input.chatWebhookUrl }),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
+      .returning();
     return row;
   });
 }

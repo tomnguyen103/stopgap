@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getEnv } from "@stopgap/core";
 import { ladderPosition } from "@stopgap/workflows";
 
+import { Figure } from "../../components/figure";
 import { TrendChart } from "../../components/trend-chart";
 import { getOversight, getShadowDashboard } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
@@ -47,7 +48,14 @@ export default async function OversightPage() {
       <p className="sub">Exposure across the facility, for the people accountable for it</p>
 
       <section className="ds-figures" aria-label="Headline figures">
-        <Figure label="Open cases" value={oversight.kpis.openCases} />
+        <Figure
+          label="Open cases"
+          value={oversight.kpis.openCases}
+          // The sparkline is `casesOpened` per day — a FLOW under a LEVEL, which is why it carries
+          // its own label rather than being left to read as the figure's own history.
+          spark={oversight.trend.map((day) => day.casesOpened)}
+          sparkLabel="opened per day, 14 days"
+        />
         <Figure label="Awaiting approval" value={oversight.pendingVersions.length} />
         <Figure label="Unacknowledged critical" value={oversight.unacknowledged.length} />
         <Figure label="Exception queue" value={oversight.kpis.exceptionCases} />
@@ -60,6 +68,9 @@ export default async function OversightPage() {
       </Card>
 
       <Card
+        // Amber when something is waiting on this director, a hairline when nothing is. A card
+        // that is always tinted reports nothing.
+        state={oversight.pendingVersions.length > 0 ? "attention" : "ok"}
         title="Waiting for your approval"
         sub={`${oversight.pendingVersions.length} drafted protocol version${
           oversight.pendingVersions.length === 1 ? "" : "s"
@@ -89,6 +100,9 @@ export default async function OversightPage() {
       </Card>
 
       <Card
+        // Critical, not amber: an unanswered critical case is the most serious thing this page
+        // can report, and it is the reason a director opens it.
+        state={oversight.unacknowledged.length > 0 ? "critical" : "ok"}
         title="Unacknowledged critical cases"
         sub="Critical cases the escalation ladder has not got an answer for"
       >
@@ -208,14 +222,5 @@ export default async function OversightPage() {
         )}
       </Card>
     </>
-  );
-}
-
-function Figure({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="ds-figure">
-      <div className="ds-figure__value">{value}</div>
-      <div className="sub">{label}</div>
-    </div>
   );
 }

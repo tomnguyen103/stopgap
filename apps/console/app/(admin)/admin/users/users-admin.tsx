@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import type { Role } from "@stopgap/core";
 import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../../lib/actions";
-import { Button, Card, Table, Toggle } from "../../../components/ui";
+import { Button, Card, ConfirmButton, Table, Toggle } from "../../../components/ui";
 
 /**
  * Role management UI (PHASE6 §6.1). A thin client over the admin server actions — each role is a
@@ -14,6 +14,8 @@ interface AdminUser {
   id: string;
   label: string;
   roles: Role[];
+  /** Soft-disabled. Only ever true when the caller asked to see disabled accounts. */
+  disabled: boolean;
 }
 
 export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: Role[] }) {
@@ -39,7 +41,9 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
     <Card>
       <Table head={["User", "Roles", "Account"]} label="Users and their roles">
         {users.map((user) => (
-          <tr key={user.id}>
+          // A disabled account wears the rail, so it is findable in a mixed list before reading —
+          // and the word "Disabled" in the last cell is what actually says so.
+          <tr key={user.id} data-state={user.disabled ? "attention" : undefined}>
             <td>{user.label}</td>
             <td>
               <div className="actions">
@@ -63,16 +67,34 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
               </div>
             </td>
             <td>
-              <Button
-                type="button"
-                variant="danger"
-                disabled={pending}
-                onClick={() => {
-                  run(() => setUserDisabledAction(user.id, true));
-                }}
-              >
-                Disable
-              </Button>
+              {user.disabled ? (
+                <div className="actions">
+                  <span className="sub">Disabled</span>
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    disabled={pending}
+                    onClick={() => {
+                      run(() => setUserDisabledAction(user.id, false));
+                    }}
+                  >
+                    Enable
+                  </Button>
+                </div>
+              ) : (
+                <ConfirmButton
+                  variant="danger"
+                  disabled={pending}
+                  target={user.label}
+                  confirmLabel="Disable account"
+                  description="They lose access at their next request. Roles are kept, and the account can be re-enabled from the disabled view."
+                  action={() => {
+                    run(() => setUserDisabledAction(user.id, true));
+                  }}
+                >
+                  Disable
+                </ConfirmButton>
+              )}
             </td>
           </tr>
         ))}

@@ -58,7 +58,10 @@ const ID = {
 const raw = postgres(DATABASE_URL, { max: 2, onnotice: () => undefined });
 
 /** Write as a tenant, inside that tenant's own scope — the way the application always writes. */
-async function asOrg<T>(orgId: string, fn: (tx: postgres.TransactionSql) => Promise<T>): Promise<T> {
+async function asOrg<T>(
+  orgId: string,
+  fn: (tx: postgres.TransactionSql) => Promise<T>,
+): Promise<T> {
   return raw.begin(async (tx) => {
     await tx`select set_config('app.current_org', ${orgId}, true)`;
     return fn(tx);
@@ -69,7 +72,8 @@ beforeAll(async () => {
   // Asked of the SERVER, not of the connection string, the way `rls.e2e.test.ts` asks it. A url
   // pattern only catches the compose default; any other superuser would sail past it and take the
   // suite with it — the writes below would be measured against a role no policy applies to.
-  const [role] = await raw`select rolsuper, rolbypassrls from pg_roles where rolname = current_user`;
+  const [role] =
+    await raw`select rolsuper, rolbypassrls from pg_roles where rolname = current_user`;
   if (role?.rolsuper || role?.rolbypassrls) {
     throw new Error(
       `DATABASE_URL names ${role.rolsuper ? "a superuser" : "a BYPASSRLS role"}; ` +
@@ -169,13 +173,17 @@ const CROSS_TENANT_WRITES: readonly {
   },
   {
     key: "audit_log_org_case_fk",
-    write: (tx) => tx`insert into audit_log (org_id, case_id, actor, action, detail, hash, prev_hash)
+    write: (
+      tx,
+    ) => tx`insert into audit_log (org_id, case_id, actor, action, detail, hash, prev_hash)
                       values (${ORG_A}, ${ID.caseB}, 'fixture', 'tenant-keys.probe', '{}'::jsonb,
                               ${"f".repeat(64)}, ${"0".repeat(64)})`,
   },
   {
     key: "protocol_versions_org_protocol_fk",
-    write: (tx) => tx`insert into protocol_versions (org_id, protocol_id, version, body, authored_by)
+    write: (
+      tx,
+    ) => tx`insert into protocol_versions (org_id, protocol_id, version, body, authored_by)
                       values (${ORG_A}, ${ID.protocolB}, 1, 'fixture', 'agent')`,
   },
   {
@@ -211,22 +219,30 @@ const CROSS_TENANT_WRITES: readonly {
   },
   {
     key: "inventory_snapshots_org_facility_fk",
-    write: (tx) => tx`insert into inventory_snapshots (org_id, facility_id, item_id, on_hand, captured_at)
+    write: (
+      tx,
+    ) => tx`insert into inventory_snapshots (org_id, facility_id, item_id, on_hand, captured_at)
                       values (${ORG_A}, ${ID.facilityB}, ${ID.itemA}, 5, now())`,
   },
   {
     key: "inventory_snapshots_org_item_fk",
-    write: (tx) => tx`insert into inventory_snapshots (org_id, facility_id, item_id, on_hand, captured_at)
+    write: (
+      tx,
+    ) => tx`insert into inventory_snapshots (org_id, facility_id, item_id, on_hand, captured_at)
                       values (${ORG_A}, ${ID.facilityA}, ${ID.itemB}, 5, now())`,
   },
   {
     key: "procurement_events_org_facility_fk",
-    write: (tx) => tx`insert into procurement_events (org_id, facility_id, item_id, ordered_at, quantity)
+    write: (
+      tx,
+    ) => tx`insert into procurement_events (org_id, facility_id, item_id, ordered_at, quantity)
                       values (${ORG_A}, ${ID.facilityB}, ${ID.itemA}, now(), 1)`,
   },
   {
     key: "procurement_events_org_item_fk",
-    write: (tx) => tx`insert into procurement_events (org_id, facility_id, item_id, ordered_at, quantity)
+    write: (
+      tx,
+    ) => tx`insert into procurement_events (org_id, facility_id, item_id, ordered_at, quantity)
                       values (${ORG_A}, ${ID.facilityA}, ${ID.itemB}, now(), 1)`,
   },
   {

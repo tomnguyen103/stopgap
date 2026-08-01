@@ -5,8 +5,20 @@
 # Langfuse both expose case data and prompt text, and neither has an auth layer of its own
 # worth the name here — so both sit behind basic auth. See PHASE5-TODO.md "Auth".
 
+# HSTS lives HERE and not in `next.config.ts` (P4.5). A header promising HTTPS, emitted by an
+# application that may be reached over plain HTTP behind a proxy, is a promise the application
+# cannot keep — Caddy is the only process in this deployment that knows the connection is TLS.
+#
+# Two years, subdomains included. No `preload`: that is a one-way submission to a browser-vendor
+# list, and it should be a deliberate decision by whoever owns the domain rather than a side
+# effect of a design programme.
+(hsts) {
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+}
+
 {$APP_DOMAIN} {
 	encode zstd gzip
+	import hsts
 	reverse_proxy console:3000
 }
 
@@ -16,6 +28,7 @@
 # forwards the forwarded-proto/host headers it expects.
 {$AUTH_DOMAIN} {
 	encode zstd gzip
+	import hsts
 	reverse_proxy keycloak:8080
 }
 
@@ -23,6 +36,7 @@
 # UI can also terminate them.
 {$TEMPORAL_DOMAIN} {
 	encode zstd gzip
+	import hsts
 	basic_auth {
 		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
 	}
@@ -33,6 +47,7 @@
 # being reachable by anyone who finds the subdomain.
 {$TRACES_DOMAIN} {
 	encode zstd gzip
+	import hsts
 	basic_auth {
 		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
 	}
@@ -45,6 +60,7 @@
 # unreachable in the deployed stack: no container publishes a port except Caddy.
 {$OPS_DOMAIN} {
 	encode zstd gzip
+	import hsts
 	basic_auth {
 		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
 	}

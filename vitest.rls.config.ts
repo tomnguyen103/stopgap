@@ -46,6 +46,7 @@ export default defineConfig({
       "packages/db/src/retention.e2e.test.ts",
       "packages/db/src/protocols.e2e.test.ts",
       "packages/db/src/tenant-keys.e2e.test.ts",
+      "packages/db/src/users.e2e.test.ts",
     ],
     fileParallelism: false,
     testTimeout: 60_000,

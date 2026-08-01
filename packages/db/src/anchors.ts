@@ -49,7 +49,9 @@ function derTlv(tag: number, content: Buffer): Buffer {
 export function buildTimestampRequest(sha256HexDigest: string): Buffer {
   const digest = Buffer.from(sha256HexDigest, "hex");
   if (digest.length !== 32) {
-    throw new Error(`buildTimestampRequest: expected a 32-byte SHA-256 digest, got ${digest.length} bytes`);
+    throw new Error(
+      `buildTimestampRequest: expected a 32-byte SHA-256 digest, got ${digest.length} bytes`,
+    );
   }
   const version = derTlv(0x02, Buffer.from([0x01])); // INTEGER 1
   const algId = derTlv(0x30, Buffer.concat([SHA256_OID, derTlv(0x05, Buffer.alloc(0))])); // SEQ { OID, NULL }
@@ -152,7 +154,10 @@ async function anchorOneOrg(db: Db, orgId: string): Promise<AuditAnchorRow | nul
  * caller owns the enumeration (the activity already lists orgs for other work) and so a test can
  * anchor a known set without seeding the registry.
  */
-export async function anchorAuditChain(db: Db, orgIds: readonly string[]): Promise<AuditAnchorRow[]> {
+export async function anchorAuditChain(
+  db: Db,
+  orgIds: readonly string[],
+): Promise<AuditAnchorRow[]> {
   const rows: AuditAnchorRow[] = [];
   for (const orgId of orgIds) {
     // Sequential, not `Promise.all`: each iteration appends a line to ONE file, and concurrent
@@ -295,7 +300,8 @@ export async function verifyAnchors(
       headMatches: liveHash === anchor.headHash,
       // Compare the OUTSIDE-the-DB record against the live chain. null when we have no external
       // record for this org+id (file missing/unreadable, or this anchor predates the file).
-      externalMatches: external === null || externalHead === undefined ? null : externalHead === liveHash,
+      externalMatches:
+        external === null || externalHead === undefined ? null : externalHead === liveHash,
     };
   });
 }

@@ -24,7 +24,12 @@ describe("orderBy", () => {
   const columns = { title: riskSignals.title, publishedAt: riskSignals.publishedAt };
 
   it("uses the requested column and direction", () => {
-    const sql = orderBy(columns, riskSignals.publishedAt, { sort: "title", dir: "asc", limit: 1, offset: 0 });
+    const sql = orderBy(columns, riskSignals.publishedAt, {
+      sort: "title",
+      dir: "asc",
+      limit: 1,
+      offset: 0,
+    });
     expect(sql.queryChunks.some((chunk) => chunk === riskSignals.title)).toBe(true);
   });
 
@@ -37,7 +42,11 @@ describe("orderBy", () => {
     // A bare `columns[sort]` returns `Object.prototype.constructor` here: a function, not
     // undefined, so the `?? fallback` would never fire and drizzle would be handed a non-column.
     for (const inherited of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
-      const sql = orderBy(columns, riskSignals.publishedAt, { sort: inherited, limit: 1, offset: 0 });
+      const sql = orderBy(columns, riskSignals.publishedAt, {
+        sort: inherited,
+        limit: 1,
+        offset: 0,
+      });
       expect(sql.queryChunks.some((chunk) => chunk === riskSignals.publishedAt)).toBe(true);
     }
   });

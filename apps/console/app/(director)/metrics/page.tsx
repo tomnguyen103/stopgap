@@ -2,9 +2,28 @@ import { getKpis, withOrgDb } from "@stopgap/db";
 import { getShadowDashboard } from "../../lib/data";
 import { resolvePrincipal } from "../../lib/principal";
 import { requireGroup } from "../../lib/group-guard";
-import { Table } from "../../components/ui";
+import { Card, type CardState } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
+
+type Verdict = "met" | "missed" | "unknown" | "none";
+
+/**
+ * How each verdict reads — as a rail tint AND as a word, in one place.
+ *
+ * One table rather than two parallel `Record`s: a fifth verdict added to two maps is a fifth
+ * verdict someone forgets in one of them, and a `Record<Verdict, …>` makes that a type error
+ * rather than an `undefined` at render.
+ *
+ * `unknown` gets no rail. It is not a failure — the deployment simply has no data yet — and
+ * tinting it would make an absent denominator look like a missed target.
+ */
+const VERDICTS: Record<Verdict, { state: CardState | undefined; label: string }> = {
+  met: { state: "ok", label: "met" },
+  missed: { state: "critical", label: "missed" },
+  unknown: { state: undefined, label: "not enough data yet" },
+  none: { state: undefined, label: "" },
+};
 
 function pct(value: number | undefined): string {
   return value === undefined ? "—" : `${(value * 100).toFixed(0)}%`;
@@ -37,7 +56,21 @@ export default async function MetricsPage() {
     0,
   );
 
-  const rows: { metric: string; value: string; target: string; note: string }[] = [
+  /**
+   * A KPI, and whether it is being met.
+   *
+   * `verdict` is DERIVED from the number beside it, never written by hand, and it is deliberately
+   * three-valued. A metric with no data yet is `unknown` — not `missed` — because rendering "no
+   * reviewed cases yet" as a failed target invents a denominator the deployment does not have,
+   * and a director acting on that would be acting on nothing.
+   */
+  const rows: {
+    metric: string;
+    value: string;
+    target: string;
+    verdict: Verdict;
+    note: string;
+  }[] = [
     {
       metric: "Time to approved protocol (median)",
       value:
@@ -45,30 +78,46 @@ export default async function MetricsPage() {
           ? "—"
           : `${kpis.medianHoursToApproval.toFixed(1)} h`,
       target: "< 1 h machine + review latency",
+      verdict:
+        kpis.medianHoursToApproval === undefined
+          ? "unknown"
+          : kpis.medianHoursToApproval < 1
+            ? "met"
+            : "missed",
       note: "Manual baseline is days. Measured from case.detected to case.approved in the audit trail.",
     },
     {
       metric: "Draft acceptance (unedited)",
       value: pct(kpis.draftAcceptanceRate),
       target: "≥ 80%",
+      verdict:
+        kpis.draftAcceptanceRate === undefined
+          ? "unknown"
+          : kpis.draftAcceptanceRate >= 0.8
+            ? "met"
+            : "missed",
       note: `${kpis.reviewedCases} reviewed case${kpis.reviewedCases === 1 ? "" : "s"}. An edit counts against acceptance.`,
     },
     {
       metric: "Under-escalation (worst drug class)",
       value: shadow.length === 0 ? "—" : pct(worstUnderEscalation),
       target: "≈ 0",
+      verdict: shadow.length === 0 ? "unknown" : worstUnderEscalation === 0 ? "met" : "missed",
       note: "Shadow runs where the agent called a shortage less severe than the human baseline.",
     },
     {
       metric: "Dropped cases",
       value: String(kpis.droppedCases),
       target: "0",
+      verdict: kpis.droppedCases === 0 ? "met" : "missed",
       note: "Open cases with no state change in 90 days — every shortage must reach a terminal state.",
     },
     {
       metric: "Exception queue",
       value: String(kpis.exceptionCases),
       target: "—",
+      // No target, so no verdict. A card with a rail here would claim a judgement nobody made.
+      verdict: "none",
       note: "Cases waiting on a pharmacist. Not a failure: escalation is the designed behaviour.",
     },
   ];
@@ -81,19 +130,31 @@ export default async function MetricsPage() {
         {kpis.terminalCases} closed or rejected
       </p>
 
-      <Table
-        head={["Metric", "Now", "Target", "What it means"]}
-        label="Programme metrics against target"
-      >
+      {/*
+        Figure tiles, not a four-column table. A KPI dashboard whose numbers are table cells makes
+        the target column and the measurement column the same size, so nothing on the page is the
+        headline — and the number IS the headline. Display-32 tabular, label beneath in Micro.
+      */}
+      <div className="ds-figures" role="group" aria-label="Programme metrics against target">
         {rows.map((row) => (
-          <tr key={row.metric}>
-            <td>{row.metric}</td>
-            <td className="is-status">{row.value}</td>
-            <td>{row.target}</td>
-            <td className="is-subtle">{row.note}</td>
-          </tr>
+          <Card key={row.metric} state={VERDICTS[row.verdict].state} className="ds-figure">
+            <p className="ds-figure__value">{row.value}</p>
+            <p className="ds-figure__label">{row.metric}</p>
+            <p className="ds-figure__target">
+              Target {row.target}
+              {/* The verdict in WORDS as well as in the rail's colour. The rail is what a director
+                  finds scanning; this is what tells them, and a colourblind reader, which it is. */}
+              {row.verdict === "none" ? null : (
+                <>
+                  {" · "}
+                  <b>{VERDICTS[row.verdict].label}</b>
+                </>
+              )}
+            </p>
+            <p className="sub sub-tight">{row.note}</p>
+          </Card>
         ))}
-      </Table>
+      </div>
     </>
   );
 }

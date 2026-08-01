@@ -200,9 +200,11 @@ export async function getAuditIntegrity(): Promise<{
 }
 
 /** Active users with their roles, for the admin management page (PHASE6 §6.1). */
-export async function getUsers(): Promise<(UserRow & { roles: Role[] })[]> {
+export async function getUsers(
+  options: { includeDisabled?: boolean } = {},
+): Promise<(UserRow & { roles: Role[] })[]> {
   const orgId = await currentOrgId();
-  return withOrgDb(orgId, (db) => listUsers(orgId, db));
+  return withOrgDb(orgId, (db) => listUsers(orgId, db, options));
 }
 
 /**

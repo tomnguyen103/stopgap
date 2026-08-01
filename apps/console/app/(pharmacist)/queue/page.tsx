@@ -8,6 +8,8 @@ import { requireGroup } from "../../lib/group-guard";
 import { isException, parseCaseQueueParams, CASE_QUEUE_SCHEMA } from "../../lib/case-queue";
 import { filterValue, listHref, pageCount, sortHref, toggleFilterHref } from "../../lib/list-href";
 import { bandSeverity } from "../../lib/signal-list";
+import { FilterChips } from "../../components/filter-chips";
+import { sortHead } from "../../components/sort-link";
 import { Badge, Button, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +50,15 @@ export default async function CaseQueuePage({
     getFeedFreshness(),
   ]);
   const pages = pageCount(queue.total, params.pageSize);
+
+  /** A sortable column heading for this list, carrying `aria-sort` on the cell. */
+  const head = (key: string, label: string) =>
+    sortHead({
+      href: sortHref(params, key, CASE_QUEUE_SCHEMA),
+      label,
+      active: params.sort === key,
+      dir: params.dir,
+    });
 
   return (
     <>
@@ -105,22 +116,13 @@ export default async function CaseQueuePage({
         </form>
 
         {Object.entries(CASE_QUEUE_SCHEMA.filters).map(([key, allowed]) => (
-          <div className="ds-chips" key={key}>
-            <span className="sub">{key}</span>
-            {allowed.map((value) => {
-              const active = (params.filters[key] ?? []).includes(value);
-              return (
-                <Link
-                  key={value}
-                  className={active ? "ds-chip ds-chip--on" : "ds-chip"}
-                  href={toggleFilterHref(params, key, value, CASE_QUEUE_SCHEMA)}
-                  aria-current={active ? "true" : undefined}
-                >
-                  {value.replace(/_/g, " ")}
-                </Link>
-              );
-            })}
-          </div>
+          <FilterChips
+            key={key}
+            groupKey={key}
+            allowed={allowed}
+            active={params.filters[key] ?? []}
+            hrefFor={(value) => toggleFilterHref(params, key, value, CASE_QUEUE_SCHEMA)}
+          />
         ))}
 
         {queue.rows.length === 0 ? (
@@ -131,24 +133,19 @@ export default async function CaseQueuePage({
           <Table
             label="Open cases, ranked by risk score"
             head={[
-              <Link key="entity" href={sortHref(params, "entity", CASE_QUEUE_SCHEMA)}>
-                Drug
-              </Link>,
+              head("entity", "Drug"),
               "Status",
-              <Link key="severity" href={sortHref(params, "severity", CASE_QUEUE_SCHEMA)}>
-                Severity
-              </Link>,
+              head("severity", "Severity"),
               "Domain",
-              <Link key="score" href={sortHref(params, "score", CASE_QUEUE_SCHEMA)}>
-                Score
-              </Link>,
-              <Link key="updated" href={sortHref(params, "updated", CASE_QUEUE_SCHEMA)}>
-                Updated
-              </Link>,
+              head("score", "Score"),
+              head("updated", "Updated"),
             ]}
           >
             {queue.rows.map((row) => (
-              <tr key={row.id}>
+              // The Ledger Rail marks a row the workflow escalated. It repeats what the badge in
+              // the next cell already says — deliberately: the badge is what a reader RESOLVES,
+              // the rail is what they find without reading.
+              <tr key={row.id} data-state={isException(row.status) ? "attention" : undefined}>
                 <td>
                   <Link href={`/cases/${encodeURIComponent(row.workflowId)}`}>
                     {row.genericName}

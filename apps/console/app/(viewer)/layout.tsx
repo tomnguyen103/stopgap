@@ -15,7 +15,7 @@ import { requireGroup } from "../lib/group-guard";
  * group — including ones added later, which is what stops a new page shipping unguarded.
  */
 
-const NAV: NavLink[] = [{ href: "/overview", label: "Overview" }];
+const NAV: NavLink[] = [{ href: "/overview", label: "Overview", icon: "overview" }];
 
 export default async function ViewerLayout({ children }: { children: ReactNode }) {
   const principal = await requireGroup("viewer");

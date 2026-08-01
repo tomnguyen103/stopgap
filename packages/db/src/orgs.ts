@@ -74,9 +74,15 @@ export async function getOrganization(id: string): Promise<OrganizationRow | und
  * than a second tenant wearing the same handle — a duplicate slug would make every URL and ops
  * command that addresses an org by name ambiguous, which is worse than a failed insert.
  */
-export async function createOrganization(input: { slug: string; name: string }): Promise<OrganizationRow> {
+export async function createOrganization(input: {
+  slug: string;
+  name: string;
+}): Promise<OrganizationRow> {
   const db = getDb();
-  const [row] = await db.insert(organizations).values({ slug: input.slug, name: input.name }).returning();
+  const [row] = await db
+    .insert(organizations)
+    .values({ slug: input.slug, name: input.name })
+    .returning();
   if (!row) throw new Error(`createOrganization: insert returned no row for ${input.slug}`);
   return row;
 }

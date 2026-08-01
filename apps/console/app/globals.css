@@ -229,8 +229,19 @@
      would lose its SIZE and LEADING as well as its face. */
   --font-body: var(--font-geist-sans, ui-sans-serif), system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono, ui-monospace), monospace;
-  --dur-fast: 120ms;
-  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  /*
+    ---- Motion (§7) --------------------------------------------------------------------------
+    CSS only. This console is server-rendered with deliberately few client components, and
+    shipping a motion runtime to animate a hover state would be a real regression in a product
+    whose pages already reason about their Flight payload.
+
+    Exit is faster than enter, so dismissal feels immediate rather than reluctant.
+  */
+  --dur-fast: 120ms; /* hover, focus, rail tint             */
+  --dur-base: 180ms; /* chip toggle, row expand, badge swap */
+  --dur-slow: 240ms; /* drawer, banner in and out           */
+  --ease-out: cubic-bezier(0.32, 0.72, 0, 1); /* the house curve */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 
   /* ---- Component: what the primitives in app/components/ui/ read --------------------------- */
   --badge-border: var(--border-default);
@@ -339,6 +350,8 @@ a {
   gap: var(--space-2);
 }
 .rail__brand {
+  display: inline-flex;
+  gap: var(--space-1);
   font-weight: 600;
   letter-spacing: -0.01em;
   font-size: var(--type-heading);
@@ -366,9 +379,31 @@ a {
   bottom. One pseudo-element, no JavaScript, no image. It survives `forced-colors` because the
   item's own text still changes weight and colour, so the mark never carries the state alone.
 */
+/* The sprite itself renders nothing — it is a library of `<symbol>`s for `<use>` to point at.
+   A class rather than `style={{ display: "none" }}`: colour and layout live in the stylesheet, and
+   an inline style is a value no token, no theme and no CSP audit can see. */
+.ds-sprite {
+  display: none;
+}
+.ds-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: none;
+  stroke: currentcolor;
+  /*
+    §8 asks for a 1.25px stroke at 20px. The paths are drawn on a 24-unit grid, so a `stroke-width`
+    of 1.25 would be scaled down with them and paint ~1.04px. 1.5 on the grid is 1.25 on screen.
+  */
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .rail__item {
   position: relative;
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   color: var(--text-subtle);
@@ -442,13 +477,9 @@ a {
 
 @media (min-width: 768px) {
   .shell {
-    /*
-      §5.2 specifies 64px icon-only here. The console ships NO icon set until P4.6 — the wordmark
-      is the `◐` character — so a 64px rail at this breakpoint truncates every label to three or
-      four characters and folds the org badge to one letter per line. A readable text rail is the
-      honest intermediate; the 64px variant lands with the icons it depends on.
-    */
-    grid-template-columns: 200px minmax(0, 1fr);
+    /* §5.2: icon-only from 768 to 1023. The labels stay in the DOM (`.rail__label` below) — an
+       icon-only rail must not be an unlabelled one. */
+    grid-template-columns: 64px minmax(0, 1fr);
   }
   .rail {
     flex-direction: column;
@@ -472,7 +503,7 @@ a {
   }
   .rail__head {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: var(--space-1);
   }
   /* The surface name returns at 1024px, where the head has room for it beside the wordmark. */
@@ -486,11 +517,51 @@ a {
   .rail__item {
     /* 40px rows (§5.2) — a real pointer target, and enough to read the active rail against. */
     min-height: 40px;
-    display: flex;
-    align-items: center;
+    justify-content: center;
+    padding: var(--space-2);
+  }
+  /*
+    Hidden from the eye, present for everything else. `display: none` would take the item's
+    accessible NAME with it and leave a link announced as a picture, so both are CLIPPED instead —
+    `.ds-sr-only`'s technique, in one rule rather than restated per selector.
+  */
+  .rail__label,
+  .rail__wordmark {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
     overflow: hidden;
+    clip-path: inset(50%);
     white-space: nowrap;
-    text-overflow: ellipsis;
+  }
+  /*
+    The wordmark and the org badge both overflow a 64px column. Neither is DELETED: the wordmark's
+    glyph stays and its word is clipped, and the badge collapses to a marked dot whose `aria-label`
+    and `title` still carry the whole sentence. That warning — "you are writing into another
+    hospital's records" — is the last thing that may become unreachable, so it keeps its name in
+    the accessibility tree at every width.
+  */
+  .active-org-badge {
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    align-self: center;
+  }
+  .active-org-badge__label,
+  .active-org-badge__name,
+  .active-org-badge__slug {
+    display: none;
+  }
+  .active-org-badge::before {
+    content: "!";
+    font-weight: 600;
+    font-size: var(--type-small);
+  }
+  .rail__principal {
+    display: none;
   }
   .rail__foot {
     flex-direction: column;
@@ -518,6 +589,36 @@ a {
   }
   .rail__surface {
     display: inline;
+  }
+  .rail__item {
+    justify-content: flex-start;
+    padding: var(--space-2) var(--space-3);
+  }
+  .rail__label,
+  .rail__wordmark {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: hidden;
+    clip-path: none;
+    text-overflow: ellipsis;
+  }
+
+  .active-org-badge {
+    justify-content: flex-start;
+    width: auto;
+    height: auto;
+    padding: var(--space-1) var(--space-3);
+  }
+  .active-org-badge::before {
+    content: none;
+  }
+  .active-org-badge__label,
+  .active-org-badge__name,
+  .active-org-badge__slug,
+  .rail__principal {
+    display: revert;
   }
   .shell__main {
     padding: var(--space-7);
@@ -708,6 +809,13 @@ h2 {
 .banner.bad {
   border-color: var(--crit);
   color: var(--crit);
+}
+/* Caution. Reserved for "this needs your attention now" — an issued key you will not see again —
+   as distinct from `.bad`, which is what a broken audit chain gets. */
+.banner.warn {
+  border-color: var(--high);
+  background: var(--surface-warn);
+  color: var(--text-default);
 }
 .match-ok {
   color: var(--ok);
@@ -936,13 +1044,18 @@ h2 {
   min-height: var(--button-min-height);
   font: 600 var(--type-md) / 1 var(--font-body);
   cursor: pointer;
-  transition: filter var(--dur-fast) var(--ease-out);
+  transition:
+    filter var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 .ds-button:hover:not(:disabled) {
   filter: brightness(1.08);
 }
 .ds-button:active:not(:disabled) {
   filter: brightness(0.92);
+  /* A press, not an effect. 1.5% is below the threshold at which it reads as an animation and
+     above the threshold at which a finger feels nothing. */
+  transform: scale(0.985);
 }
 /* Never transition the ring: a focus indicator that fades in is a focus indicator you can miss. */
 .ds-button:focus-visible {
@@ -953,9 +1066,36 @@ h2 {
   opacity: var(--button-disabled-opacity);
   cursor: not-allowed;
 }
+/*
+  A pending action. The label stays put and a 2px platinum bar travels the button's own width —
+  no spinner glyph, no width change, no layout shift, and nothing that has to be positioned
+  against a label of unknown length. Pairs with the `aria-busy` the primitive already sets, which
+  is what actually tells a screen reader; the bar is for the eye.
+*/
 .ds-button[data-state="loading"] {
   opacity: var(--button-disabled-opacity);
   cursor: progress;
+  position: relative;
+  overflow: hidden;
+}
+.ds-button[data-state="loading"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 40%;
+  background: var(--button-fg);
+  /* `linear`: an indeterminate bar has no start or end to ease between. */
+  animation: ds-indeterminate 1.1s linear infinite;
+}
+@keyframes ds-indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(350%);
+  }
 }
 /*
   Outlined variants draw a real BORDER, exactly as `button.danger` has always done. An inset
@@ -985,13 +1125,48 @@ h2 {
 }
 
 /* Card — the same panel the console has always drawn, expressed once. */
+/*
+  ---- The Ledger Rail (§6) -------------------------------------------------------------------
+  A 2px vertical rail on the left edge, inset top and bottom, tinted by the element's state.
+
+  Why this and not an ornament: the two structures this product is built on — a hash-chained
+  audit log and an escalation ladder — are both ordered vertical sequences, and a rail running
+  down a stack of cards is that structure drawn. It does real work too: a director scanning
+  `/oversight` had to read five card titles to find the one that needed them, and an amber rail
+  is findable in peripheral vision before reading.
+
+  One pseudo-element, one custom property. No JavaScript, no image, no extra DOM. The border-box
+  survives `forced-colors`, and the rail never carries meaning alone — the badge or figure inside
+  the card still says what the state is.
+*/
 .ds-card {
+  position: relative;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
   margin-bottom: var(--space-4);
   box-shadow: var(--elev-raised);
+}
+.ds-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-3);
+  bottom: var(--space-3);
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--rail, var(--line-default));
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.ds-card[data-state="critical"] {
+  --rail: var(--severity-critical);
+}
+.ds-card[data-state="attention"] {
+  --rail: var(--severity-high);
+}
+.ds-card[data-state="ok"] {
+  --rail: var(--status-ok);
 }
 /* Matches the global `h2` rule exactly — a card rebuilt on the primitive must not shift. */
 .ds-card__title {
@@ -1048,6 +1223,12 @@ h2 {
 .ds-table-scroll {
   overflow-x: auto;
 }
+/* Only ever focusable when it actually scrolls (see `ScrollRegion`), so this ring only appears on
+   a region there is something to do with. */
+.ds-table-scroll:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .ds-table {
   width: 100%;
   border-collapse: collapse;
@@ -1071,8 +1252,55 @@ h2 {
   text-transform: uppercase;
   letter-spacing: var(--tracking-micro);
 }
+.ds-table tr td {
+  transition: background var(--dur-fast) var(--ease-out);
+}
 .ds-table tr:hover td {
   background: var(--table-row-hover);
+}
+/* The rail tints with the row. On a row with no state of its own this is the whole hover mark
+   on the left edge; on an exception row the state colour wins, because it already has one. */
+.ds-table tbody tr:hover {
+  --rail: var(--line-default);
+}
+/*
+  The same rail, on a row that has a state — and on a hovered row, which is the hover mark on the
+  left edge. A `tr` cannot host an absolutely-positioned pseudo-element reliably across engines,
+  so the row's FIRST CELL carries it, which is also where the eye starts.
+*/
+.ds-table tr[data-state="critical"],
+.ds-table tbody tr[data-state="critical"]:hover {
+  --rail: var(--severity-critical);
+}
+.ds-table tr[data-state="attention"],
+.ds-table tbody tr[data-state="attention"]:hover {
+  --rail: var(--severity-high);
+}
+.ds-table tr[data-state="ok"],
+.ds-table tbody tr[data-state="ok"]:hover {
+  --rail: var(--status-ok);
+}
+/*
+  EVERY row carries the rail, at rest as well as on hover. §7 says the row's rail "tints from
+  `--line-subtle` to `--line-default`", and a rail that only exists while hovered does not tint —
+  it appears, which is a different and noisier thing on a 400-row queue.
+
+  The inset is `--space-2` rather than the card's `--space-3`: a 40px row inset 12px top and
+  bottom leaves a 16px mark, which reads as a dash rather than a rail.
+*/
+.ds-table tbody tr td:first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-2);
+  bottom: var(--space-2);
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--rail, var(--line-subtle));
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.ds-table td:first-child {
+  position: relative;
 }
 /* Same pair `.sub` applies when it lands on a cell: recede, and drop one type step. */
 .ds-table td.is-subtle {
@@ -1085,9 +1313,22 @@ h2 {
   font-weight: 600;
 }
 
+/*
+  Every duration to 1ms, not only the button's. The block this replaces named `.ds-button` alone,
+  so the rail tint, the row hover, the link underline, the toggle and the drawer all kept moving
+  for a reader who had asked them not to.
+
+  `1ms` rather than `none`: a zero-duration transition still fires `transitionend`, so nothing
+  that waits on one silently stops working.
+*/
 @media (prefers-reduced-motion: reduce) {
-  .ds-button {
-    transition-duration: 1ms;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -1101,7 +1342,7 @@ h2 {
   display: grid;
   /* `minmax(0, 1fr)`, not `1fr`: a long figure otherwise widens its track and pushes the page
      sideways on a 320px viewport. */
-  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: var(--space-3);
   margin: var(--space-4) 0;
 }
@@ -1111,6 +1352,37 @@ h2 {
   border-radius: var(--card-radius);
   padding: var(--card-pad-y) var(--card-pad-x);
   box-shadow: var(--elev-raised);
+}
+/* A Card used as a figure tile sits in the grid, so its stack margin would double the gap. */
+.ds-figures .ds-card {
+  margin-bottom: 0;
+}
+.ds-figure__label {
+  margin: var(--space-1) 0 0;
+  color: var(--text-subtle);
+  font-size: var(--type-micro);
+  line-height: var(--leading-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+}
+/* Reads `currentColor`, so the line takes the subtle text colour rather than introducing one. */
+.ds-spark {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-subtle);
+}
+.ds-spark svg {
+  display: block;
+  width: 100%;
+  max-width: 96px;
+  height: 20px;
+}
+.ds-figure__target,
+.ds-figure__caption {
+  margin: var(--space-2) 0 0;
+  color: var(--text-subtle);
+  font-size: var(--type-small);
+  font-variant-numeric: var(--font-numeric);
 }
 .ds-figure__value {
   font-size: var(--type-display);
@@ -1132,6 +1404,14 @@ h2 {
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+/* The group's name, in the same Micro voice as a column heading — it is the same kind of thing. */
+.ds-chips__label {
+  color: var(--text-subtle);
+  font-size: var(--type-micro);
+  line-height: var(--leading-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
 }
 .ds-chip {
   border: 1px solid var(--badge-border);
@@ -1195,8 +1475,37 @@ h2 {
   max-height: 80vh;
   overflow-y: auto;
 }
+.ds-drawer[open] {
+  animation: ds-drawer-in var(--dur-slow) var(--ease-out);
+}
+@keyframes ds-drawer-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 .ds-drawer::backdrop {
   background: var(--surface-scrim);
+}
+.ds-drawer[open]::backdrop {
+  animation: ds-fade-in var(--dur-base) var(--ease-out);
+}
+@keyframes ds-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* The confirmation reuses the drawer's elevation — it is the same kind of surface — at a width
+   sized to one sentence rather than to a captured URL. */
+.ds-confirm {
+  width: min(420px, calc(100vw - var(--space-6)));
 }
 .ds-drawer__head {
   display: flex;

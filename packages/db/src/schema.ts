@@ -1304,7 +1304,6 @@ export const connectorRuns = pgTable(
 
 export type ConnectorRunRow = typeof connectorRuns.$inferSelect;
 
-
 /**
  * ---------------------------------------------------------------------------------------------
  * The facility catalog (ticket 15). Eight TENANT tables — what this hospital actually stocks.

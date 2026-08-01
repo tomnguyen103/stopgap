@@ -34,7 +34,10 @@ const ORG_A = "00000000-0000-0000-0000-0000000000a1";
 const ORG_B = "00000000-0000-0000-0000-0000000000b2";
 
 /** Build a valid chain of rows under the given per-row schemes. */
-function buildChain(entries: (EntryFields & { scheme: Scheme })[], hmacKey?: string): VerifiableRow[] {
+function buildChain(
+  entries: (EntryFields & { scheme: Scheme })[],
+  hmacKey?: string,
+): VerifiableRow[] {
   const rows: VerifiableRow[] = [];
   let prevHash = GENESIS_HASH;
   entries.forEach((e, i) => {
@@ -169,7 +172,12 @@ describe("verifyChainRows", () => {
     tail.hash = computeAuditHash(
       "v2",
       tail.prevHash,
-      { caseId: tail.caseId ?? undefined, actor: tail.actor, action: tail.action, detail: tail.detail },
+      {
+        caseId: tail.caseId ?? undefined,
+        actor: tail.actor,
+        action: tail.action,
+        detail: tail.detail,
+      },
       KEY,
     );
     const result = verifyChainRows(rows, KEY);
@@ -263,7 +271,16 @@ describe("hashed payload is stable (PHASE6 §6.1 audit-chain-unchanged guarantee
 describe("v3 binds actorUserId into the HMAC (PHASE6 §6.1, CWE-353)", () => {
   it("accepts a v3 chain carrying actorUserId", () => {
     const rows = buildChain(
-      [{ scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" }],
+      [
+        {
+          scheme: "v3",
+          caseId: "c1",
+          actor: "pharmacist-1",
+          action: "review.approve",
+          detail: {},
+          actorUserId: "u-1",
+        },
+      ],
       KEY,
     );
     expect(verifyChainRows(rows, KEY)).toEqual({ ok: true });
@@ -271,7 +288,16 @@ describe("v3 binds actorUserId into the HMAC (PHASE6 §6.1, CWE-353)", () => {
 
   it("fails a v3 row whose actorUserId was reattributed without recomputing the hash", () => {
     const rows = buildChain(
-      [{ scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" }],
+      [
+        {
+          scheme: "v3",
+          caseId: "c1",
+          actor: "pharmacist-1",
+          action: "review.approve",
+          detail: {},
+          actorUserId: "u-1",
+        },
+      ],
       KEY,
     );
     // A DB writer rewrites the recorded principal — the v3 HMAC no longer matches.
@@ -284,7 +310,16 @@ describe("v3 binds actorUserId into the HMAC (PHASE6 §6.1, CWE-353)", () => {
 
   it("v2 ignores actorUserId — reattributing it does NOT break a legacy v2 row (only v3 binds it)", () => {
     const rows = buildChain(
-      [{ scheme: "v2", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" }],
+      [
+        {
+          scheme: "v2",
+          caseId: "c1",
+          actor: "pharmacist-1",
+          action: "review.approve",
+          detail: {},
+          actorUserId: "u-1",
+        },
+      ],
       KEY,
     );
     rows[0]!.actorUserId = "u-attacker";
@@ -298,7 +333,14 @@ describe("monotonic scheme rank (v1 < v2 < v3)", () => {
       [
         { scheme: "v1", caseId: "c1", actor: "system", action: "case.detected", detail: {} },
         { scheme: "v2", caseId: "c1", actor: "system", action: "case.assessing", detail: {} },
-        { scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" },
+        {
+          scheme: "v3",
+          caseId: "c1",
+          actor: "pharmacist-1",
+          action: "review.approve",
+          detail: {},
+          actorUserId: "u-1",
+        },
       ],
       KEY,
     );
@@ -309,7 +351,14 @@ describe("monotonic scheme rank (v1 < v2 < v3)", () => {
     // Attacker relabels/rebuilds a lower-ranked row after v3 to strip the actorUserId binding.
     const rows = buildChain(
       [
-        { scheme: "v3", caseId: "c1", actor: "pharmacist-1", action: "review.approve", detail: {}, actorUserId: "u-1" },
+        {
+          scheme: "v3",
+          caseId: "c1",
+          actor: "pharmacist-1",
+          action: "review.approve",
+          detail: {},
+          actorUserId: "u-1",
+        },
         { scheme: "v2", caseId: "c1", actor: "system", action: "comms.sent", detail: {} },
       ],
       KEY,
@@ -381,7 +430,17 @@ describe("v4 binds orgId into the HMAC (PHASE6 §6.5)", () => {
     // This is what makes migration 0013's backfill safe: every historical row was stamped with the
     // seed org and not one hash changed. The weakness is real and is precisely why v4 exists.
     const rows = buildChain(
-      [{ scheme: "v3", caseId: "c1", actor: "system", action: "case.detected", detail: {}, actorUserId: "u-1", orgId: ORG_A }],
+      [
+        {
+          scheme: "v3",
+          caseId: "c1",
+          actor: "system",
+          action: "case.detected",
+          detail: {},
+          actorUserId: "u-1",
+          orgId: ORG_A,
+        },
+      ],
       KEY,
     );
     rows[0]!.orgId = ORG_B;
@@ -428,8 +487,23 @@ describe("v4 binds orgId into the HMAC (PHASE6 §6.5)", () => {
       [
         { scheme: "v1", caseId: "c1", actor: "system", action: "case.detected", detail: {} },
         { scheme: "v2", caseId: "c1", actor: "system", action: "case.assessing", detail: {} },
-        { scheme: "v3", caseId: "c1", actor: "system", action: "case.researching", detail: {}, actorUserId: "u-1" },
-        { scheme: "v4", caseId: "c1", actor: "system", action: "comms.sent", detail: {}, actorUserId: "u-1", orgId: ORG_A },
+        {
+          scheme: "v3",
+          caseId: "c1",
+          actor: "system",
+          action: "case.researching",
+          detail: {},
+          actorUserId: "u-1",
+        },
+        {
+          scheme: "v4",
+          caseId: "c1",
+          actor: "system",
+          action: "comms.sent",
+          detail: {},
+          actorUserId: "u-1",
+          orgId: ORG_A,
+        },
       ],
       KEY,
     );
@@ -441,8 +515,24 @@ describe("chains are independent per org (PHASE6 §6.5)", () => {
   const chainFor = (orgId: string, note: string) =>
     buildChain(
       [
-        { scheme: "v4", caseId: "c1", actor: "system", action: "case.detected", detail: { note }, actorUserId: "u-1", orgId },
-        { scheme: "v4", caseId: "c1", actor: "system", action: "comms.sent", detail: { note }, actorUserId: "u-1", orgId },
+        {
+          scheme: "v4",
+          caseId: "c1",
+          actor: "system",
+          action: "case.detected",
+          detail: { note },
+          actorUserId: "u-1",
+          orgId,
+        },
+        {
+          scheme: "v4",
+          caseId: "c1",
+          actor: "system",
+          action: "comms.sent",
+          detail: { note },
+          actorUserId: "u-1",
+          orgId,
+        },
       ],
       KEY,
     );
@@ -467,7 +557,10 @@ describe("chains are independent per org (PHASE6 §6.5)", () => {
   it("two orgs' rows verified TOGETHER break at the crossover (why the reader filters by org)", () => {
     // Feeding the verifier an unfiltered, deployment-wide row set is a correct answer to the
     // wrong question: org B's first row chains to GENESIS, not to org A's head.
-    const merged = [...chainFor(ORG_A, "a"), ...chainFor(ORG_B, "b")].map((r, i) => ({ ...r, id: i + 1 }));
+    const merged = [...chainFor(ORG_A, "a"), ...chainFor(ORG_B, "b")].map((r, i) => ({
+      ...r,
+      id: i + 1,
+    }));
     const result = verifyChainRows(merged, KEY);
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("prev-hash-mismatch");

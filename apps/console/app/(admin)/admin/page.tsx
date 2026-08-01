@@ -145,7 +145,21 @@ export default async function AdminIndexPage() {
         {isDemoMode() ? " · demo deployment" : ""}
       </p>
 
-      <Card title="Setup checklist" sub="Each line answered by a query, not by a flag">
+      <Card
+        // The checklist IS this page's state: every line answered by a query, so "all done" is a
+        // fact rather than a flag someone set.
+        state={checklist.every((row) => row.done) ? "ok" : "attention"}
+        title="Setup checklist"
+        // The rail's verdict, in words. §6 requires the rail never to carry meaning alone, and an
+        // AGGREGATE state is the one a reader cannot recover by looking at the rows themselves.
+        sub={
+          checklist.every((row) => row.done)
+            ? "Every line answered by a query, not by a flag · all complete"
+            : `Each line answered by a query, not by a flag · ${String(
+                checklist.filter((row) => !row.done).length,
+              )} outstanding`
+        }
+      >
         <Table label="Setup checklist" head={["", "Item", "State"]}>
           {checklist.map((row) => (
             <tr key={row.label}>
