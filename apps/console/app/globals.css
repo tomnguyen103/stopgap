@@ -390,7 +390,7 @@ a {
   height: 20px;
   flex: none;
   fill: none;
-  stroke: currentColor;
+  stroke: currentcolor;
   /*
     §8 asks for a 1.25px stroke at 20px. The paths are drawn on a 24-unit grid, so a `stroke-width`
     of 1.25 would be scaled down with them and paint ~1.04px. 1.5 on the grid is 1.25 on screen.

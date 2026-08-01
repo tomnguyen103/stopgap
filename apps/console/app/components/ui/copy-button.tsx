@@ -14,8 +14,11 @@ import { Button } from "./button";
  * clipboard has no UI), so it needs saying, and saying it where the click happened is quieter than
  * a notification. `aria-live="polite"` on the label, because the change is the whole message.
  *
- * `navigator.clipboard` is unavailable on an insecure origin. The failure says so instead of
- * silently doing nothing, since "I clicked copy" is exactly the belief that loses the key.
+ * `navigator.clipboard` is UNDEFINED on an insecure origin, not merely failing — so reaching for
+ * `.writeText` throws synchronously, before there is a promise to attach a `.catch` to. Left that
+ * way the button swallows the error and stays idle, which is the exact failure this component
+ * exists to prevent: "I clicked copy" is the belief that loses a key shown once. The guard runs
+ * first and says so.
  */
 export function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
@@ -26,6 +29,10 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
       variant="quiet"
       state={state === "failed" ? "error" : undefined}
       onClick={() => {
+        if (!navigator.clipboard) {
+          setState("failed");
+          return;
+        }
         navigator.clipboard
           .writeText(value)
           .then(() => {
