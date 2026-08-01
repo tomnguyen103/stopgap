@@ -1,9 +1,10 @@
-# Phase 5 — open items (ship / deploy / extract / writeups)
+# Phase 5 — closeout and owner-controlled items
 
-Phase 5 is in progress. Deploy and demo mode are done (see PROGRESS.md); everything still
-open is listed here.
+The repo-controlled Phase 5 work is complete and merged. Deployment rehearsal, demo mode,
+`shadow-ledger` extraction, the writeup, post-mortem and portfolio copy are delivered in the
+repository; only the owner-controlled release/deployment actions below remain.
 
-## Remaining from the plan (§13 Phase 5, §11 deployment)
+## Remaining owner actions from the plan (§13 Phase 5, §11 deployment)
 
 - **Provisioning.** The compose stack, Caddyfile and runbook exist and were rehearsed on a
   local Docker daemon; no VPS has been rented, so Let's Encrypt issuance and the public
@@ -17,6 +18,9 @@ open is listed here.
   (`docs/writeup.md`, `docs/post-mortem.md`, `docs/portfolio.md`, the last containing the
   video outline); pushing them to public channels is the owner's call, not an agent's.
 
+No item in this section authorizes the agent to rent hosting, publish to an account, or send
+public communications. These are release decisions, not implementation gaps.
+
 ## Done in Phase 5
 
 - Deployment stack + runbook (`deploy/`, `docs/deploy.md`).
@@ -26,21 +30,30 @@ open is listed here.
   freshness panel, daily USD cap with local-model fallback (`@stopgap/demo`,
   `@stopgap/observability` spend cap, `llm_spend`, `demo_runs`).
 
-## Deliberate deviations from §11 (recorded, not dropped)
+## Resolved repo-side closeout decisions
 
-- **The demo seed writes no shadow-ledger rows.** §11 lists a "populated shadow ledger" in
-  the nightly re-seed. Seeding it would mean inventing agreement percentages and printing
-  them on a dashboard whose whole purpose is to report measured agreement. The runbook
-  instead populates `/shadow` by running the real replay on the host, so every figure there
-  was actually measured.
-- **The scenario rate limit is deployment-wide, not per visitor.** §11 says "generous
-  per-visitor limits". Without an auth layer there is no honest way to tell two visitors
-  apart — an IP is not a person — and a per-IP limit would read as a stronger guarantee than
-  it is. One busy visitor can use up the hour's runs. Per-visitor limits land with auth.
-- **The `ollama` container and the over-cap fallback are unexercised.** The local rehearsal
-  pointed the containers at a host Ollama, so the in-cluster model service has not run.
+- **Measured demo shadow rows are now populated by the nightly service.** The seed still writes
+  only cases and protocols, never invented agreement percentages. In demo mode, `demo-seed`
+  runs the real `@stopgap/shadow replay` after the idempotent seed; the replay writes measured
+  rows and remains observational. Migration `0024_icy_barracuda.sql` makes a corpus entry
+  idempotent per UTC day while preserving duplicate legacy evidence. The runbook's manual replay
+  command is retained as a backfill.
+- **Scenario limits are now per anonymous visitor plus an aggregate demo bound.**
+  `startDemoShortage` issues a server-generated httpOnly visitor UUID cookie, `demo_runs` stores it,
+  and the reservation advisory lock/count enforce both `(org_id, visitor_id)` and the aggregate
+  `(org_id)` hourly limits. Clearing the cookie cannot bypass `DEMO_MAX_RUNS_PER_HOUR_TOTAL`; the
+  optional daily LLM spend cap remains an additional hard deployment boundary.
+- **The Ollama image has a local runtime receipt; full deployment fallback remains follow-up.**
+  `ollama/ollama:0.5.7` started on CPU against the local model store, exposed the cached models,
+  and generated a response from `mistral:latest`. The provider tests cover the budget switch, but
+  the full production Compose network plus over-cap request path still belongs to the VPS/runtime
+  rehearsal, not a missing repository implementation.
 
-## Stubbed during this run — needs real credentials/config before Phase 5
+## External/configuration follow-up (owner-controlled)
+
+These integrations are implemented in the repository. They remain unconfigured in this local
+environment and need deployment credentials or provider accounts before provider-specific live
+claims can be made; they are not missing repo work.
 
 - **`GEMINI_API_KEY` absent.** The Gemini provider is implemented but not exercised
   against the live API. Local gate + CI run on Ollama. Set the key and run the
@@ -59,16 +72,18 @@ open is listed here.
   openFDA opens cases live. ASHP mappers are unit-tested against a recorded fixture.
   Set `ASHP_AUTH_KEY` for ASHP to actually poll and merge into the dedup/auto-open path.
 
-## Deferred CodeRabbit findings (PR #1)
+## Historical deferred CodeRabbit findings (PR #1; closed by Phase 6)
 
-- **Audit chain is tamper-evident, not tamper-proof (CWE-345).** `packages/db/src/audit.ts`'s
+- **Closed in Phase 6 PR #6 — audit chain is tamper-evident, not tamper-proof (CWE-345).**
+  `packages/db/src/audit.ts`'s
   SHA-256 hash chain detects accidental corruption/bugs (verified: manually deleting a row
   makes `verifyAuditChain` correctly report the break) but anyone with DB write access can
   recompute the whole chain after editing rows — there's no secret key or external anchor.
   Phase 1's threat model is internal correctness (concurrent writers, retries), not a
   compromised DB. Before this is a real compliance control, add either a keyed HMAC (secret
   outside the DB) or anchor the chain head to an external append-only store.
-- **Monitoring doesn't auto-detect feed resolution.** `pollFeedsWorkflow`/`pollAndOpenCases`
+- **Closed in Phase 6 PR #6 — monitoring doesn't auto-detect feed resolution.**
+  `pollFeedsWorkflow`/`pollAndOpenCases`
   only opens cases for `current` shortages; it never checks whether a case already in
   `monitoring` has dropped off the feed (i.e. resolved) and doesn't call `markResolved` for
   it. Today resolution requires an external caller (console action, ops script) to signal
@@ -86,9 +101,9 @@ open is listed here.
 
 - `.env.example` documents every variable. Copy to `.env` and fill before deploy.
 
-## Auth (blocks several Phase 4 claims)
+## Historical auth note (closed by Phase 6)
 
-Stopgap has **no authentication layer**. Consequences, all recorded rather than hidden:
+Before Phase 6, Stopgap had **no authentication layer**. The historical consequences were:
 
 - Console server actions and Temporal signals are unauthenticated. The reviewer identity is a
   claim, written to the audit trail as `identitySource: workflow-signal-claim` and as the
@@ -101,7 +116,10 @@ Stopgap has **no authentication layer**. Consequences, all recorded rather than 
 - Per-role restrictions on which exception types a user may resolve
   (`docs/exception-matrix.md`) need this first.
 
-Until it exists, run the console and MCP server bound to localhost only.
+Phase 6 PR #7 adds Keycloak OIDC/RBAC and PR #9 moves programmatic review behind scoped API
+keys. Current auth/browser evidence is recorded in `PROGRESS.md` and
+`docs/coverage-ledger-2026-08-01.md`; the historical localhost-only instruction no longer
+describes the merged repository.
 
 ## Phase 3 deferrals
 

@@ -162,6 +162,20 @@
       "when": 1785462712725,
       "tag": "0022_breezy_lord_tyger",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785596989026,
+      "tag": "0023_lyrical_thor_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785602807640,
+      "tag": "0024_icy_barracuda",
+      "breakpoints": true
     }
   ]
 }

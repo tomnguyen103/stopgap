@@ -1,19 +1,52 @@
 # Stopgap — Build Progress
 
-**Phases 1–6 are merged to `main`.** Deploy + demo mode are built and
-verified locally; `shadow-ledger` extraction and the writeups remain. Open items and known
-gaps stay in `PHASE5-TODO.md`.
+**Phases 1–6 are merged to `main`.** The repo-controlled Phase 5 work is complete: deploy
+rehearsal, demo mode, `shadow-ledger` extraction and the writeups are delivered. Remaining
+items are owner-controlled release/deployment actions or credential-dependent measurements,
+listed in `PHASE5-TODO.md`.
 
 Single source of truth: `PROJECT_PLAN.md`. This file tracks phase status against the
 plan's build table (§13).
 
-## Environment (verified 2026-07-23)
+## Environment (verified 2026-08-01)
 
 - node v24.15.0 · pnpm 10.34.5 · git 2.54 · Docker 29.6.2 (daemon up) · gh 2.93 (authed)
 - Ollama 0.32.3 local; models present: `mistral`, `gemma4:12b`, `gemma4`, `qwen3.6`
 - codegraph 0.9.8 · graphify 0.9.19
 - **No `GEMINI_API_KEY` / `RESEND_API_KEY` / Langfuse keys in env** → those providers are
-  stubbed; local gate + CI run on Ollama (as the plan intends). See `PHASE5-TODO.md`.
+  intentionally unconfigured; local gate + CI run on Ollama (as the plan intends). See
+  `PHASE5-TODO.md`.
+- Current live verification also has the local Keycloak realm, Postgres app role, Temporal,
+  Prometheus, Grafana and Alertmanager available. The enforcing RLS tier passed 259 tests with
+  `stopgap_app`; the default superuser connection remains local-development-only.
+
+## Phase 5/6 receipt index (2026-08-01)
+
+- `pnpm test:rls`: **9 files, 259 passed, 0 skipped** with `stopgap_app` plus the maintenance
+  role. The superuser refusal remains a deliberate fail-closed guard.
+- Authenticated browser smoke: **5/5 passed** after the default-Keycloak-origin CSP fix, using
+  the enforcing app role. Demo smoke: **4/4 passed** after zero-config principal hardening.
+- Exact mobile design proof: **7/7 surfaces passed at 375px** (overview, queue, case detail,
+  oversight, admin, API keys and users); every page reported viewport/client/document/body width
+  375 with zero browser errors/warnings and failed requests.
+- UI evidence: **14** desktop/mobile role, case-detail and admin-credential captures reported
+  `status=200`, zero browser console errors/warnings and zero failed requests. The bad hard-coded
+  case key used in the first exploratory script was replaced with a live workflow id before the
+  final captures.
+- `pnpm eval`: **15/19 passed** in this live Ollama run. Four failures were model-quality signal,
+  not deterministic gate failures: `heparin-multi-ndc` alternative expectation,
+  `methotrexate-preservative-free` alternative expectation, `rho-d-immune-globulin` severity /
+  alternative expectation, and the closing-delimiter injection alternative assertion. The
+  existing Phase 2/4 notes document this small-model variance and weakness class; no threshold
+  was invented for a non-blocking eval signal.
+- `pnpm verify-audit`: **exit 1**, reporting `chain BROKEN for org stopgap at row 7
+  (prev-hash-mismatch)` and zero anchors checked. This is the already-investigated 58-link fork
+  from the 2026-07-23 stale worker during the 57-case bulk poll; current advisory-lock code and
+  fresh-database concurrency tests remain the evidence for the fix. The dev artifact is retained
+  rather than rewritten; see `docs/post-mortem.md`.
+- Final post-change `pnpm gate` is **green**: lint, typecheck, 75 test files/892 tests and
+  production build. Local diff review, PR review and main synchronization remain closeout steps
+  below.
 
 ## Phase 1 — Spine (weeks 1–2)
 
@@ -92,7 +125,8 @@ golden dataset v1; Langfuse; eval CI gate on Ollama.
   3. **Severity floors** on a few critical-care items (epinephrine, succinylcholine).
   A Gemini-class model is expected to do better on all three; that comparison is the blocked
   item below.
-- [ ] Gemini-vs-Ollama comparison table (blocked on `GEMINI_API_KEY`, see `PHASE5-TODO.md`)
+- [ ] Gemini-vs-Ollama comparison table — **owner/configuration blocker:** no
+  `GEMINI_API_KEY` is present; the comparison remains explicitly unmeasured.
 
 ## Phase 3 — Memory + shadow (weeks 4–6)
 
@@ -128,8 +162,8 @@ replay corpus + agreement dashboard; promotion gates.
   still running without the advisory-lock fix. Current code is correct: 12 concurrent
   `appendAudit` calls against the same database produced zero forks. The dev database keeps
   the historical break; a fresh database does not reproduce it.
-- [ ] Extract `shadow-ledger` as a standalone npm library (PROJECT_PLAN §12 artifact 5 —
-  Phase 5 packaging work)
+- [x] Extracted `shadow-ledger` as a standalone dependency-free library (PROJECT_PLAN §12
+  artifact 5); npm publication remains an owner-controlled release action.
 
 ## Phase 4 — Product (weeks 6–8)
 
@@ -174,11 +208,12 @@ doc; injection test suite; provider comparison table.
 
 ## Phase 5 — Ship (weeks 8–10)
 
-**Status:** 🚧 in progress. Deploy + demo mode built and verified locally; library extraction
-and writeups are the remaining items.
+**Status:** ✅ repo-controlled work complete. Deploy + demo mode, library extraction and
+writeups are delivered and verified locally; external publication/hosting actions remain.
 
-Target deliverable: VPS deploy (incl. Ollama container); demo mode; extract `shadow-ledger`
-lib; writeup; post-mortem; portfolio page + video.
+Target deliverable: VPS deploy (incl. Ollama container); demo mode; extracted `shadow-ledger`
+library; writeup; post-mortem; portfolio page + video. The VPS/public-release portions are
+owner-controlled and not represented as shipped here.
 
 - [x] Deployment stack (`deploy/`): Dockerfile with `console`/`worker` targets,
   `docker-compose.prod.yml` (app, worker, Temporal + UI, one Postgres with three databases,
@@ -190,8 +225,12 @@ lib; writeup; post-mortem; portfolio page + video.
   refused in the server action, not merely hidden), "Run a shortage" against a fixed drug
   catalogue with an hourly rate limit counted from a durable `demo_runs` table, nightly
   idempotent re-seed of three mid-lifecycle cases (day 2 / 18 / 45) and their protocol
-  history. The limit is deployment-wide rather than per visitor, and the seed writes no
-  shadow-ledger rows — both deviations from §11, recorded in `PHASE5-TODO.md` with reasons.
+  history. The quota is scoped to a server-issued anonymous visitor cookie and an aggregate
+  per-demo-tenant hourly bound, so clearing the cookie cannot bypass the demo guard; demo mode
+  runs the real measured shadow replay after seeding, with the optional daily spend cap as an
+  additional hard boundary. The Ollama image now has a local
+  CPU-container receipt; the remaining unverified item is the full production Compose network
+  and over-cap request rehearsal, recorded in `PHASE5-TODO.md`.
 - [x] Live-feed panel with a last-polled timestamp (§11). Building it surfaced that nothing
   had ever written `feed_records` — the table existed from Phase 1 but the poll path never
   persisted to it, so provenance for "which feed record opened this case" did not exist.
@@ -215,7 +254,11 @@ lib; writeup; post-mortem; portfolio page + video.
   model calls the case made. What did **not** run: Caddy (needs public DNS), the Temporal UI,
   the whole Langfuse stack, the long-running `demo-seed` service, and the `ollama` container —
   the rehearsal pointed the containers at a host Ollama (`docker-compose.localcheck.yml`), so
-  the in-cluster model container and the over-cap fallback path are still unexercised.
+  the production Compose network and over-cap fallback path are still unexercised. A follow-up
+  local receipt started `ollama/ollama:0.5.7` on CPU against the cached model store, listed five
+  models and generated from `mistral:latest`; the provider unit suite proves the cap switch. The
+  production Compose loop now preserves `STOPGAP_DEMO_MODE` for the container shell and invokes
+  measured shadow replay after each nightly seed.
 - [x] **Bug the rehearsal caught:** `next build` minifies function names, so starting a
   workflow by passing the imported function sent Temporal the workflow type `aa` — every case
   started from the deployed console died with "no such function is exported by the workflow
@@ -237,12 +280,29 @@ lib; writeup; post-mortem; portfolio page + video.
 
 ---
 
+## Current verification (2026-08-01)
+
+- `pnpm test:rls` — **green:** 9 files, 259 passed, 0 skipped, using the enforcing
+  `stopgap_app` application role plus the separate maintenance role.
+- `pnpm test:browser` — **green:** 5 authenticated Keycloak tests passed. The console was
+  started with the enforcing application role for this receipt.
+- `pnpm test:browser:demo` — **green:** 4 anonymous demo tests passed after the zero-config
+  Auth.js/principal hardening.
+- Desktop/mobile Playwright captures cover the four role landings, the case detail, and both
+  admin credential surfaces. The clean captures are kept outside the repository under the
+  visualization workspace; each page reported zero browser console errors/warnings and zero
+  failed requests. A final exact-375px proof covered overview, queue, case detail, oversight,
+  admin, API keys and users with zero document/body horizontal overflow.
+- The historical receipt below is retained as historical context. Final gate, eval and audit
+  receipts are recorded above; local review and delivery receipt remain closeout checks for this
+  branch.
+
 ## Merged-PR log
 
 <!-- append one line per merged PR: ✅ <PR title> — <what it proved> -->
 ✅ Phase 6 PR E — multi-tenancy with Postgres RLS ([#10](https://github.com/tomnguyen103/stopgap/pull/10)) — closes Phase 6. Isolation moved into Postgres rather than WHERE clauses: `organizations` plus `org_id` on nine tenant tables (migrations 0013/0014, nullable → backfill to a seed org → NOT NULL, because a NOT NULL column added outright fails on every non-empty table), each with ENABLE + FORCE + one policy whose USING and WITH CHECK match. FORCE is the load-bearing word — without it the table owner is exempt, and the owner is who the app connects as, so the policies would be installed and enforcing nothing with green tests to match. `current_setting('app.current_org', true)` returns NULL when unset and `org_id = NULL` is not TRUE, so an unscoped connection sees nothing rather than everything: forgetting to scope yields an empty page someone reports on day one instead of another hospital's data nobody notices. Two pools — a non-superuser app role RLS applies to, and a BYPASSRLS maintenance role for the genuinely cross-tenant work (migrations, anchoring, verification, and the two identity lookups whose output IS the org). That split was the critical local-review finding: the first cut ran `withBypassDb` on the app pool, so there was no configuration in which isolation was both enforced and functional. A startup probe, a `readyz` check, and hard refusals in anchoring and `verify-audit` mean neither can pass vacuously. Audit chain gains scheme `v4` binding `org_id` while v1–v3 bytes stay frozen — which is exactly what lets 0013 backfill `org_id` without invalidating one historical hash; head, advisory lock, verification and anchoring are all per-org. The org comes from the session, the API key, or the workflow input and nowhere else. CodeRabbit caught two that mattered: `GRANT ALL` handed the app role TRUNCATE, which bypasses RLS, so the one role the policies constrain could have wiped every tenant; and `CaseInput.orgId` becoming required would have broken every in-flight execution on replay (90-day monitoring makes in-flight the normal state), now handled with `patched()`. RLS behaviour and both migrations are NOT verified — no database in this environment; `pnpm test:rls` covers them, including a migration replay proving the backfill preserves the chain, and refuses to run as superuser rather than report a green board proving nothing. 306 tests, gate clean, CodeRabbit clean after 1 fix round (all 14 findings fixed).
 
-✅ Phase 6 PR B — RBAC + OIDC SSO wired into the audit chain ([#7](https://github.com/tomnguyen103/stopgap/pull/7)) — Auth.js (NextAuth v5) + Keycloak OIDC (seeded `stopgap` realm, one demo user per role) with an edge-safe split config; middleware protects every console route, unauthenticated → Keycloak sign-in, demo/unconfigured → anonymous read-only viewer (honest non-configuration, no faked auth, no MissingSecretError crash). Additive migration 0010 adds `users`/`user_roles` and nullable `users.id` FKs on `audit_log`/`protocol_versions`; legacy rows backfill to synthetic system/agent users. Server-side role matrix (viewer<pharmacist<pharmacy_director<admin) via `requireRole` at the top of every mutating action; reviewer/approver identity comes from the session (real `users.id`), never a client string, threaded into `audit_log.actor_user_id`. Disabled users are rejected at sign-in; privileged audits fire only on real state changes. Audit chain gains a v3 scheme that binds `actor_user_id` into the HMAC (CWE-353) while v1/v2 stay byte-stable, so verification still passes across the migration boundary. Prod compose imports no dev realm/creds (CWE-798). 163 tests, gate clean, CodeRabbit clean after 2 fix rounds (incl. a HIGH partial-index ON CONFLICT bug caught in local review).
+✅ Phase 6 PR B — RBAC + OIDC SSO wired into the audit chain ([#7](https://github.com/tomnguyen103/stopgap/pull/7)) — Auth.js (NextAuth v5) + Keycloak OIDC (seeded `stopgap` realm, one demo user per role) with an edge-safe split config; middleware protects every console route, unauthenticated → Keycloak sign-in, explicit demo mode → anonymous read-only viewer, and non-demo missing auth → fail-closed 503 (honest non-configuration, no faked auth, no MissingSecretError crash). Additive migration 0010 adds `users`/`user_roles` and nullable `users.id` FKs on `audit_log`/`protocol_versions`; legacy rows backfill to synthetic system/agent users. Server-side role matrix (viewer<pharmacist<pharmacy_director<admin) via `requireRole` at the top of every mutating action; reviewer/approver identity comes from the session (real `users.id`), never a client string, threaded into `audit_log.actor_user_id`. Disabled users are rejected at sign-in; privileged audits fire only on real state changes. Audit chain gains a v3 scheme that binds `actor_user_id` into the HMAC (CWE-353) while v1/v2 stay byte-stable, so verification still passes across the migration boundary. Prod compose imports no dev realm/creds (CWE-798). 163 tests, gate clean, CodeRabbit clean after 2 fix rounds (incl. a HIGH partial-index ON CONFLICT bug caught in local review).
 
 ✅ Phase 6 PR D — public API with scoped keys + OpenAPI ([#9](https://github.com/tomnguyen103/stopgap/pull/9)) — one authorization path for all programmatic access. `api_keys` (migration 0012) stores a SHA-256 hash only, so a database read — dump, replica, stray backup — cannot mint a usable credential; the plaintext is returned once at issue and never persisted or logged. Per-key hourly limit reuses the `demo_runs` reservation shape (one transaction, per-key advisory lock, count-then-insert; row locks cannot fix that race, it is a phantom insert) and prunes its own counter rows so the table does not grow without bound. Seven REST routes under `/api/v1` gate authenticate → authorize → throttle: unknown and revoked keys are indistinguishable so the API is not an oracle for probing leaked strings, a wrong-scope caller is told which scope they need, and throttling comes last so an unauthenticated flood cannot spend a real key's budget. Store outages answer 503, never 401 (a bad-credential lie sends an integrator to rotate a key that was fine) and the rate reservation fails closed. Temporal transport failures report the outcome as UNKNOWN rather than claiming nothing was recorded — the signal may have landed before the response was lost, and a blind retry would double-apply a clinical decision. Every write lands in the audit chain as `api-key:<name>` with the issuing human's `users.id` beside it: the key acted, a named human is answerable for having issued it, and neither is dressed up as a pharmacist session. OpenAPI 3.1 is built from the same Zod schemas the routes validate with and a test walks `app/api/v1` so a route cannot ship undocumented; `/api/v1/docs` renders server-side with zero external requests after a CDN-loaded Swagger bundle with no integrity pinning was caught in local review. The MCP server no longer imports `@stopgap/db` or `@stopgap/workflows` at all — `STOPGAP_MCP_ALLOW_REVIEW` is gone, and "may this client write?" is now a scope an admin ticked, audited and revocable, not an env var on the MCP host. 230 tests, gate clean, CodeRabbit clean after 1 fix round (5 of 6 findings fixed; a durable-outbox redesign declined as out of scope and recorded).
 
@@ -256,7 +316,7 @@ lib; writeup; post-mortem; portfolio page + video.
 
 ---
 
-## Final verification (2026-07-23, on `main` at Phase 4 merge)
+## Historical verification (2026-07-23, on `main` at Phase 4 merge)
 
 - `pnpm gate` — **green**: lint + typecheck + 68 tests + build.
 - `pnpm eval` (live Ollama, non-blocking by design) — 14/19 checks passed on the final run.
@@ -275,42 +335,42 @@ lib; writeup; post-mortem; portfolio page + video.
 
 # Programme — unified supply-resilience platform
 
-Spec: `docs/unified-platform-spec.md`. Tickets: `.scratch/unified-platform/issues/01…20`, twenty
-vertical slices with explicit blocking edges. A ticket is done only when its pull request is
-**merged**.
+Spec: `docs/unified-platform-spec.md`. Tickets: `.scratch/unified-platform/issues/01…21`,
+twenty-one vertical slices with explicit blocking edges. The programme closeout (PR #38)
+re-verified the ticket criteria against the tree; the ticket files are the detailed acceptance
+records. A ticket is complete when its repo work is merged, or when the ticket explicitly records
+an owner action/closed decision.
 
-Reviews are the pacing constraint, not the code: CodeRabbit's fair-usage policy allows roughly one
-review per hour, so branches open as **drafts** (which cost no review event), are iterated and
-locally reviewed there, and are flipped ready one at a time as quota refills. A parked pull request
-is never merged without its review.
-
-| # | Ticket | State | PR |
+| # | Ticket | Current state | Delivery record |
 | --- | --- | --- | --- |
-| — | Role landing route + pure list-state module (foundation for 03, 08) | **merged** | #11 |
-| 01 | Keycloak with seeded per-role users | **merged** | #12 |
-| 02 | Design tokens and shared primitives | draft, awaiting refill | #16 |
-| 03 | Route groups and per-role landing | in progress, stacked on #16 | — |
-| 04 | Browser smoke tier | blocked by 03 | — |
-| 05 | Normalized signal contract, recall and device feeds | draft, awaiting refill | #14 |
-| 06 | Risk signal and snapshot persistence | draft, stacked on #14 | #18 |
-| 07 | Deterministic risk scorer | draft, stacked on #18 | #19 |
-| 08 | Viewer dashboard | blocked by 03, 07 | — |
-| 09 | Evidence artifacts | draft, stacked on #19 | #20 |
-| 10 | Compliance guard | draft, awaiting refill | #13 |
-| 11 | Pharmacist dashboard | blocked by 03, 07, 09, 10 | — |
-| 12 | Alert rules, cooldowns and delivery | blocked by 07 | — |
-| 13 | Daily brief | blocked by 07 | — |
-| 14 | Pharmacy director dashboard | blocked by 03, 12, 13 | — |
-| 15 | Catalog schema and CSV import | draft, awaiting refill | #15 |
-| 16 | Signal matching and score completion | blocked by 07, 15 | — |
-| 17 | Administrator dashboard | blocked by 03, 15, 16 | — |
-| 18 | Retention schedule | blocked by 06, 15 | — |
-| 19 | Signals, scores and catalog on the public API | blocked by 07, 15 | — |
-| 20 | Archive medical-supply-monitor | blocked by 16, 17 | — |
+| — | Role landing route + pure list-state foundation | **merged** | #11 |
+| 01 | Keycloak with seeded per-role users | **merged** | ticket 01 / closeout #38 |
+| 02 | Design tokens and shared primitives | **merged** | #34, reverified #38 |
+| 03 | Route groups and per-role landing | **merged** | #34, reverified #38 |
+| 04 | Browser smoke tier | **merged** | #34; current auth 5/5 + demo 4/4 |
+| 05 | Normalized signal contract, recall and device feeds | **merged** | #14 |
+| 06 | Risk signal and snapshot persistence | **merged** | #18 |
+| 07 | Deterministic risk scorer | **merged** | #19 |
+| 08 | Viewer dashboard | **merged** | #34, reverified #38 |
+| 09 | Evidence artifacts | **merged** | #20 |
+| 10 | Compliance guard | **merged** | ticket 10 / closeout #38 |
+| 11 | Pharmacist dashboard | **merged** | #34, reverified #38 |
+| 12 | Alert rules, cooldowns and delivery | **merged** | #22 |
+| 13 | Daily brief | **merged** | #31 |
+| 14 | Pharmacy director dashboard | **merged** | #37 |
+| 15 | Catalog schema and CSV import | **merged** | #15 |
+| 16 | Signal matching and score completion | **merged** | #15 |
+| 17 | Administrator dashboard | **merged** | #37/#38; model spend cap closed by decision |
+| 18 | Retention schedule | **merged** | #15 |
+| 19 | Signals, scores and catalog on the public API | **merged** | #15 |
+| 20 | Archive medical-supply-monitor | **repo work merged; owner archive pending** | `docs/absorption.md` |
+| 21 | Composite tenant foreign keys | **merged** | migration 0021; current RLS 259/259 |
 
-## Decisions taken during delivery
+## Historical decisions taken during delivery
 
-Recorded as they are made, so the reasoning survives the pull request that carried it.
+Recorded as they were made, so the reasoning survives the pull request that carried it. The
+programme is now closed; references below to blocked/draft branches describe the historical
+queue, not the current GitHub state.
 
 - **Blocked tickets are built on STACKED branches while CodeRabbit quota refills** (#18, #19, #20).
   Drafts cost no review event and `auto_incremental_review` is off, so a branch cut from its

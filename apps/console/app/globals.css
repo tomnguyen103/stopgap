@@ -1147,6 +1147,9 @@ h2 {
   padding: var(--card-pad-y) var(--card-pad-x);
   margin-bottom: var(--space-4);
   box-shadow: var(--elev-raised);
+  /* A nested table owns its horizontal scrollport; the card must not publish that table's
+     intrinsic width as page overflow. The table wrapper remains scrollable inside this clip. */
+  overflow-x: clip;
 }
 .ds-card::before {
   content: "";

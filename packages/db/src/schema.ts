@@ -3,6 +3,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  date,
   index,
   integer,
   numeric,
@@ -630,6 +631,9 @@ export const shadowRuns = pgTable(
       .references(() => organizations.id),
     /** Replay-corpus entry id, so a run is traceable to the exact input it scored. */
     corpusId: text("corpus_id").notNull(),
+    /** One measured sample per corpus entry and tenant per UTC replay day. Legacy duplicate rows
+     * from before migration 0024 keep a null day so their evidence is preserved. */
+    replayDay: date("replay_day").default(sql`(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date`),
     key: text("key").notNull(),
     drugClass: text("drug_class"),
     proposedSeverity: text("proposed_severity").notNull(),
@@ -664,6 +668,9 @@ export const shadowRuns = pgTable(
     index("shadow_runs_key_idx").on(t.orgId, t.key),
     index("shadow_runs_class_idx").on(t.orgId, t.drugClass),
     index("shadow_runs_ran_at_idx").on(t.orgId, t.ranAt),
+    uniqueIndex("shadow_runs_org_corpus_day_uq")
+      .on(t.orgId, t.corpusId, t.replayDay)
+      .where(sql`${t.replayDay} is not null`),
   ],
 );
 
@@ -694,7 +701,10 @@ export const llmSpend = pgTable("llm_spend", {
  * A separate table rather than counting `cases`: a demo drug reuses one case row, so
  * `cases.opened_at` stops moving after the first run and a count over it would let the limit
  * decay to "unlimited" within an hour. Rows are written when a run is accepted, so the count
- * is of attempts that were allowed through, not of cases that happened to be created.
+ * is of attempts that were allowed through, not of cases that happened to be created. New rows
+ * carry a server-issued anonymous visitor id so the rolling limit is per visitor; the column stays
+ * nullable for rows written by the pre-visitor-id schema, which remain historical evidence rather
+ * than being assigned a made-up owner.
  */
 export const demoRuns = pgTable(
   "demo_runs",
@@ -706,10 +716,14 @@ export const demoRuns = pgTable(
       .notNull()
       .references(() => organizations.id),
     key: text("key").notNull(),
+    visitorId: text("visitor_id"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  // Org-leading: the only read is "how many runs for THIS org since THIS instant".
-  (t) => [index("demo_runs_started_at_idx").on(t.orgId, t.startedAt)],
+  // Org-leading: supports both per-visitor and aggregate-per-demo-tenant rolling counts.
+  (t) => [
+    index("demo_runs_started_at_idx").on(t.orgId, t.startedAt),
+    index("demo_runs_visitor_idx").on(t.orgId, t.visitorId, t.startedAt),
+  ],
 );
 
 /**

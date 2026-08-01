@@ -1,6 +1,8 @@
 # Design direction and UI implementation plan
 
-Status: proposed, not implemented. Written 2026-07-31 against `07782fc`.
+Status: implemented in PRs #39 and #41; current runtime evidence refreshed 2026-08-01.
+Written 2026-07-31 against `07782fc`; the plan remains the visual source of truth for the
+delivered console.
 
 This document is the console's visual source of truth. It states the positioning, the token
 system, the signature element, and a priority-ordered plan to get there from what

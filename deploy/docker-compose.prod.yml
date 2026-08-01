@@ -6,9 +6,9 @@
 # Everything runs on one host: app, worker, Temporal + UI, one Postgres holding three
 # databases (app / temporal / langfuse), Langfuse, a CPU Ollama, and Caddy for TLS.
 #
-# Ports are deliberately NOT published for anything except Caddy. There is no auth layer
-# (PHASE5-TODO.md), so the console, Temporal UI and Langfuse are reachable only through
-# Caddy, which is where the basic-auth gate lives.
+# Ports are deliberately NOT published for anything except Caddy. The console has its own
+# Auth.js/Keycloak layer; Temporal UI and Langfuse remain reachable only through Caddy, which is
+# where their basic-auth gate lives.
 name: stopgap-prod
 
 # TWO DATABASE ROLES, and the split is the whole of tenant isolation (PHASE6 §6.5).
@@ -62,11 +62,12 @@ x-app-env: &app-env
   STOPGAP_DEMO_MODE: ${STOPGAP_DEMO_MODE:-on}
   LLM_DAILY_USD_CAP: ${LLM_DAILY_USD_CAP:-}
   DEMO_MAX_RUNS_PER_HOUR: ${DEMO_MAX_RUNS_PER_HOUR:-6}
+  DEMO_MAX_RUNS_PER_HOUR_TOTAL: ${DEMO_MAX_RUNS_PER_HOUR_TOTAL:-60}
   # OIDC SSO / RBAC (PHASE6 §6.1). Honest non-configuration: with these unset (and demo mode on,
   # the default here), `authConfigured()` is false, so the console runs read-only as the
   # anonymous viewer — never a faked sign-in. Set AUTH_SECRET + KEYCLOAK_CLIENT_SECRET and turn
-  # demo mode off to enforce the role matrix. The issuer is the PUBLIC Keycloak URL so the token
-  # `iss` matches what the browser is redirected to.
+  # demo mode off to enforce the role matrix; a non-demo deployment with missing secrets fails
+  # closed with 503. The issuer is the PUBLIC Keycloak URL so the token `iss` matches the redirect.
   AUTH_SECRET: ${AUTH_SECRET:-}
   KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://${AUTH_DOMAIN}/realms/stopgap}
   KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-stopgap-console}
@@ -131,7 +132,11 @@ services:
       - ollama
     environment:
       OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["sh", "-c", "ollama pull ${OLLAMA_MODEL:-mistral}"]
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+    # Ollama may be running before its HTTP API is ready, and a multi-GB pull can fail transiently.
+    # Keep retrying inside the one-shot dependency so `service_completed_successfully` becomes a
+    # recoverable gate instead of permanently preventing worker/demo-seed startup.
+    entrypoint: ["sh", "-c", "until ollama pull \"$${OLLAMA_MODEL:-mistral}\"; do echo '[ollama-pull] pull failed; retrying in 30s' >&2; sleep 30; done"]
     restart: "no"
 
   # The non-superuser application role (PHASE6 §6.5). One-shot, idempotent, runs on every `up` —
@@ -194,6 +199,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: console
+      args:
+        KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://${AUTH_DOMAIN}/realms/stopgap}
     restart: unless-stopped
     depends_on:
       migrate:
@@ -201,15 +208,16 @@ services:
       temporal:
         condition: service_healthy
     environment: *app-env
-    # Liveness via the always-200 health route (PHASE6 §6.4). `node -e` rather than curl/wget so it
-    # works on the minimal Next runtime image regardless of what shell tools it ships.
+    # Readiness via `/api/readyz`: it includes database, Temporal, maintenance-role and auth
+    # configuration checks, so a non-demo deployment with missing secrets cannot stay healthy.
+    # `node -e` rather than curl/wget works on the minimal Next runtime image regardless of tools.
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "require('http').get('http://localhost:3000/api/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+          "require('http').get('http://localhost:3000/api/readyz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
         ]
       interval: 15s
       timeout: 5s
@@ -220,6 +228,8 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: worker
+      args:
+        KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://${AUTH_DOMAIN}/realms/stopgap}
     restart: unless-stopped
     depends_on:
       migrate:
@@ -245,19 +255,33 @@ services:
       retries: 10
 
   # Nightly demo re-seed (PROJECT_PLAN §11). A sleep loop rather than a cron image: one
-  # dependency fewer, and the seeder is idempotent so a missed or doubled run is harmless.
+  # dependency fewer, and the seeder/replay are observational or idempotent. A failed replay
+  # retries after five minutes instead of sleeping for a full day with missing evidence.
   demo-seed:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
       target: worker
+      args:
+        KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-https://${AUTH_DOMAIN}/realms/stopgap}
     restart: unless-stopped
     depends_on:
       migrate:
         condition: service_completed_successfully
-    environment: *app-env
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-env
+      # Shadow replay refuses paid providers because its cost column is observationally exact.
+      # Keep the nightly evidence job local even when the main worker routes to Gemini.
+      LLM_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://ollama:11434
     entrypoint:
-      ["sh", "-c", "while true; do pnpm --filter @stopgap/demo seed || true; sleep 86400; done"]
+      [
+        "sh",
+        "-c",
+        "while true; do if [ \"$${STOPGAP_DEMO_MODE:-off}\" = \"on\" ]; then pnpm --filter @stopgap/demo seed || true; replay_failed=0; for org in 00000000-0000-0000-0000-0000000000a1 00000000-0000-0000-0000-0000000000a2; do if ! STOPGAP_ORG_ID=\"$${org}\" pnpm --filter @stopgap/shadow replay; then replay_failed=1; fi; done; if [ \"$${replay_failed}\" -eq 0 ]; then sleep 86400; else echo '[demo-seed] shadow replay failed; retrying in 300s' >&2; sleep 300; fi; else sleep 86400; fi; done",
+      ]
 
   # ---- Keycloak (OIDC IdP, PHASE6 §6.1) ----------------------------------------------------
   # Production mode against a dedicated `keycloak` database in the shared Postgres, behind Caddy

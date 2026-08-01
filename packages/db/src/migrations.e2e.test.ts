@@ -92,6 +92,7 @@ const SEEDED = {
   protocolId: "eeee0002-0000-0000-0000-000000000002",
   auditActions: ["case.detected", "case.assessed", "case.protocol_drafted"],
 };
+const LEGACY_SHADOW_CORPUS = "legacy-migration-0024-corpus";
 
 let admin: postgres.Sql;
 let scratch: postgres.Sql;
@@ -107,6 +108,9 @@ beforeAll(async () => {
   const boundary = tags.findIndex((t) => t.startsWith("0013"));
   if (boundary < 1)
     throw new Error("migrations.e2e: could not locate migration 0013 in the journal");
+  const replayBoundary = tags.findIndex((t) => t.startsWith("0024"));
+  if (replayBoundary <= boundary)
+    throw new Error("migrations.e2e: could not locate migration 0024 after multi-tenancy");
 
   // --- everything BEFORE multi-tenancy ------------------------------------------------------
   for (const tag of tags.slice(0, boundary)) await applyMigration(scratch, tag);
@@ -139,7 +143,26 @@ beforeAll(async () => {
   }
 
   // --- and now the multi-tenancy migrations -------------------------------------------------
-  for (const tag of tags.slice(boundary)) await applyMigration(scratch, tag);
+  for (const tag of tags.slice(boundary, replayBoundary)) await applyMigration(scratch, tag);
+
+  // Two legacy replays for the same corpus item on the same UTC day are valid historical evidence
+  // under the pre-0024 schema. Seed them immediately before the migration so its backfill is tested
+  // against the data shape that made the old ledger non-idempotent.
+  await scratch.begin(async (tx) => {
+    await tx`select set_config('app.current_org', ${SEED_ORG_ID}, true)`;
+    await tx`insert into shadow_runs
+      (org_id, corpus_id, key, proposed_severity, baseline_severity, agreement, severity_agreed,
+       latency_ms, usd_cost, provider, model_id, ran_at)
+      values
+        (${SEED_ORG_ID}, ${LEGACY_SHADOW_CORPUS}, 'legacy-shadow-key', 'high', 'high', '1.000', true,
+         10, '0', 'ollama', 'mistral', '2026-07-31T10:00:00Z'),
+        (${SEED_ORG_ID}, ${LEGACY_SHADOW_CORPUS}, 'legacy-shadow-key', 'high', 'high', '1.000', true,
+         11, '0', 'ollama', 'mistral', '2026-07-31T11:00:00Z'),
+        (${SEED_ORG_ID}, 'legacy-migration-0024-other-day', 'legacy-shadow-key', 'high', 'high', '1.000', true,
+         12, '0', 'ollama', 'mistral', '2026-07-30T11:00:00Z')`;
+  });
+
+  for (const tag of tags.slice(replayBoundary)) await applyMigration(scratch, tag);
 });
 
 afterAll(async () => {
@@ -224,6 +247,26 @@ describe("migrations 0013/0014 against a database that already had rows", () => 
     const leftovers = await scratch`select 1 from pg_indexes
                                     where tablename = 'cases' and indexname = 'cases_key_idx'`;
     expect(leftovers).toHaveLength(0);
+  });
+
+  it("backfills legacy shadow days without deleting same-day duplicate evidence", async () => {
+    const rows = await scratch.begin(async (tx) => {
+      await tx`select set_config('app.current_org', ${SEED_ORG_ID}, true)`;
+      return tx`select replay_day, ran_at
+                from shadow_runs
+                where corpus_id = ${LEGACY_SHADOW_CORPUS}
+                order by ran_at`;
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.replay_day).toBe("2026-07-31");
+    expect(rows[1]?.replay_day).toBeNull();
+
+    const [index] = await scratch`select indexdef from pg_indexes
+                                  where tablename = 'shadow_runs'
+                                    and indexname = 'shadow_runs_org_corpus_day_uq'`;
+    expect(index?.indexdef).toContain("WHERE");
+    expect(index?.indexdef).toContain("replay_day");
+    expect(index?.indexdef.toLowerCase()).toContain("is not null");
   });
 
   /**

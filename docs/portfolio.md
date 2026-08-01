@@ -67,8 +67,8 @@ that drug reuses it instead of paying for research again.
   under-escalation, 0 dropped cases. *Small samples — these are the real numbers from the
   verification session, not a projection.*
 - **Live feeds:** one poll opened 57 real cases from openFDA with zero duplicates.
-- **91 tests** in a deterministic local gate (lint + typecheck + test + build); live-model
-  evals run separately, on purpose.
+- **75 test files / 892 tests** in a deterministic local gate (lint + typecheck + test + build);
+  live-model evals run separately, on purpose.
 
 ### Not claimed
 
@@ -78,8 +78,10 @@ that drug reuses it instead of paying for research again.
 - **No live deployment.** The single-VPS compose stack (app, worker, Temporal, Postgres,
   Langfuse, CPU Ollama, Caddy) is written and was rehearsed on a local Docker daemon; no host
   has been provisioned.
-- **No auth layer.** Reviewer identity is recorded as an unverified claim. The demo is
-  read-only because of it.
+- **No live external auth proof.** Auth.js/Keycloak and the four-role matrix are implemented and
+  exercised against the seeded local IdP, but no public deployment or external provider
+  credentials exist in this environment. Explicit demo mode remains read-only and does not claim
+  an anonymous visitor approved clinical guidance.
 
 ### Stack
 

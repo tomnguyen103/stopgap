@@ -114,11 +114,12 @@ an edit writes a new protocol version authored by the pharmacist, an approval of
 agent draft writes one authored by the agent and approved by the human, a rejection is
 terminal and recorded with its reason.
 
-**What is missing, and is not hidden:** there is no authentication layer. The reviewer
-identity is a *claim*, written to the audit trail as `identitySource: workflow-signal-claim`.
-Asserting "a pharmacist approved this" would be a lie the audit trail then preserves forever.
-The public demo is read-only precisely because of this: reviews are refused in the server
-action, not merely hidden in the UI.
+**What is missing, and is not hidden:** this environment has no live external deployment or
+IdP credentials. The repository now contains Auth.js/Keycloak OIDC, a four-role matrix, and
+server-side authorization; local browser proof covers the seeded users. In explicit public demo
+mode there is no authenticated reviewer identity, so reviews are refused in the server action,
+not merely hidden in the UI. The audit trail does not claim that an anonymous visitor approved
+clinical guidance.
 
 ## 6. Evals as CI — and the honest reason they are not a gate
 
@@ -129,7 +130,7 @@ injection cases. Neither is in the build gate.
 on two full runs — 80–84%, with the *same corpus* moving about four points between identical
 runs. Small quantized models are not deterministic at temperature 0. A hard gate on that
 noise trains a team to ignore red, which costs more than the gate buys. `pnpm gate` stays
-deterministic (91 tests, no live model); `pnpm eval` reports the real signal.
+deterministic (75 test files/892 tests, no live model); `pnpm eval` reports the real signal.
 
 The failures are reproducible clusters, not flakes:
 

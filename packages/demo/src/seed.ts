@@ -50,9 +50,9 @@ const SEEDED_ORGS: readonly { orgId: string; caseKeys: readonly string[] }[] = [
  *   cleaned up after itself would break verification for every later row. Re-seeding instead
  *   updates the same demo case rows in place and appends a `demo.reseed` entry.
  * - **No metrics are invented.** The seed writes cases and protocols — things a demo needs in
- *   order to have anything to click — and never shadow-ledger rows or KPI figures. The shadow
- *   dashboard on a deployment is populated by running the real replay (`pnpm --filter
- *   @stopgap/shadow replay`), so every agreement number on it was actually measured.
+ *   order to have anything to click — and never fabricates shadow-ledger rows or KPI figures.
+ *   The nightly `demo-seed` service runs the real replay after this seed, so every agreement
+ *   number on the dashboard is actually measured.
  *
  * Seeded cases have no live Temporal workflow: they are the database mirror of one. The
  * "Run a shortage" button is the part of the demo that drives the real engine.

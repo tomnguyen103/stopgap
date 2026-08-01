@@ -6,6 +6,12 @@
 
 **LLM decision (user-specified): Gemini 3.5 Flash Lite primary · Ollama for local dev, CI, and runtime fallback.** Agent layer = Vercel AI SDK (provider-agnostic, structured outputs). Model routing is a showcase feature.
 
+**Current implementation status (2026-08-01):** the repo-controlled deliverables in Phases 1–6
+and the approved unified-platform successor plans are implemented and merged. The Phase 5
+deployment/publication items that require paid hosting, external credentials, account-level
+publishing or public communications remain owner-controlled; the truthful coverage and evidence
+ledger is `docs/coverage-ledger-2026-08-01.md`.
+
 ---
 
 ## 1. Research foundation (key findings the build session needs)

@@ -60,13 +60,19 @@ const revokeRole = vi.fn(async (_db: unknown, orgId: string, userId: string, _ro
 const createAlertRule = vi.fn();
 const importCatalog = vi.fn();
 const updateAlertRule = vi.fn();
+const getCaseByKey = vi.fn();
+const prepareDemoRun = vi.fn();
+const startCase = vi.fn();
+const demoMode = vi.fn(() => false);
+const setCookie = vi.fn();
+let demoCookieValue: string | undefined;
 vi.mock("@stopgap/db", () => ({
   appendAudit: (...a: unknown[]) => appendAudit(...a),
   approveProtocolVersion: (...a: unknown[]) => approveProtocolVersion(...a),
   assignRole: (...a: [unknown, string, string, string]) => assignRole(...a),
   revokeRole: (...a: [unknown, string, string, string]) => revokeRole(...a),
   setUserDisabled: vi.fn(),
-  getCaseByKey: vi.fn(),
+  getCaseByKey: (...a: unknown[]) => getCaseByKey(...a),
   getCaseByWorkflowId: vi.fn(),
   getOrganization: vi.fn(),
   // The production scoping wrapper, stubbed to RECORD the org it was opened for and hand the
@@ -91,7 +97,14 @@ vi.mock("@stopgap/db", () => ({
 }));
 
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ get: () => undefined, set: () => undefined }),
+  cookies: async () => ({
+    get: (name: string) =>
+      name === "stopgap_demo_visitor" && demoCookieValue ? { value: demoCookieValue } : undefined,
+    set: (...a: unknown[]) => {
+      setCookie(...a);
+      demoCookieValue = String(a[1]);
+    },
+  }),
 }));
 
 // Workflow client — spy so we can assert it is NEVER called when authorization fails.
@@ -100,14 +113,14 @@ vi.mock("@stopgap/workflows", () => ({
   withTemporalClient: (...a: unknown[]) => withTemporalClient(...a),
   submitReview: vi.fn(),
   resolveException: vi.fn(),
-  startCase: vi.fn(),
+  startCase: (...a: unknown[]) => startCase(...a),
 }));
 
 // Demo gate is not under test here — let mutations through so RBAC is the only gate exercised.
 vi.mock("@stopgap/demo", () => ({
   assertMutationAllowed: vi.fn(),
-  isDemoMode: () => false,
-  prepareDemoRun: vi.fn(),
+  isDemoMode: () => demoMode(),
+  prepareDemoRun: (...a: unknown[]) => prepareDemoRun(...a),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -119,6 +132,7 @@ const {
   createAlertRuleAction,
   updateAlertRuleAction,
   importCatalogAction,
+  startDemoShortage,
 } = await import("./actions");
 const { AuthorizationError } = await import("./authz");
 
@@ -139,8 +153,16 @@ beforeEach(() => {
   approveProtocolVersion.mockClear();
   appendAudit.mockClear();
   withTemporalClient.mockClear();
+  withTemporalClient.mockReset();
   assignRole.mockClear();
   revokeRole.mockClear();
+  getCaseByKey.mockReset();
+  prepareDemoRun.mockReset();
+  startCase.mockReset();
+  demoMode.mockReset();
+  demoMode.mockReturnValue(false);
+  setCookie.mockReset();
+  demoCookieValue = undefined;
   scopedOrgIds.length = 0;
 });
 
@@ -339,5 +361,33 @@ describe("importCatalogAction (server-enforced authorization)", () => {
     resolvePrincipal.mockResolvedValue(principal(["admin"]));
     await expect(importCatalogAction("not_a_kind", CSV)).rejects.toThrow();
     expect(importCatalog).not.toHaveBeenCalled();
+  });
+});
+
+describe("anonymous demo quota identity", () => {
+  it("issues an httpOnly visitor UUID once and reuses it for later starts", async () => {
+    demoMode.mockReturnValue(true);
+    resolvePrincipal.mockResolvedValue(principal([]));
+    prepareDemoRun.mockResolvedValue({
+      ok: false,
+      reason: "rate-limited",
+      message: "demo limit reached",
+    });
+
+    await startDemoShortage("demo-cisplatin");
+    const firstVisitorId = prepareDemoRun.mock.calls[0]?.[2] as string;
+    expect(firstVisitorId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(setCookie).toHaveBeenCalledWith(
+      "stopgap_demo_visitor",
+      firstVisitorId,
+      expect.objectContaining({ httpOnly: true, sameSite: "lax", path: "/" }),
+    );
+
+    setCookie.mockClear();
+    await startDemoShortage("demo-cisplatin");
+    expect(prepareDemoRun.mock.calls[1]?.[2]).toBe(firstVisitorId);
+    expect(setCookie).not.toHaveBeenCalled();
   });
 });

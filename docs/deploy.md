@@ -39,17 +39,20 @@ which is a real loss: it is the only per-call record of what the model was asked
    docker compose -f docker-compose.prod.yml up -d --build
    ```
    Order is enforced by the compose file: Postgres → `migrate` (one-shot) → console/worker.
-   `ollama-pull` fetches the model once so the first case does not wait on a multi-GB download.
+   `ollama-pull` keeps retrying until the Ollama API is ready and the model is present, so a
+   transient startup or multi-GB download failure does not permanently gate the worker.
 4. **Open the case schedule** — nothing polls the feeds until this runs once:
    ```bash
    docker compose -f docker-compose.prod.yml exec worker pnpm --filter @stopgap/workflows start-schedule
    ```
-5. **Populate the shadow dashboard with real numbers** (optional, ~10 min on CPU Ollama):
+5. **Populate the shadow dashboard with real numbers** (manual backfill; the nightly demo-seed
+   service does this automatically in demo mode):
    ```bash
-   docker compose -f docker-compose.prod.yml exec worker pnpm --filter @stopgap/shadow replay
+   docker compose -f docker-compose.prod.yml exec -e LLM_PROVIDER=ollama -e STOPGAP_ORG_ID=00000000-0000-0000-0000-0000000000a1 worker pnpm --filter @stopgap/shadow replay
+   docker compose -f docker-compose.prod.yml exec -e LLM_PROVIDER=ollama -e STOPGAP_ORG_ID=00000000-0000-0000-0000-0000000000a2 worker pnpm --filter @stopgap/shadow replay
    ```
-   The demo seeder deliberately does not write shadow rows — every agreement figure on
-   `/shadow` should be one that was actually measured on this host.
+   The replay is observational and local-provider-only: every agreement figure on `/shadow` is
+   measured on this host, never copied into the seed.
 
 ## What is exposed
 
@@ -60,12 +63,13 @@ which is a real loss: it is the only per-call record of what the model was asked
 | `https://$TRACES_DOMAIN` | basic auth | Langfuse; prompts and case text are visible in spans |
 | `https://$OPS_DOMAIN` | basic auth | Grafana; ops/business dashboards show case volumes and queue depth |
 
-No container publishes a port except Caddy. **There is still no application auth layer**
-(PHASE5-TODO.md): demo mode is what makes the public console safe, by refusing every
-mutation except starting a demo shortage. Turning `STOPGAP_DEMO_MODE=off` on a
-publicly-reachable host means anyone who finds it can approve clinical guidance. `STOPGAP_DEMO_MODE`
-therefore defaults to `on` in the prod compose file: a public deploy fails closed (read-only)
-unless the operator deliberately sets it `off`.
+No container publishes a port except Caddy. The console has an Auth.js/Keycloak application auth
+layer. `STOPGAP_DEMO_MODE=on` is explicit public demo mode: it resolves requests as an anonymous
+viewer and refuses every mutation except starting a demo shortage. Turning it off requires
+`AUTH_SECRET` and `KEYCLOAK_CLIENT_SECRET`; missing credentials in non-demo mode return
+`503 authentication_not_configured` instead of silently exposing a viewer surface. The prod
+compose file defaults demo mode to `on`, so the operator must provision the IdP before turning it
+off on a public host.
 
 ## Demo mode
 
@@ -74,9 +78,11 @@ unless the operator deliberately sets it `off`.
 - **"Run a shortage"** starts a real Temporal case through the real agents. The drug comes
   from a fixed catalogue (never free text, so a visitor cannot reach the prompt), keys are
   `demo-` prefixed so a demo run cannot collide with a live openFDA case, and starts are
-  limited to `DEMO_MAX_RUNS_PER_HOUR` counted from a durable `demo_runs` table. The limit is
-  deployment-wide, not per visitor: with no auth layer there is no honest way to tell two
-  visitors apart, so one busy visitor can use up the hour's runs.
+  limited to `DEMO_MAX_RUNS_PER_HOUR` per anonymous visitor plus the aggregate
+  `DEMO_MAX_RUNS_PER_HOUR_TOTAL` bound for the public demo tenant, counted from a durable
+  `demo_runs` table. The visitor id is an httpOnly quota cookie, not authentication; clearing it
+  cannot bypass the aggregate bound. `LLM_DAILY_USD_CAP`, when configured, is an additional hard
+  spend boundary.
 - **Budget cap.** Every LLM call's cost is added to a daily row (`llm_spend`); at
   `LLM_DAILY_USD_CAP` routing is restricted to the free local model and the banner says so.
   The cap is not demo-specific — a scheduled poll spends the same dollars a visitor does — and
@@ -86,6 +92,11 @@ unless the operator deliberately sets it `off`.
 - **Nightly re-seed** (`demo-seed` service) parks three cases at day 2 / 18 / 45 with the
   protocol history behind them. It updates rather than deletes: `audit_log` is an append-only
   hash chain and a tidy-up would break verification for every later row.
+- The nightly shadow replay waits for the recoverable `ollama-pull` gate, pins its own local-provider
+  environment, and runs for both fixed demo tenants. It skips already recorded corpus entries before
+  invoking the model and writes at most one sample per entry, tenant and UTC day. A failed replay is
+  retried after five minutes rather than leaving either dashboard without measured evidence for the
+  next day.
 
 ## Operating
 
@@ -146,5 +157,3 @@ minifies function names, so starting a workflow by passing the imported function
 Temporal the workflow type `aa`. Workflows are now started by name
 (`SHORTAGE_CASE_WORKFLOW`). Nothing in dev mode or the unit tests could have surfaced it —
 only a production build could.
-
-

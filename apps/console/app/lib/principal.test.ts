@@ -17,6 +17,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+const testEnv = vi.hoisted(() => ({ mode: "auth" as "auth" | "demo" | "unconfigured" }));
+
 const SEED_ORG_ID = "00000000-0000-0000-0000-0000000000a1";
 const OWN_ORG_ID = "11111111-0000-0000-0000-000000000011";
 const OTHER_ORG_ID = "22222222-0000-0000-0000-000000000022";
@@ -41,18 +43,31 @@ vi.mock("@stopgap/db", () => ({
 
 vi.mock("@stopgap/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@stopgap/core")>();
-  // Only `getEnv` is stubbed — the role RANK that `rolesAllow` reads must stay REAL, or the
-  // admin gate under test would be the mock's opinion rather than the app's policy.
-  return { ...actual, getEnv: () => ({ STOPGAP_DEMO_MODE: "on" }) };
+  // Only the environment is stubbed — the role RANK and authConfigured logic must stay REAL, or
+  // the admin gate under test would be the mock's opinion rather than the app's policy.
+  return {
+    ...actual,
+    getEnv: () =>
+      testEnv.mode === "demo"
+        ? { STOPGAP_DEMO_MODE: "on" }
+        : testEnv.mode === "unconfigured"
+          ? { STOPGAP_DEMO_MODE: "off" }
+          : {
+              STOPGAP_DEMO_MODE: "off",
+              AUTH_SECRET: "test-auth-secret",
+              KEYCLOAK_CLIENT_SECRET: "test-client-secret",
+            },
+  };
 });
 
-const { resolvePrincipal, ACTIVE_ORG_COOKIE } = await import("./principal");
+const { resolvePrincipal, getActiveOrgOverride, ACTIVE_ORG_COOKIE } = await import("./principal");
 
 function session(roles: string[], orgId = OWN_ORG_ID) {
   return { user: { id: "user-1", email: "dana@hospital.test", roles, orgId } };
 }
 
 beforeEach(() => {
+  testEnv.mode = "auth";
   auth.mockReset();
   getOrganization.mockClear();
   cookieValue = undefined;
@@ -108,7 +123,7 @@ describe("resolvePrincipal (PHASE6 §6.5 tenant resolution)", () => {
   });
 
   it("resolves the anonymous/demo viewer to the seed org, read-only", async () => {
-    auth.mockResolvedValue(null);
+    testEnv.mode = "demo";
     const principal = await resolvePrincipal();
     // The public demo IS the seed tenant — the org migration 0013 backfilled every
     // pre-multi-tenancy row into — so this is a statement of fact, not a fallback.
@@ -117,13 +132,36 @@ describe("resolvePrincipal (PHASE6 §6.5 tenant resolution)", () => {
     // `viewer` holds no mutating role, so every action gate refuses this principal.
     expect(principal.roles).toEqual(["viewer"]);
     expect(principal.userId).toBeNull();
+    expect(auth).not.toHaveBeenCalled();
   });
 
   it("does not let an anonymous caller's cookie select a tenant", async () => {
-    auth.mockResolvedValue(null);
+    testEnv.mode = "demo";
     cookieValue = OTHER_ORG_ID;
     const principal = await resolvePrincipal();
     expect(principal.orgId).toBe(SEED_ORG_ID);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke Auth.js for an UNCONFIGURED non-demo process", async () => {
+    testEnv.mode = "unconfigured";
+    const principal = await resolvePrincipal();
+    expect(principal.authenticated).toBe(false);
+    expect(principal.roles).toEqual(["viewer"]);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("returns no active-org badge when auth is UNCONFIGURED", async () => {
+    testEnv.mode = "unconfigured";
+    expect(await getActiveOrgOverride()).toBeNull();
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("returns the active organization for an authenticated admin", async () => {
+    auth.mockResolvedValue(session(["admin"]));
+    cookieValue = OTHER_ORG_ID;
+    expect(await getActiveOrgOverride()).toEqual({ slug: "other", name: "Other" });
+    expect(auth).toHaveBeenCalledTimes(1);
   });
 
   it("names the cookie once, so the switcher action and the resolver cannot drift apart", () => {

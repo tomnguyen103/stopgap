@@ -54,9 +54,11 @@ hits these, Prometheus hits `/metrics`.
 
 - **`GET /api/healthz`** (console) — liveness. Always `200` if the process is up; no dependency
   checks. Use it to answer "is the console running."
-- **`GET /api/readyz`** (console) — readiness. `200` when the console can reach its dependencies;
-  `503` if the **DB or Temporal is down**. A `503` here means the console is up but cannot serve
-  real work — pull it out of rotation, don't restart blindly.
+- **`GET /api/readyz`** (console) — readiness. `200` when the console can reach its dependencies
+  and its authentication posture is usable: explicit demo mode may run anonymously, while
+  non-demo mode requires both auth secrets. `503` if the **DB, Temporal or required auth is down /
+  unconfigured**. A `503` here means the console is up but cannot serve real work — pull it out of
+  rotation, don't restart blindly.
 - **Worker sidecar on `:9464`** — `/healthz` (liveness, up = `200`), `/readyz` (readiness, `503`
   when the worker can't reach its dependencies), and `/metrics` (the Prometheus scrape target).
   Killing the worker flips `/readyz` and, after 2m of missed scrapes, fires `WorkerDown`.
