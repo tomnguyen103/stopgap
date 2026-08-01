@@ -17,3 +17,12 @@ services:
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
     extra_hosts: ["host.docker.internal:host-gateway"]
+  demo-seed:
+    # The nightly seeder also calls the local model for shadow replay. Keep a full-stack
+    # localcheck on host Ollama instead of inheriting the production pull gate and service URL.
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts: ["host.docker.internal:host-gateway"]

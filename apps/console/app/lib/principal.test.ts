@@ -17,7 +17,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const testEnv = vi.hoisted(() => ({ mode: "auth" as "auth" | "demo" | "unconfigured" }));
+const testEnv = vi.hoisted(() => ({
+  mode: "auth" as "auth" | "demo" | "demo-auth" | "unconfigured",
+}));
 
 const SEED_ORG_ID = "00000000-0000-0000-0000-0000000000a1";
 const OWN_ORG_ID = "11111111-0000-0000-0000-000000000011";
@@ -48,8 +50,13 @@ vi.mock("@stopgap/core", async (importOriginal) => {
   return {
     ...actual,
     getEnv: () =>
-      testEnv.mode === "demo"
-        ? { STOPGAP_DEMO_MODE: "on" }
+      testEnv.mode === "demo" || testEnv.mode === "demo-auth"
+        ? {
+            STOPGAP_DEMO_MODE: "on",
+            ...(testEnv.mode === "demo-auth"
+              ? { AUTH_SECRET: "test-auth-secret", KEYCLOAK_CLIENT_SECRET: "test-client-secret" }
+              : {}),
+          }
         : testEnv.mode === "unconfigured"
           ? { STOPGAP_DEMO_MODE: "off" }
           : {
@@ -140,6 +147,20 @@ describe("resolvePrincipal (PHASE6 §6.5 tenant resolution)", () => {
     cookieValue = OTHER_ORG_ID;
     const principal = await resolvePrincipal();
     expect(principal.orgId).toBe(SEED_ORG_ID);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it("keeps demo principals anonymous even when auth credentials are present", async () => {
+    testEnv.mode = "demo-auth";
+    auth.mockResolvedValue(session(["admin"]));
+    cookieValue = OTHER_ORG_ID;
+
+    const principal = await resolvePrincipal();
+
+    expect(principal.orgId).toBe(SEED_ORG_ID);
+    expect(principal.authenticated).toBe(false);
+    expect(principal.userId).toBeNull();
+    expect(await getActiveOrgOverride()).toBeNull();
     expect(auth).not.toHaveBeenCalled();
   });
 
