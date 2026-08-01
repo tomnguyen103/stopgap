@@ -33,10 +33,30 @@ const nextConfig: NextConfig = {
    * cannot keep.
    */
   headers: () => {
+    /*
+      The IdP's origin, from the issuer the deployment is actually configured with.
+
+      `form-action` is NOT a same-origin question here, and assuming it was is what made the first
+      cut of this policy unshippable: Auth.js's sign-in page POSTs to `/api/auth/signin/keycloak`
+      on this origin, and that response REDIRECTS to Keycloak. Chrome re-checks `form-action`
+      against every hop of that redirect, so `form-action 'self'` blocked the POST outright and
+      nobody could sign in at all. Caught by driving the flow, not by reading the policy:
+      "Sending form data to '…/api/auth/signin/keycloak' violates … form-action 'self'".
+
+      Empty when no IdP is configured — a demo deployment has no third origin to allow.
+    */
+    const idpOrigin = (() => {
+      try {
+        return process.env.KEYCLOAK_ISSUER ? new URL(process.env.KEYCLOAK_ISSUER).origin : "";
+      } catch {
+        return "";
+      }
+    })();
+
     const csp = [
       "default-src 'self'",
       "base-uri 'self'",
-      "form-action 'self'",
+      `form-action 'self'${idpOrigin ? ` ${idpOrigin}` : ""}`,
       // Clickjacking, in the header modern browsers actually enforce. `X-Frame-Options` below is
       // for the ones that do not.
       "frame-ancestors 'none'",
@@ -47,7 +67,9 @@ const nextConfig: NextConfig = {
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline'",
       "connect-src 'self'",
-    ].join("; ");
+    ]
+      .filter(Boolean)
+      .join("; ");
 
     return Promise.resolve([
       {
