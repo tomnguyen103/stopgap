@@ -1,6 +1,7 @@
 import { DEGRADED_REASONS, type DegradedReason } from "@stopgap/db";
 import { getDailyBriefs } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
+import { Badge, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export default async function BriefPage() {
   return (
     <>
       <h1>Daily brief</h1>
-      <p className="sub">
+      <p className="sub ds-prose">
         What moved, what is newly at risk, and what needs review · generated on a schedule, one per
         day · every figure comes from the deterministic scorer, never from the model
       </p>
@@ -48,7 +49,7 @@ export default async function BriefPage() {
             {latest.degradedReason ? (
               <>
                 {" "}
-                <span className="pill sev-high">{degradedLabel(latest.degradedReason)}</span>
+                <Badge severity="high">{degradedLabel(latest.degradedReason)}</Badge>
               </>
             ) : null}
           </h2>
@@ -98,34 +99,22 @@ export default async function BriefPage() {
       {earlier.length > 0 && (
         <>
           <h2>Earlier</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Headline</th>
-                <th>Signals</th>
-                <th>Model</th>
+          <Table head={["Date", "Headline", "Signals", "Model"]} label="Earlier daily briefs">
+            {earlier.map((brief) => (
+              <tr key={brief.id}>
+                <td>{brief.briefDate}</td>
+                <td>
+                  {brief.degradedReason ? (
+                    <Badge severity="high">{degradedLabel(brief.degradedReason)}</Badge>
+                  ) : (
+                    brief.headline
+                  )}
+                </td>
+                <td>{brief.signalKeys.length}</td>
+                <td className="is-subtle">{brief.model ?? "—"}</td>
               </tr>
-            </thead>
-            <tbody>
-              {earlier.map((brief) => (
-                <tr key={brief.id}>
-                  <td>{brief.briefDate}</td>
-                  <td>
-                    {brief.degradedReason ? (
-                      <span className="pill sev-high">
-                        {degradedLabel(brief.degradedReason)}
-                      </span>
-                    ) : (
-                      brief.headline
-                    )}
-                  </td>
-                  <td>{brief.signalKeys.length}</td>
-                  <td className="sub">{brief.model ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </Table>
         </>
       )}
     </>

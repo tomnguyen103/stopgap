@@ -50,15 +50,21 @@ function esc(value: unknown): string {
 /** `#/components/schemas/CaseList` → `CaseList`; anything else renders as-is. */
 function refName(schema: unknown): string | undefined {
   const ref = (schema as { $ref?: string } | undefined)?.$ref;
-  return ref?.startsWith("#/components/schemas/") ? ref.slice("#/components/schemas/".length) : undefined;
+  return ref?.startsWith("#/components/schemas/")
+    ? ref.slice("#/components/schemas/".length)
+    : undefined;
 }
 
 /** The JSON schema behind an OpenAPI `content` block, named if it is a `$ref`, else "inline". */
 function contentSchemaLabel(content: unknown): string {
-  const schema = (content as { "application/json"?: { schema?: unknown } } | undefined)?.["application/json"]?.schema;
+  const schema = (content as { "application/json"?: { schema?: unknown } } | undefined)?.[
+    "application/json"
+  ]?.schema;
   if (schema === undefined) return "—";
   const name = refName(schema);
-  return name ? `<a href="#schema-${esc(name)}"><code>${esc(name)}</code></a>` : "<code>inline</code>";
+  return name
+    ? `<a href="#schema-${esc(name)}"><code>${esc(name)}</code></a>`
+    : "<code>inline</code>";
 }
 
 /** A one-line type summary for a JSON-schema node — enough to read a field list without a viewer. */
@@ -84,7 +90,8 @@ function renderParameters(parameters: unknown): string {
   const rows = list
     .map((p) => {
       const required = p.required === true ? "required" : "optional";
-      const description = (p.schema as Record<string, unknown> | undefined)?.description ?? p.description ?? "";
+      const description =
+        (p.schema as Record<string, unknown> | undefined)?.description ?? p.description ?? "";
       return `<tr><td><code>${esc(p.name)}</code></td><td>${esc(p.in)}</td><td><code>${esc(
         typeLabel(p.schema as Record<string, unknown>),
       )}</code></td><td>${esc(required)}</td><td>${esc(description)}</td></tr>`;
@@ -152,7 +159,10 @@ function renderSchema(name: string, schema: Record<string, unknown>): string {
     ? own
     : Array.isArray(variants)
       ? variants
-          .map((variant, i) => `<h4>Variant ${i + 1}</h4>${renderFieldTable(variant) || `<p class="desc">${esc(typeLabel(variant))}</p>`}`)
+          .map(
+            (variant, i) =>
+              `<h4>Variant ${i + 1}</h4>${renderFieldTable(variant) || `<p class="desc">${esc(typeLabel(variant))}</p>`}`,
+          )
           .join("")
       : `<p class="desc">${esc(typeLabel(schema))}</p>`;
   return `<section class="op" id="schema-${esc(name)}">

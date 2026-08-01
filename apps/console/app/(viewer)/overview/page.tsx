@@ -1,9 +1,9 @@
 import Link from "next/link";
 
-import { Badge, Card, Table } from "../../components/ui";
 import { getSignalsPage, getViewerOverview } from "../../lib/data";
 import { resolvePrincipal } from "../../lib/principal";
 import { requireGroup } from "../../lib/group-guard";
+import { Badge, Button, Card, Table } from "../../components/ui";
 import {
   bandSeverity,
   filterValue,
@@ -146,9 +146,7 @@ export default async function OverviewPage({
           <input type="hidden" name="sort" value={params.sort} />
           <input type="hidden" name="dir" value={params.dir} />
           <input type="hidden" name="pageSize" value={String(params.pageSize)} />
-          <button className="ds-button" type="submit">
-            Search
-          </button>
+          <Button type="submit">Search</Button>
         </form>
 
         {Object.entries(SIGNAL_LIST_SCHEMA.filters).map(([key, allowed]) => (

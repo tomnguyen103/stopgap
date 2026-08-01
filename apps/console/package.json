@@ -10,9 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@stopgap/core": "workspace:*",
     "@stopgap/catalog": "workspace:*",
     "@stopgap/compliance": "workspace:*",
+    "@stopgap/core": "workspace:*",
     "@stopgap/db": "workspace:*",
     "@stopgap/demo": "workspace:*",
     "@stopgap/ingest": "workspace:*",
@@ -21,6 +21,7 @@
     "@stopgap/shadow": "workspace:*",
     "@stopgap/workflows": "workspace:*",
     "drizzle-orm": "^0.38.0",
+    "geist": "^1.7.2",
     "next": "^15.1.0",
     "next-auth": "5.0.0-beta.32",
     "react": "^19.0.0",

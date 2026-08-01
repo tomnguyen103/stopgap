@@ -119,13 +119,15 @@ describe("paths", () => {
    */
   it("publishes the console list vocabulary on the signal, score and catalog lists", () => {
     for (const path of ["/api/v1/signals", "/api/v1/scores", "/api/v1/catalog/items"]) {
-      const parameters = (doc.paths?.[path]?.get as { parameters?: { name: string }[] })?.parameters ?? [];
+      const parameters =
+        (doc.paths?.[path]?.get as { parameters?: { name: string }[] })?.parameters ?? [];
       const names = parameters.map((p) => p.name);
       for (const expected of ["q", "sort", "dir", "page", "pageSize"]) {
         expect(names, `${path} does not document ?${expected}`).toContain(expected);
       }
     }
-    const scoreParams = (doc.paths?.["/api/v1/scores"]?.get as { parameters?: { name: string }[] })?.parameters ?? [];
+    const scoreParams =
+      (doc.paths?.["/api/v1/scores"]?.get as { parameters?: { name: string }[] })?.parameters ?? [];
     expect(scoreParams.map((p) => p.name)).toContain("band");
   });
 

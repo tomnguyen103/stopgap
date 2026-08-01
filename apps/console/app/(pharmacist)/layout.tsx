@@ -19,9 +19,9 @@ const NAV: NavLink[] = [
 ];
 
 export default async function PharmacistLayout({ children }: { children: ReactNode }) {
-  await requireGroup("pharmacist");
+  const principal = await requireGroup("pharmacist");
   return (
-    <DashboardShell surface="pharmacist workspace" nav={NAV}>
+    <DashboardShell surface="pharmacist workspace" nav={NAV} principal={principal.label}>
       {children}
     </DashboardShell>
   );

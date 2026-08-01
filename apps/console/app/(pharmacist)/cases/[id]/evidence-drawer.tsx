@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { Button } from "../../../components/ui";
 
 export interface EvidenceEntry {
   id: string;
@@ -40,23 +41,23 @@ export function EvidenceDrawer({
 
   return (
     <>
-      <button
+      <Button
         className="ds-button ds-button--quiet"
         type="button"
         onClick={() => dialog.current?.showModal()}
       >
         Evidence ({entries.length})
-      </button>
+      </Button>
       <dialog className="ds-drawer" ref={dialog} aria-label="Evidence behind this case">
         <div className="ds-drawer__head">
           <h2>Evidence</h2>
-          <button
+          <Button
             className="ds-button ds-button--quiet"
             type="button"
             onClick={() => dialog.current?.close()}
           >
             Close
-          </button>
+          </Button>
         </div>
         {signalTitle ? <p className="sub">{signalTitle}</p> : null}
         {entries.length === 0 ? (

@@ -13,6 +13,7 @@ import { resolvePrincipal } from "../../../lib/principal";
 import { EscalationPanel } from "./escalation-panel";
 import { ReviewPanel } from "./review-panel";
 import { requireGroup } from "../../../lib/group-guard";
+import { Card } from "../../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -80,7 +81,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         {c.severity ? ` · severity ${c.severity}` : ""}
       </p>
 
-      <div className="card">
+      <Card>
         <dl className="kv">
           <dt>Workflow ID</dt>
           <dd>{c.workflowId}</dd>
@@ -103,11 +104,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             </>
           ) : null}
         </dl>
-      </div>
+      </Card>
 
       {/* The evidence trail is a property of the CASE, not of the running workflow: a worker that
           is down must not take the reason for a decision off the page with it. */}
-      <div className="card">
+      <Card>
         <h2>Evidence</h2>
         <p className="sub sub-tight">
           {signal
@@ -130,13 +131,13 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             }))}
           />
         </div>
-      </div>
+      </Card>
 
       {live && draftWithheld ? (
         // WITHHELD MEANS NO DECISION, not a decision on blank text. Rendering the panel with an
         // emptied draft leaves an Approve button that reads as "approve" while the pharmacist has
         // seen nothing — the same failure as approving text you cannot see, arrived at politely.
-        <div className="card">
+        <Card>
           <h2>Draft withheld</h2>
           <p className="sub">
             The compliance guard objected to this draft, so it is not rendered and no decision can
@@ -145,7 +146,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             somebody can see the line that tripped it, and a case page is a wider audience than
             that.
           </p>
-        </div>
+        </Card>
       ) : live ? (
         <ReviewPanel
           // Keyed on case + view + a FINGERPRINT of the draft: two cases sharing a draft (including
@@ -170,18 +171,18 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
       ) : c.status === "awaiting_review" || c.status === "exception" ? (
         // Without live state there is no draft to read, and approving text you cannot see is
         // worse than waiting. Say why the gate is missing instead of rendering an empty one.
-        <div className="card">
+        <Card>
           <h2>Review unavailable</h2>
           <p className="sub">
             This case is {c.status.replace("_", " ")}, but the workflow could not be reached, so the
             drafted protocol cannot be shown. Start the worker (<code>pnpm worker</code>) and reload
             — decisions are taken against the live draft, never a stale copy.
           </p>
-        </div>
+        </Card>
       ) : null}
 
       {live?.protocolSource ? (
-        <div className="card">
+        <Card>
           <h2>Protocol</h2>
           <p className="sub">
             {live.protocolSource === "memory"
@@ -198,9 +199,9 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
               Withheld by the compliance guard ({describeViolations(draftScreen)}).
             </p>
           ) : live.draft ? (
-            <pre className="draft">{live.draft}</pre>
+            <pre className="draft ds-prose">{live.draft}</pre>
           ) : null}
-        </div>
+        </Card>
       ) : null}
 
       <EscalationPanel
@@ -231,8 +232,8 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
         )}
       />
 
-      <div className="card">
-        <h1 style={{ fontSize: 15 }}>Audit trail (hash-chained)</h1>
+      <Card>
+        <h2>Audit trail (hash-chained)</h2>
         <ol className="audit">
           {audit.map((a) => (
             <li key={a.id}>
@@ -241,7 +242,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ id:
             </li>
           ))}
         </ol>
-      </div>
+      </Card>
     </>
   );
 }

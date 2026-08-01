@@ -45,9 +45,7 @@ export const SIGNAL_LIST_SCHEMA: ListParamsSchema = {
   defaultPageSize: 25,
 };
 
-export function parseSignalListParams(
-  input: Parameters<typeof parseListParams>[0],
-): ListParams {
+export function parseSignalListParams(input: Parameters<typeof parseListParams>[0]): ListParams {
   return parseListParams(input, SIGNAL_LIST_SCHEMA);
 }
 

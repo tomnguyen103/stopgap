@@ -18,9 +18,9 @@ import { requireGroup } from "../lib/group-guard";
 const NAV: NavLink[] = [{ href: "/overview", label: "Overview" }];
 
 export default async function ViewerLayout({ children }: { children: ReactNode }) {
-  await requireGroup("viewer");
+  const principal = await requireGroup("viewer");
   return (
-    <DashboardShell surface="viewer dashboard" nav={NAV}>
+    <DashboardShell surface="viewer dashboard" nav={NAV} principal={principal.label}>
       {children}
     </DashboardShell>
   );

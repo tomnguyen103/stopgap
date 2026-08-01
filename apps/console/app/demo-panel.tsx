@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { startDemoShortage } from "./lib/actions";
+import { Button, Card } from "./components/ui";
 
 /**
  * "Run a shortage" (PROJECT_PLAN §11). Each button starts a real durable case through the
@@ -36,21 +37,24 @@ export function DemoPanel({ drugs }: { drugs: { key: string; genericName: string
   }
 
   return (
-    <div className="card">
-      <h2 className="card-title">Run a shortage</h2>
+    <Card title="Run a shortage">
       <p className="sub sub-tight">
         Starts a real Temporal case against the live agent layer. Reviews stay disabled — this is a
         read-only demo.
       </p>
       <div className="actions">
         {drugs.map((d) => (
-          <button key={d.key} onClick={() => run(d.key)} disabled={pending}>
+          <Button key={d.key} onClick={() => run(d.key)} disabled={pending}>
             {d.genericName}
-          </button>
+          </Button>
         ))}
       </div>
       {message ? <p className="sub sub-note">{message}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
-    </div>
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </Card>
   );
 }

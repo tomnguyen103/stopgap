@@ -2,6 +2,7 @@ import { getKpis, withOrgDb } from "@stopgap/db";
 import { getShadowDashboard } from "../../lib/data";
 import { resolvePrincipal } from "../../lib/principal";
 import { requireGroup } from "../../lib/group-guard";
+import { Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -80,26 +81,19 @@ export default async function MetricsPage() {
         {kpis.terminalCases} closed or rejected
       </p>
 
-      <table>
-        <thead>
-          <tr>
-            <th>Metric</th>
-            <th>Now</th>
-            <th>Target</th>
-            <th>What it means</th>
+      <Table
+        head={["Metric", "Now", "Target", "What it means"]}
+        label="Programme metrics against target"
+      >
+        {rows.map((row) => (
+          <tr key={row.metric}>
+            <td>{row.metric}</td>
+            <td className="is-status">{row.value}</td>
+            <td>{row.target}</td>
+            <td className="is-subtle">{row.note}</td>
           </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.metric}>
-              <td>{row.metric}</td>
-              <td className="status">{row.value}</td>
-              <td>{row.target}</td>
-              <td className="sub">{row.note}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        ))}
+      </Table>
     </>
   );
 }

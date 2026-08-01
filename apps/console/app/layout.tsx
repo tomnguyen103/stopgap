@@ -1,3 +1,5 @@
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { DemoBanner } from "./demo-banner";
@@ -19,7 +21,16 @@ export const metadata: Metadata = {
  */
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    /*
+      Both faces are self-hosted and inlined by `next/font`. A Google-Fonts pairing would put a
+      third-party fetch on the critical path of a console documented as deployable inside hospital
+      networks — the same reason `api/v1/docs` refuses a CDN — and the failure mode is unstyled
+      text on a page someone opened under time pressure.
+
+      The classes go on `<html>` rather than `<body>` so the variables are in scope for `:root`,
+      which is where `--font-body` and `--font-mono` read them.
+    */
+    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body>
         <DemoBanner />
         {children}

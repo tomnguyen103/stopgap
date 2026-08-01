@@ -14,12 +14,13 @@ import { Card } from "../components/ui";
  */
 export default function AccessDeniedPage() {
   return (
-    <main>
+    /* Prose measure (§5.2): this page is read, not scanned. */
+    <main className="shell__main ds-prose">
       <h1>Access denied</h1>
       <Card title="No Stopgap role is assigned to this account">
         <p>
-          You are signed in, but this account carries no role that Stopgap recognizes, so there is no
-          dashboard to send you to.
+          You are signed in, but this account carries no role that Stopgap recognizes, so there is
+          no dashboard to send you to.
         </p>
         <p>
           Ask an administrator to grant the account a role in the identity provider. If roles were

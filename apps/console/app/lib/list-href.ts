@@ -1,8 +1,4 @@
-import {
-  serializeListParams,
-  type ListParams,
-  type ListParamsSchema,
-} from "./list-params.js";
+import { serializeListParams, type ListParams, type ListParamsSchema } from "./list-params.js";
 
 /**
  * Addresses for an interactive list — the links a sort header, a filter chip and a pager point at.

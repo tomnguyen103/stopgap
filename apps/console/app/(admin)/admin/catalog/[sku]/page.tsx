@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { Badge, Card, Table } from "../../../../components/ui";
 import { isSoleSourced, isUnsourced } from "../../../../lib/catalog-list";
 import { getCatalogItemDetail } from "../../../../lib/data";
 import { requireGroup } from "../../../../lib/group-guard";
 import { bandSeverity } from "../../../../lib/signal-list";
+import { Badge, Card, Table } from "../../../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +65,7 @@ export default async function CatalogItemPage({ params }: { params: Promise<{ sk
             {identifiers.map((row) => (
               <tr key={`${row.kind}:${row.value}`}>
                 <td>{row.kind}</td>
-                <td className="sub">{row.value}</td>
+                <td className="is-subtle">{row.value}</td>
               </tr>
             ))}
           </Table>
@@ -85,7 +85,7 @@ export default async function CatalogItemPage({ params }: { params: Promise<{ sk
               // a key built from the name alone would collide.
               <tr key={`${String(index)}:${row.name}`}>
                 <td>{row.name}</td>
-                <td className="sub">{row.code ?? "—"}</td>
+                <td className="is-subtle">{row.code ?? "—"}</td>
                 <td>{row.preferred ? "yes" : <span className="sub">no</span>}</td>
               </tr>
             ))}
@@ -107,7 +107,7 @@ export default async function CatalogItemPage({ params }: { params: Promise<{ sk
                   {row.onHand}
                   {row.unit ? <span className="sub"> {row.unit}</span> : null}
                 </td>
-                <td className="sub">{row.capturedAt.toISOString().slice(0, 10)}</td>
+                <td className="is-subtle">{row.capturedAt.toISOString().slice(0, 10)}</td>
               </tr>
             ))}
           </Table>

@@ -4,7 +4,6 @@ import { isDemoMode } from "@stopgap/demo";
 import type { ConnectorRunOutcome } from "@stopgap/db";
 import { SIGNAL_SOURCES } from "@stopgap/ingest";
 
-import { Badge, Card, Table } from "../../components/ui";
 import {
   getCatalogCoverage,
   getConnectorRuns,
@@ -13,6 +12,7 @@ import {
 } from "../../lib/data";
 import { requireGroup } from "../../lib/group-guard";
 import { SeedDemoPanel } from "./seed-demo-panel";
+import { Badge, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -152,12 +152,16 @@ export default async function AdminIndexPage() {
               <td>
                 {/* A word as well as a colour: a checklist that separates done from not-done by
                     green alone is unreadable to a reader who cannot see the difference. */}
-                {row.done ? <Badge tone="status">done</Badge> : <Badge severity="high">to do</Badge>}
+                {row.done ? (
+                  <Badge tone="status">done</Badge>
+                ) : (
+                  <Badge severity="high">to do</Badge>
+                )}
               </td>
               <td>
                 {row.href === undefined ? row.label : <Link href={row.href}>{row.label}</Link>}
               </td>
-              <td className="sub">{row.detail}</td>
+              <td className="is-subtle">{row.detail}</td>
             </tr>
           ))}
         </Table>
@@ -184,9 +188,9 @@ export default async function AdminIndexPage() {
                 {source}
                 {unknown ? <span className="sub"> · not polled here</span> : null}
               </td>
-              <td className="sub">{run ? stamp(run.ranAt) : "—"}</td>
+              <td className="is-subtle">{run ? stamp(run.ranAt) : "—"}</td>
               <td>{run ? run.signalCount : "—"}</td>
-              <td className="sub">
+              <td className="is-subtle">
                 {/* Separate from the last RUN on purpose: a connector failing every poll for a week
                     still has a recent run, and the gap between the two columns is the whole signal. */}
                 {run?.lastOkAt ? stamp(run.lastOkAt) : "never"}
@@ -241,7 +245,7 @@ export default async function AdminIndexPage() {
             {feeds.map((feed) => (
               <tr key={feed.source}>
                 <td>{feed.source}</td>
-                <td className="sub">{stamp(feed.lastFetchedAt)}</td>
+                <td className="is-subtle">{stamp(feed.lastFetchedAt)}</td>
                 <td>{feed.records}</td>
                 <td>
                   {isQuiet(feed.lastFetchedAt) ? (

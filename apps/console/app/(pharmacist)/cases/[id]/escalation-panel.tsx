@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import type { EscalationEvent } from "@stopgap/workflows";
 import { acknowledgeCase } from "../../../lib/actions";
 import { formatUtc } from "../../../lib/format";
+import { Button, Card } from "../../../components/ui";
 
 /**
  * The per-case escalation timeline + acknowledge control (PHASE6 §6.3). Shows the ladder as it
@@ -53,7 +54,7 @@ export function EscalationPanel({
   const notified = escalationEvents.filter((e) => !e.sendFailed);
 
   return (
-    <div className="card">
+    <Card>
       <h2>Escalation</h2>
       <p className="sub">
         {acked
@@ -93,7 +94,7 @@ export function EscalationPanel({
       </ol>
       {!acked ? (
         <div className="actions">
-          <button
+          <Button
             type="button"
             // `aria-disabled` rather than `disabled`: a disabled control leaves the tab order, so
             // the very explanation a keyboard or screen-reader user needs becomes unreachable.
@@ -114,10 +115,14 @@ export function EscalationPanel({
             }}
           >
             Acknowledge
-          </button>
+          </Button>
         </div>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
-    </div>
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </Card>
   );
 }

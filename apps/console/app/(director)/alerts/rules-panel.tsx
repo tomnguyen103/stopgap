@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { createAlertRuleAction, updateAlertRuleAction } from "../../lib/actions";
+import { Button, Table } from "../../components/ui";
 
 export interface RuleView {
   id: string;
@@ -58,7 +59,8 @@ export function RulesPanel({
    * identity goes, which is not an improvement on the tooltip. Undefined when allowed, so the
    * element keeps its own text.
    */
-  const gatedLabel = (name: string) => (unavailableReason ? `${name} — ${unavailableReason}` : undefined);
+  const gatedLabel = (name: string) =>
+    unavailableReason ? `${name} — ${unavailableReason}` : undefined;
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | undefined>();
   // Cooldown edits are CONTROLLED, keyed by rule. With an uncontrolled input the toggle button
@@ -107,101 +109,92 @@ export function RulesPanel({
         </p>
       ) : null}
 
-      <table className="ds-table">
-        <thead>
+      <Table
+        head={["Rule", "Fires at", "Cooldown", "Channels", "Last fired", "State"]}
+        label="Alert rules"
+      >
+        {rules.length === 0 ? (
           <tr>
-            <th>Rule</th>
-            <th>Fires at</th>
-            <th>Cooldown</th>
-            <th>Channels</th>
-            <th>Last fired</th>
-            <th>State</th>
+            <td colSpan={6} className="is-subtle">
+              No rules yet. Nothing is being alerted on.
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {rules.length === 0 ? (
-            <tr>
-              <td colSpan={6} className="sub">
-                No rules yet. Nothing is being alerted on.
+        ) : (
+          rules.map((rule) => (
+            <tr key={rule.id}>
+              <td>
+                {rule.name}
+                {rule.riskDomain ? <span className="sub"> · {rule.riskDomain}</span> : null}
+                {rule.entityContains ? (
+                  <span className="sub"> · names containing “{rule.entityContains}”</span>
+                ) : null}
+              </td>
+              <td>{rule.minSeverity} and above</td>
+              <td>
+                <label className="sub" htmlFor={`cooldown-${rule.id}`}>
+                  minutes
+                </label>{" "}
+                <input
+                  className="ds-input ds-input--inline"
+                  id={`cooldown-${rule.id}`}
+                  type="number"
+                  min={1}
+                  value={cooldowns[rule.id] ?? rule.cooldownMinutes}
+                  disabled={pending}
+                  aria-disabled={blocked || undefined}
+                  title={unavailableReason ?? undefined}
+                  aria-label={gatedLabel(`cooldown minutes for ${rule.name}`)}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    setCooldowns((current) => ({ ...current, [rule.id]: next }));
+                  }}
+                  onBlur={() => {
+                    const next = cooldowns[rule.id] ?? rule.cooldownMinutes;
+                    if (next === rule.cooldownMinutes) return;
+                    run(() =>
+                      updateAlertRuleAction(rule.id, settings(rule, { cooldownMinutes: next })),
+                    );
+                  }}
+                />
+              </td>
+              <td>
+                {rule.channels.join(", ")}
+                {/* A chat rule with no destination does not error — it silently pages nobody,
+                      which is the one failure alerting cannot afford to keep to itself. */}
+                {rule.channels.includes("chat") && !rule.hasChatWebhook ? (
+                  <span className="sub"> · no webhook set — this rule pages nobody</span>
+                ) : null}
+              </td>
+              <td className="is-subtle">{rule.lastFired ?? "never"}</td>
+              <td>
+                <Button
+                  type="button"
+                  className="ds-button ds-button--quiet"
+                  aria-disabled={blocked || undefined}
+                  title={unavailableReason ?? undefined}
+                  aria-label={gatedLabel(rule.enabled ? "Enabled" : "Disabled")}
+                  disabled={pending}
+                  onClick={() => {
+                    // The cooldown from the box, not from props: an unsaved edit sitting in the
+                    // input must not be reverted by a toggle on the same row.
+                    run(() =>
+                      updateAlertRuleAction(
+                        rule.id,
+                        settings(rule, {
+                          enabled: !rule.enabled,
+                          cooldownMinutes: cooldowns[rule.id] ?? rule.cooldownMinutes,
+                        }),
+                      ),
+                    );
+                  }}
+                >
+                  {rule.enabled ? "Enabled" : "Disabled"}
+                </Button>
               </td>
             </tr>
-          ) : (
-            rules.map((rule) => (
-              <tr key={rule.id}>
-                <td>
-                  {rule.name}
-                  {rule.riskDomain ? <span className="sub"> · {rule.riskDomain}</span> : null}
-                  {rule.entityContains ? (
-                    <span className="sub"> · names containing “{rule.entityContains}”</span>
-                  ) : null}
-                </td>
-                <td>{rule.minSeverity} and above</td>
-                <td>
-                  <label className="sub" htmlFor={`cooldown-${rule.id}`}>
-                    minutes
-                  </label>{" "}
-                  <input
-                    className="ds-input ds-input--inline"
-                    id={`cooldown-${rule.id}`}
-                    type="number"
-                    min={1}
-                    value={cooldowns[rule.id] ?? rule.cooldownMinutes}
-                    disabled={pending}
-                    aria-disabled={blocked || undefined}
-                    title={unavailableReason ?? undefined}
-                    aria-label={gatedLabel(`cooldown minutes for ${rule.name}`)}
-                    onChange={(event) => {
-                      const next = Number(event.target.value);
-                      setCooldowns((current) => ({ ...current, [rule.id]: next }));
-                    }}
-                    onBlur={() => {
-                      const next = cooldowns[rule.id] ?? rule.cooldownMinutes;
-                      if (next === rule.cooldownMinutes) return;
-                      run(() =>
-                        updateAlertRuleAction(rule.id, settings(rule, { cooldownMinutes: next })),
-                      );
-                    }}
-                  />
-                </td>
-                <td>
-                  {rule.channels.join(", ")}
-                  {/* A chat rule with no destination does not error — it silently pages nobody,
-                      which is the one failure alerting cannot afford to keep to itself. */}
-                  {rule.channels.includes("chat") && !rule.hasChatWebhook ? (
-                    <span className="sub"> · no webhook set — this rule pages nobody</span>
-                  ) : null}
-                </td>
-                <td className="sub">{rule.lastFired ?? "never"}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="ds-button ds-button--quiet"
-                    aria-disabled={blocked || undefined}
-                    title={unavailableReason ?? undefined}
-                    aria-label={gatedLabel(rule.enabled ? "Enabled" : "Disabled")}
-                    disabled={pending}
-                    onClick={() => {
-                      // The cooldown from the box, not from props: an unsaved edit sitting in the
-                      // input must not be reverted by a toggle on the same row.
-                      run(() =>
-                        updateAlertRuleAction(
-                          rule.id,
-                          settings(rule, {
-                            enabled: !rule.enabled,
-                            cooldownMinutes: cooldowns[rule.id] ?? rule.cooldownMinutes,
-                          }),
-                        ),
-                      );
-                    }}
-                  >
-                    {rule.enabled ? "Enabled" : "Disabled"}
-                  </button>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+          ))
+        )}
+      </Table>
 
       <div className="ds-filters">
         <label className="sub" htmlFor="rule-name">
@@ -273,7 +266,7 @@ export function RulesPanel({
             }}
           />
         ) : null}
-        <button
+        <Button
           type="button"
           className="ds-button"
           aria-disabled={blocked || undefined}
@@ -302,9 +295,13 @@ export function RulesPanel({
           }}
         >
           Create rule
-        </button>
+        </Button>
       </div>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </>
   );
 }

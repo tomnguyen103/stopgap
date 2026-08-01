@@ -23,9 +23,7 @@ export const CATALOG_LIST_SCHEMA: ListParamsSchema = {
   defaultPageSize: 25,
 };
 
-export function parseCatalogListParams(
-  input: Parameters<typeof parseListParams>[0],
-): ListParams {
+export function parseCatalogListParams(input: Parameters<typeof parseListParams>[0]): ListParams {
   return parseListParams(input, CATALOG_LIST_SCHEMA);
 }
 
@@ -57,11 +55,7 @@ export function isUnsourced(supplierSiteCount: number): boolean {
  * plan could identify one. A message that names only the reason sends an administrator hunting
  * through four thousand rows for it.
  */
-export function describeRowError(error: {
-  line: number;
-  column?: string;
-  reason: string;
-}): string {
+export function describeRowError(error: { line: number; column?: string; reason: string }): string {
   return error.column === undefined
     ? `Line ${String(error.line)}: ${error.reason}`
     : `Line ${String(error.line)}, column “${error.column}”: ${error.reason}`;

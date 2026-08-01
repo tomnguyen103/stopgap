@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { resolveExceptionCase, reviewCase } from "../../../lib/actions";
+import { Button, Card, Field } from "../../../components/ui";
 
 /**
  * The HITL gate (PROJECT_PLAN §2). A case sitting in `awaiting_review` blocks its workflow
@@ -65,7 +66,7 @@ export function ReviewPanel({
   if (status === "awaiting_review") {
     const edited = editedDraft !== draft;
     return (
-      <div className="card">
+      <Card className="ds-prose">
         <h2>Pharmacist review</h2>
         <p className="sub">
           This case is blocked on your decision. Alternatives proposed:{" "}
@@ -81,17 +82,26 @@ export function ReviewPanel({
             {unavailableReason}
           </p>
         ) : null}
-        <textarea
-          className="draft-input"
-          rows={10}
-          value={editedDraft}
-          disabled={pending}
-          onChange={(event) => {
-            setEditedDraft(event.target.value);
-          }}
-        />
+        <Field
+          label="Protocol draft"
+          hint="Edit before approving to record your changes on the approved version."
+        >
+          {(id, describedBy) => (
+            <textarea
+              id={id}
+              aria-describedby={describedBy}
+              className="draft-input"
+              rows={10}
+              value={editedDraft}
+              disabled={pending}
+              onChange={(event) => {
+                setEditedDraft(event.target.value);
+              }}
+            />
+          )}
+        </Field>
         <div className="actions">
-          <button
+          <Button
             type="button"
             // `aria-disabled` rather than `disabled` when the caller lacks the role: a disabled
             // control leaves the tab order, taking the explanation of WHY with it. The handler
@@ -110,19 +120,24 @@ export function ReviewPanel({
             }}
           >
             {edited ? "Approve with edits" : "Approve"}
-          </button>
-          <input
-            className="reason-input"
-            placeholder="Reason (required to reject)"
-            value={rejectReason}
-            disabled={pending}
-            onChange={(event) => {
-              setRejectReason(event.target.value);
-            }}
-          />
-          <button
+          </Button>
+          <Field label="Reason" hint="Required to reject.">
+            {(id, describedBy) => (
+              <input
+                id={id}
+                aria-describedby={describedBy}
+                className="reason-input"
+                value={rejectReason}
+                disabled={pending}
+                onChange={(event) => {
+                  setRejectReason(event.target.value);
+                }}
+              />
+            )}
+          </Field>
+          <Button
             type="button"
-            className="danger"
+            variant="danger"
             aria-disabled={blocked || undefined}
             title={unavailableReason ?? undefined}
             disabled={pending || rejectReason.trim().length === 0}
@@ -132,16 +147,20 @@ export function ReviewPanel({
             }}
           >
             Reject
-          </button>
+          </Button>
         </div>
-        {error ? <p className="error">{error}</p> : null}
-      </div>
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </Card>
     );
   }
 
   if (status === "exception") {
     return (
-      <div className="card">
+      <Card className="ds-prose">
         <h2>Resolve exception</h2>
         <p className="sub">
           The agent escalated this case. What you write here becomes an approved protocol version
@@ -153,36 +172,54 @@ export function ReviewPanel({
             {unavailableReason}
           </p>
         ) : null}
-        <textarea
-          className="draft-input"
-          rows={8}
-          placeholder="Substitution or allocation guidance for the floor"
-          value={resolutionBody}
-          disabled={pending}
-          onChange={(event) => {
-            setResolutionBody(event.target.value);
-          }}
-        />
+        <Field
+          label="Resolution"
+          hint="Substitution or allocation guidance for the floor. Becomes an approved protocol version."
+        >
+          {(id, describedBy) => (
+            <textarea
+              id={id}
+              aria-describedby={describedBy}
+              className="draft-input"
+              rows={8}
+              value={resolutionBody}
+              disabled={pending}
+              onChange={(event) => {
+                setResolutionBody(event.target.value);
+              }}
+            />
+          )}
+        </Field>
         <div className="actions">
-          <input
-            className="reason-input"
-            placeholder="Alternative (optional)"
-            value={resolutionAlternative}
-            disabled={pending}
-            onChange={(event) => {
-              setResolutionAlternative(event.target.value);
-            }}
-          />
-          <input
-            className="reason-input"
-            placeholder="Why (recorded on the protocol version)"
-            value={rationale}
-            disabled={pending}
-            onChange={(event) => {
-              setRationale(event.target.value);
-            }}
-          />
-          <button
+          <Field label="Alternative" hint="Optional.">
+            {(id, describedBy) => (
+              <input
+                id={id}
+                aria-describedby={describedBy}
+                className="reason-input"
+                value={resolutionAlternative}
+                disabled={pending}
+                onChange={(event) => {
+                  setResolutionAlternative(event.target.value);
+                }}
+              />
+            )}
+          </Field>
+          <Field label="Why" hint="Recorded on the protocol version.">
+            {(id, describedBy) => (
+              <input
+                id={id}
+                aria-describedby={describedBy}
+                className="reason-input"
+                value={rationale}
+                disabled={pending}
+                onChange={(event) => {
+                  setRationale(event.target.value);
+                }}
+              />
+            )}
+          </Field>
+          <Button
             type="button"
             aria-disabled={blocked || undefined}
             title={unavailableReason ?? undefined}
@@ -201,10 +238,14 @@ export function ReviewPanel({
             }}
           >
             Resolve and write protocol
-          </button>
+          </Button>
         </div>
-        {error ? <p className="error">{error}</p> : null}
-      </div>
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </Card>
     );
   }
 

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { approveProtocolVersionAction } from "../../lib/actions";
+import { Button } from "../../components/ui";
 
 /**
  * Approve a drafted protocol version (ticket 14).
@@ -28,7 +29,7 @@ export function ApproveButton({
 
   return (
     <>
-      <button
+      <Button
         type="button"
         className="ds-button"
         // `aria-disabled`, not `disabled`: a disabled control leaves the tab order and takes its
@@ -59,13 +60,17 @@ export function ApproveButton({
           : supersedes === null
             ? "Approve"
             : `Approve, superseding v${String(supersedes)}`}
-      </button>
+      </Button>
       {unavailableReason ? (
         <p className="sub sub-tight" role="note">
           {unavailableReason}
         </p>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </>
   );
 }

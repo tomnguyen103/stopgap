@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import type { Role } from "@stopgap/core";
 import { assignRoleAction, revokeRoleAction, setUserDisabledAction } from "../../../lib/actions";
+import { Button, Card, Table, Toggle } from "../../../components/ui";
 
 /**
  * Role management UI (PHASE6 §6.1). A thin client over the admin server actions — each role is a
@@ -35,58 +36,52 @@ export function UsersAdmin({ users, allRoles }: { users: AdminUser[]; allRoles: 
   }
 
   return (
-    <div className="card">
-      <table>
-        <thead>
-          <tr>
-            <th>User</th>
-            <th>Roles</th>
-            <th>Account</th>
+    <Card>
+      <Table head={["User", "Roles", "Account"]} label="Users and their roles">
+        {users.map((user) => (
+          <tr key={user.id}>
+            <td>{user.label}</td>
+            <td>
+              <div className="actions">
+                {allRoles.map((role) => {
+                  const has = user.roles.includes(role);
+                  return (
+                    <Toggle
+                      key={role}
+                      pressed={has}
+                      disabled={pending}
+                      onClick={() => {
+                        run(() =>
+                          has ? revokeRoleAction(user.id, role) : assignRoleAction(user.id, role),
+                        );
+                      }}
+                    >
+                      {role}
+                    </Toggle>
+                  );
+                })}
+              </div>
+            </td>
+            <td>
+              <Button
+                type="button"
+                variant="danger"
+                disabled={pending}
+                onClick={() => {
+                  run(() => setUserDisabledAction(user.id, true));
+                }}
+              >
+                Disable
+              </Button>
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {users.map((user) => (
-            <tr key={user.id}>
-              <td>{user.label}</td>
-              <td>
-                <div className="actions">
-                  {allRoles.map((role) => {
-                    const has = user.roles.includes(role);
-                    return (
-                      <button
-                        key={role}
-                        type="button"
-                        className={has ? "pill" : "pill muted"}
-                        disabled={pending}
-                        onClick={() => {
-                          run(() =>
-                            has ? revokeRoleAction(user.id, role) : assignRoleAction(user.id, role),
-                          );
-                        }}
-                      >
-                        {has ? `✓ ${role}` : role}
-                      </button>
-                    );
-                  })}
-                </div>
-              </td>
-              <td>
-                <button
-                  type="button"
-                  className="danger"
-                  disabled={pending}
-                  onClick={() => {
-                    run(() => setUserDisabledAction(user.id, true));
-                  }}
-                >
-                  Disable
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {error ? <p className="error">{error}</p> : null}
-    </div>
+        ))}
+      </Table>
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </Card>
   );
 }

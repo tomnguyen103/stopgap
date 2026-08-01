@@ -3,10 +3,10 @@ import { notFound } from "next/navigation";
 
 import { COMPONENT_BUDGET, type ComponentName } from "@stopgap/scorer";
 
-import { Badge, Card, Table } from "../../../components/ui";
 import { getSignalDetail } from "../../../lib/data";
 import { requireGroup } from "../../../lib/group-guard";
 import { bandSeverity, componentLabel, partialScoreNotice } from "../../../lib/signal-list";
+import { Badge, Card, Table } from "../../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -124,7 +124,7 @@ export default async function SignalDetailPage({ params }: { params: Promise<{ k
                         value.toFixed(1)
                       )}
                     </td>
-                    <td className="sub">{COMPONENT_BUDGET[name]}</td>
+                    <td className="is-subtle">{COMPONENT_BUDGET[name]}</td>
                   </tr>
                 );
               })}

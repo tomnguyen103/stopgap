@@ -1,9 +1,14 @@
 import { getProtocols } from "../../lib/data";
-import { Card, Table } from "../../components/ui";
 import { requireGroup } from "../../lib/group-guard";
-import { diffLines, parseVersionParam, resolveComparison, summarizeDiff } from "../../lib/version-diff";
+import {
+  diffLines,
+  parseVersionParam,
+  resolveComparison,
+  summarizeDiff,
+} from "../../lib/version-diff";
 import { ApproveVersionButton } from "./approve-version";
 import { WithdrawVersionButton } from "./withdraw-version";
+import { Button, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +19,7 @@ export const dynamic = "force-dynamic";
  *
  * Rebuilt on the shared primitives (ticket 02) and deliberately UNCHANGED on screen. The markup
  * this page used to hand-write — `<section className="card">`, a bare `<table>`, a
- * `<td className="status">` — resolves to the same tokens through `Card` and `Table`, so
+ * `<td className="is-status">` — resolves to the same tokens through `Card` and `Table`, so
  * the rebuild is a proof that the two styling systems coexist rather than a redesign.
  */
 /**
@@ -70,116 +75,118 @@ export default async function ProtocolsPage({
           const comparison =
             pair === null ? null : { ...pair, diff: diffLines(pair.from.body, pair.to.body) };
           return (
-          <Card
-            key={protocol.id}
-            title={protocol.title}
-            sub={
-              <>
-                key <code>{protocol.key}</code>
-                {protocol.drugClass ? ` · ${protocol.drugClass}` : ""}
-              </>
-            }
-          >
-            <Table
-              label={`${protocol.title} version history`}
-              head={["Version", "State", "Authored by", "Approved by", "Rationale", "Action"]}
+            <Card
+              key={protocol.id}
+              title={protocol.title}
+              sub={
+                <>
+                  key <code>{protocol.key}</code>
+                  {protocol.drugClass ? ` · ${protocol.drugClass}` : ""}
+                </>
+              }
             >
-              {versions.map((version) => (
-                <tr key={version.id}>
-                  <td>v{version.version}</td>
-                  <td className="is-status">{version.state}</td>
-                  <td>{version.authoredBy}</td>
-                  <td>{version.approvedBy ?? "—"}</td>
-                  <td className="is-subtle">{version.rationale ?? "—"}</td>
-                  <td>
-                    {version.state === "draft" ? (
-                      <ApproveVersionButton versionId={version.id} roles={principal.roles} />
-                    ) : null}
-                    {/* Only the LIVE version can be withdrawn: a draft has never been guidance and
+              <Table
+                label={`${protocol.title} version history`}
+                head={["Version", "State", "Authored by", "Approved by", "Rationale", "Action"]}
+              >
+                {versions.map((version) => (
+                  <tr key={version.id}>
+                    <td>v{version.version}</td>
+                    <td className="is-status">{version.state}</td>
+                    <td>{version.authoredBy}</td>
+                    <td>{version.approvedBy ?? "—"}</td>
+                    <td className="is-subtle">{version.rationale ?? "—"}</td>
+                    <td>
+                      {version.state === "draft" ? (
+                        <ApproveVersionButton versionId={version.id} roles={principal.roles} />
+                      ) : null}
+                      {/* Only the LIVE version can be withdrawn: a draft has never been guidance and
                         a superseded one is already down. */}
-                    {version.state === "approved" ? (
-                      <WithdrawVersionButton
-                        versionId={version.id}
-                        version={version.version}
-                        roles={principal.roles}
-                      />
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </Table>
-            {/* ARBITRARY PAIRS, not just "against the one before". "What changed in v3" and "what
+                      {version.state === "approved" ? (
+                        <WithdrawVersionButton
+                          versionId={version.id}
+                          version={version.version}
+                          roles={principal.roles}
+                        />
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+              {/* ARBITRARY PAIRS, not just "against the one before". "What changed in v3" and "what
                 has changed since the version we agreed in March" are different questions, and the
                 second is the one asked in an incident review. A GET form rather than a client
                 component: the whole page is server-rendered, and the comparison belongs in the
                 address for the same reason every other list state does. */}
-            {versions.length < 2 ? null : (
-              <form className="ds-filters" method="get">
-                <input type="hidden" name="compare" value={protocol.key} />
-                <label className="sub" htmlFor={`from-${protocol.key}`}>
-                  Compare
-                </label>
-                <select
-                  className="ds-input ds-input--inline"
-                  id={`from-${protocol.key}`}
-                  name="from"
-                  defaultValue={String(comparison?.from.version ?? versions[versions.length - 1]?.version ?? "")}
-                >
-                  {versions.map((v) => (
-                    <option key={v.id} value={v.version}>
-                      v{v.version}
-                    </option>
-                  ))}
-                </select>
-                <label className="sub" htmlFor={`to-${protocol.key}`}>
-                  with
-                </label>
-                <select
-                  className="ds-input ds-input--inline"
-                  id={`to-${protocol.key}`}
-                  name="to"
-                  defaultValue={String(comparison?.to.version ?? versions[0]?.version ?? "")}
-                >
-                  {versions.map((v) => (
-                    <option key={v.id} value={v.version}>
-                      v{v.version}
-                    </option>
-                  ))}
-                </select>
-                <button className="ds-button" type="submit">
-                  Show what changed
-                </button>
-              </form>
-            )}
+              {versions.length < 2 ? null : (
+                <form className="ds-filters" method="get">
+                  <input type="hidden" name="compare" value={protocol.key} />
+                  <label className="sub" htmlFor={`from-${protocol.key}`}>
+                    Compare
+                  </label>
+                  <select
+                    className="ds-input ds-input--inline"
+                    id={`from-${protocol.key}`}
+                    name="from"
+                    defaultValue={String(
+                      comparison?.from.version ?? versions[versions.length - 1]?.version ?? "",
+                    )}
+                  >
+                    {versions.map((v) => (
+                      <option key={v.id} value={v.version}>
+                        v{v.version}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="sub" htmlFor={`to-${protocol.key}`}>
+                    with
+                  </label>
+                  <select
+                    className="ds-input ds-input--inline"
+                    id={`to-${protocol.key}`}
+                    name="to"
+                    defaultValue={String(comparison?.to.version ?? versions[0]?.version ?? "")}
+                  >
+                    {versions.map((v) => (
+                      <option key={v.id} value={v.version}>
+                        v{v.version}
+                      </option>
+                    ))}
+                  </select>
+                  <Button type="submit">Show what changed</Button>
+                </form>
+              )}
 
-            {comparison === null ? (
-              versions[0] ? <pre className="draft">{versions[0].body}</pre> : null
-            ) : (
-              <>
-                <p className="sub sub-tight">
-                  v{comparison.from.version} → v{comparison.to.version} ·{" "}
-                  {summarizeDiff(comparison.diff)}
-                </p>
-                <Table
-                  label={`Changes between v${String(comparison.from.version)} and v${String(comparison.to.version)}`}
-                  head={["", "Line"]}
-                >
-                  {comparison.diff.map((line, i) => (
-                    <tr key={`${String(i)}:${line.text}`}>
-                      <td className="sub">
-                        {/* A symbol AND a colour, the same pair the approvals diff uses: a diff
+              {comparison === null ? (
+                versions[0] ? (
+                  <pre className="draft">{versions[0].body}</pre>
+                ) : null
+              ) : (
+                <>
+                  <p className="sub sub-tight">
+                    v{comparison.from.version} → v{comparison.to.version} ·{" "}
+                    {summarizeDiff(comparison.diff)}
+                  </p>
+                  <Table
+                    label={`Changes between v${String(comparison.from.version)} and v${String(comparison.to.version)}`}
+                    head={["", "Line"]}
+                  >
+                    {comparison.diff.map((line, i) => (
+                      <tr key={`${String(i)}:${line.text}`}>
+                        <td className="is-subtle">
+                          {/* A symbol AND a colour, the same pair the approvals diff uses: a diff
                             that separates added from removed by colour alone is unreadable to a
                             reader who cannot see the difference — and this one is read to decide
                             whether guidance changed. */}
-                        {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : ""}
-                      </td>
-                      <td className={`ds-diff ds-diff--${line.kind}`}>{line.text}</td>
-                    </tr>
-                  ))}
-                </Table>
-              </>
-            )}
-          </Card>
+                          {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : ""}
+                        </td>
+                        <td className={`ds-diff ds-diff--${line.kind}`}>{line.text}</td>
+                      </tr>
+                    ))}
+                  </Table>
+                </>
+              )}
+            </Card>
           );
         })
       )}

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { issueApiKeyAction, revokeApiKeyAction } from "../../../lib/actions";
+import { Badge, Button, Card, Field, Table, Toggle } from "../../../components/ui";
 
 /**
  * API key management UI (PHASE6 §6.7). A thin client over the admin server actions, which re-check
@@ -64,61 +65,65 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
 
   return (
     <>
-      <div className="card">
-        <h2 className="card-title">Issue a key</h2>
+      <Card title="Issue a key">
         <p className="sub-tight">
           Scopes are the whole authorization story for a key — it can do exactly what is ticked here
           and nothing else.
         </p>
         <div className="actions">
-          <input
-            className="reason-input"
-            placeholder="Name (e.g. epic-integration)"
-            value={name}
-            disabled={pending}
-            onChange={(e) => {
-              setName(e.target.value);
-            }}
-          />
-          <input
-            className="reason-input"
-            type="number"
-            min={1}
-            max={100000}
-            value={rateLimit}
-            disabled={pending}
-            onChange={(e) => {
-              setRateLimit(Number(e.target.value));
-            }}
-            aria-label="Requests per hour"
-          />
-        </div>
-        <div className="actions">
-          {allScopes.map((scope) => {
-            const on = scopes.includes(scope);
-            return (
-              <button
-                key={scope}
-                type="button"
-                className={on ? "pill" : "pill muted"}
+          <Field label="Name" hint="For example, epic-integration.">
+            {(id, describedBy) => (
+              <input
+                id={id}
+                aria-describedby={describedBy}
+                className="reason-input"
+                value={name}
                 disabled={pending}
-                onClick={() => {
-                  toggleScope(scope);
+                onChange={(e) => {
+                  setName(e.target.value);
                 }}
-              >
-                {on ? `✓ ${scope}` : scope}
-              </button>
-            );
-          })}
+              />
+            )}
+          </Field>
+          <Field label="Requests per hour">
+            {(id) => (
+              <input
+                id={id}
+                className="reason-input"
+                type="number"
+                min={1}
+                max={100000}
+                value={rateLimit}
+                disabled={pending}
+                onChange={(e) => {
+                  setRateLimit(Number(e.target.value));
+                }}
+              />
+            )}
+          </Field>
         </div>
         <div className="actions">
-          <button
+          {allScopes.map((scope) => (
+            <Toggle
+              key={scope}
+              pressed={scopes.includes(scope)}
+              disabled={pending}
+              onClick={() => {
+                toggleScope(scope);
+              }}
+            >
+              {scope}
+            </Toggle>
+          ))}
+        </div>
+        <div className="actions">
+          <Button
             type="button"
             disabled={pending || name.trim() === "" || scopes.length === 0}
             onClick={issue}
           >
             Issue key
-          </button>
+          </Button>
         </div>
         {issued ? (
           <div className="banner bad">
@@ -127,74 +132,67 @@ export function ApiKeysAdmin({ keys, allScopes }: { keys: AdminApiKey[]; allScop
               The server stores only its hash.
             </p>
             <p className="mono">{issued.plaintext}</p>
-            <button
+            <Button
               type="button"
               onClick={() => {
                 setIssued(undefined);
               }}
             >
               I have copied it
-            </button>
+            </Button>
           </div>
         ) : null}
-      </div>
+      </Card>
 
       {keys.length === 0 ? (
         <div className="empty">
           No keys issued — the public API refuses every request until one exists.
         </div>
       ) : (
-        <div className="card">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Prefix</th>
-                <th>Scopes</th>
-                <th>Limit/hr</th>
-                <th>Last used</th>
-                <th>State</th>
+        <Card>
+          <Table
+            head={["Name", "Prefix", "Scopes", "Limit/hr", "Last used", "State"]}
+            label="Issued API keys"
+          >
+            {keys.map((key) => (
+              <tr key={key.id}>
+                <td>{key.name}</td>
+                <td className="mono">{key.keyPrefix}…</td>
+                <td>
+                  <div className="actions">
+                    {key.scopes.map((scope) => (
+                      <Badge key={scope}>{scope}</Badge>
+                    ))}
+                  </div>
+                </td>
+                <td>{key.rateLimitPerHour}</td>
+                <td className="mono">{key.lastUsedAt ?? "never"}</td>
+                <td>
+                  {key.revokedAt ? (
+                    <Badge severity="critical">revoked</Badge>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      disabled={pending}
+                      onClick={() => {
+                        run(() => revokeApiKeyAction(key.id));
+                      }}
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {keys.map((key) => (
-                <tr key={key.id}>
-                  <td>{key.name}</td>
-                  <td className="mono">{key.keyPrefix}…</td>
-                  <td>
-                    <div className="actions">
-                      {key.scopes.map((scope) => (
-                        <span key={scope} className="pill">
-                          {scope}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td>{key.rateLimitPerHour}</td>
-                  <td className="mono">{key.lastUsedAt ?? "never"}</td>
-                  <td>
-                    {key.revokedAt ? (
-                      <span className="pill sev-critical">revoked</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="danger"
-                        disabled={pending}
-                        onClick={() => {
-                          run(() => revokeApiKeyAction(key.id));
-                        }}
-                      >
-                        Revoke
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </Table>
+        </Card>
       )}
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </>
   );
 }

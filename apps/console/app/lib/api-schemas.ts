@@ -72,13 +72,9 @@ export const protocolSummarySchema = z
     key: z.string(),
     title: z.string(),
     drugClass: z.string().nullable(),
-    approvedVersion: z
-      .number()
-      .int()
-      .nullable()
-      .openapi({
-        description: "The live version number, or null when every version is still a draft.",
-      }),
+    approvedVersion: z.number().int().nullable().openapi({
+      description: "The live version number, or null when every version is still a draft.",
+    }),
     updatedAt: isoDateTime,
   })
   .openapi({ ref: "ProtocolSummary", description: "A protocol as it appears in the index." });
@@ -184,12 +180,10 @@ export const approveVersionSchema = z
   })
   .openapi({ ref: "ApproveVersionRequest" });
 
-export const acceptedSchema = z
-  .object({ ok: z.literal(true), key: z.string() })
-  .openapi({
-    ref: "Accepted",
-    description: "The write was accepted and recorded in the audit chain.",
-  });
+export const acceptedSchema = z.object({ ok: z.literal(true), key: z.string() }).openapi({
+  ref: "Accepted",
+  description: "The write was accepted and recorded in the audit chain.",
+});
 
 export const approvedSchema = z
   .object({ ok: z.literal(true), version: z.number().int(), changed: z.boolean() })
@@ -218,13 +212,18 @@ export const pageMetaSchema = z
   .object({
     page: z.number().int(),
     pageSize: z.number().int(),
-    total: z.number().int().openapi({ description: "Rows matching the filters, across all pages." }),
+    total: z
+      .number()
+      .int()
+      .openapi({ description: "Rows matching the filters, across all pages." }),
   })
   .openapi({ ref: "PageMeta" });
 
 export const signalSchema = z
   .object({
-    key: z.string().openapi({ description: "The signal's dedupe key — `<org>:<source>:<sourceId>`." }),
+    key: z
+      .string()
+      .openapi({ description: "The signal's dedupe key — `<org>:<source>:<sourceId>`." }),
     source: z.string(),
     sourceId: z.string(),
     riskDomain: z.string(),
@@ -361,13 +360,24 @@ function listParamsQuery(resource: ApiListResource, searchedFields: string): z.Z
       .string()
       .optional()
       .openapi({ description: `Case-insensitive substring search over ${searchedFields}.` }),
-    sort: z.enum(schema.sortKeys as unknown as [string, ...string[]]).optional()
+    sort: z
+      .enum(schema.sortKeys as unknown as [string, ...string[]])
+      .optional()
       .openapi({ description: `Sort key. Defaults to \`${schema.defaultSort}\`.` }),
-    dir: z.enum(["asc", "desc"]).optional().openapi({ description: `Defaults to \`${schema.defaultDir}\`.` }),
+    dir: z
+      .enum(["asc", "desc"])
+      .optional()
+      .openapi({ description: `Defaults to \`${schema.defaultDir}\`.` }),
     // Bounds are published, not merely described: a generated client that offers an unconstrained
     // integer invites values this parser silently discards, and "my page parameter did nothing" is
     // the least debuggable failure an integrator can hit.
-    page: z.coerce.number().int().min(1).max(10_000).optional().openapi({ description: "1-based." }),
+    page: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(10_000)
+      .optional()
+      .openapi({ description: "1-based." }),
     pageSize: z.coerce
       .number()
       .int()
@@ -659,9 +669,14 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
               "degrades to its default rather than failing the request.",
           ),
           ...scoped("signals:read"),
-          requestParams: { query: listParamsQuery("signals", "the title and the entity identifier") },
+          requestParams: {
+            query: listParamsQuery("signals", "the title and the entity identifier"),
+          },
           responses: {
-            "200": { description: "Signals.", content: { "application/json": { schema: signalListSchema } } },
+            "200": {
+              description: "Signals.",
+              content: { "application/json": { schema: signalListSchema } },
+            },
             ...authFailureResponses,
           },
         },
@@ -677,7 +692,10 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
             }),
           },
           responses: {
-            "200": { description: "The signal.", content: { "application/json": { schema: signalSchema } } },
+            "200": {
+              description: "The signal.",
+              content: { "application/json": { schema: signalSchema } },
+            },
             ...notFoundResponse,
             ...authFailureResponses,
           },
@@ -694,7 +712,10 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
           ...scoped("scores:read"),
           requestParams: { query: listParamsQuery("scores", "the signal title") },
           responses: {
-            "200": { description: "Scores.", content: { "application/json": { schema: scoreListSchema } } },
+            "200": {
+              description: "Scores.",
+              content: { "application/json": { schema: scoreListSchema } },
+            },
             ...authFailureResponses,
           },
         },
@@ -708,9 +729,14 @@ export function buildOpenApiDocument(): ReturnType<typeof createDocument> {
               "part of this resource.",
           ),
           ...scoped("catalog:read"),
-          requestParams: { query: listParamsQuery("catalogItems", "the sku, name and generic name") },
+          requestParams: {
+            query: listParamsQuery("catalogItems", "the sku, name and generic name"),
+          },
           responses: {
-            "200": { description: "Items.", content: { "application/json": { schema: catalogItemListSchema } } },
+            "200": {
+              description: "Items.",
+              content: { "application/json": { schema: catalogItemListSchema } },
+            },
             ...authFailureResponses,
           },
         },

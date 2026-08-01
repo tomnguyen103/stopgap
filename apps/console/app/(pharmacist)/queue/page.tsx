@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { DEMO_DRUGS, isDemoMode } from "@stopgap/demo";
 
-import { Badge, Card, Table } from "../../components/ui";
 import { DemoPanel } from "../../demo-panel";
 import { getCaseQueue, getFeedFreshness } from "../../lib/data";
 import { formatUtc } from "../../lib/format";
@@ -9,6 +8,7 @@ import { requireGroup } from "../../lib/group-guard";
 import { isException, parseCaseQueueParams, CASE_QUEUE_SCHEMA } from "../../lib/case-queue";
 import { filterValue, listHref, pageCount, sortHref, toggleFilterHref } from "../../lib/list-href";
 import { bandSeverity } from "../../lib/signal-list";
+import { Badge, Button, Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -69,8 +69,8 @@ export default async function CaseQueuePage({
           <p className="sub sub-tight">
             {feeds.map((f) => (
               <span key={f.source} className="feed-line">
-                <b>{f.source}</b> · latest stored record{" "}
-                {formatUtc(f.lastFetchedAt)} · {f.records} record
+                <b>{f.source}</b> · latest stored record {formatUtc(f.lastFetchedAt)} · {f.records}{" "}
+                record
                 {f.records === 1 ? "" : "s"}
               </span>
             ))}
@@ -101,9 +101,7 @@ export default async function CaseQueuePage({
           <input type="hidden" name="sort" value={params.sort} />
           <input type="hidden" name="dir" value={params.dir} />
           <input type="hidden" name="pageSize" value={String(params.pageSize)} />
-          <button className="ds-button" type="submit">
-            Search
-          </button>
+          <Button type="submit">Search</Button>
         </form>
 
         {Object.entries(CASE_QUEUE_SCHEMA.filters).map(([key, allowed]) => (
@@ -152,7 +150,9 @@ export default async function CaseQueuePage({
             {queue.rows.map((row) => (
               <tr key={row.id}>
                 <td>
-                  <Link href={`/cases/${encodeURIComponent(row.workflowId)}`}>{row.genericName}</Link>
+                  <Link href={`/cases/${encodeURIComponent(row.workflowId)}`}>
+                    {row.genericName}
+                  </Link>
                 </td>
                 <td>
                   {isException(row.status) ? (
@@ -181,7 +181,7 @@ export default async function CaseQueuePage({
                     </>
                   )}
                 </td>
-                <td className="sub">{row.updatedAt.toISOString().slice(0, 10)}</td>
+                <td className="is-subtle">{row.updatedAt.toISOString().slice(0, 10)}</td>
               </tr>
             ))}
           </Table>

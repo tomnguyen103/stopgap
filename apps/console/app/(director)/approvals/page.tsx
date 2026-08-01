@@ -1,6 +1,5 @@
 import { isDemoMode } from "@stopgap/demo";
 
-import { Card, Table } from "../../components/ui";
 import { isActionAllowed } from "../../lib/authz";
 import { unavailableReason } from "../../lib/case-queue";
 import { getOversight } from "../../lib/data";
@@ -8,6 +7,7 @@ import { requireGroup } from "../../lib/group-guard";
 import { resolvePrincipal } from "../../lib/principal";
 import { diffLines, summarizeDiff } from "../../lib/version-diff";
 import { ApproveButton } from "./approve-button";
+import { Card, Table } from "../../components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -51,10 +51,13 @@ export default async function ApprovalsPage() {
               sub={`v${String(version.version)} · authored by ${version.authoredBy} · ${summarizeDiff(diff)}`}
             >
               {version.rationale ? <p className="sub">{version.rationale}</p> : null}
-              <Table label={`Changes in ${protocol.title} v${String(version.version)}`} head={["", "Line"]}>
+              <Table
+                label={`Changes in ${protocol.title} v${String(version.version)}`}
+                head={["", "Line"]}
+              >
                 {diff.map((line, index) => (
                   <tr key={`${String(index)}:${line.text}`}>
-                    <td className="sub">
+                    <td className="is-subtle">
                       {/* A symbol AND a colour: a diff that separates added from removed by colour
                           alone is unreadable to a reader who cannot see the difference. */}
                       {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : ""}

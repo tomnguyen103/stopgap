@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
   transpilePackages: ["@stopgap/core", "@stopgap/db", "@stopgap/observability"],
   // DB access is server-only; never bundle postgres into a client chunk.
   serverExternalPackages: ["postgres"],
-  eslint: { ignoreDuringBuilds: true },
   // Workspace packages use extensioned ESM imports (`./x.js`) over raw `.ts` sources
   // (moduleResolution: Bundler). Teach webpack to resolve `.js` specifiers to `.ts`.
   webpack: (config) => {

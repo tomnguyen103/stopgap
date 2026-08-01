@@ -19,9 +19,9 @@ const NAV: NavLink[] = [
 ];
 
 export default async function DirectorLayout({ children }: { children: ReactNode }) {
-  await requireGroup("pharmacy_director");
+  const principal = await requireGroup("pharmacy_director");
   return (
-    <DashboardShell surface="director oversight" nav={NAV}>
+    <DashboardShell surface="director oversight" nav={NAV} principal={principal.label}>
       {children}
     </DashboardShell>
   );
