@@ -1,13 +1,21 @@
 import type { ShortageRecord } from "@stopgap/core";
-import { generateStructured } from "@stopgap/providers";
+import { generateStructured, type ProviderName } from "@stopgap/providers";
 import { formatRecordPrompt, UNTRUSTED_RECORD_NOTICE } from "./prompt.js";
 import { AlternativesResearch } from "./schemas.js";
+
+export interface AlternativesModelOptions {
+  provider?: ProviderName;
+  allowFailover?: boolean;
+}
 
 /**
  * Research therapeutic alternatives and draft a substitution protocol. Deterministic
  * (temperature 0) so the offline eval gate is reproducible against Ollama.
  */
-export async function researchAlternatives(record: ShortageRecord): Promise<AlternativesResearch> {
+export async function researchAlternatives(
+  record: ShortageRecord,
+  options?: AlternativesModelOptions,
+): Promise<AlternativesResearch> {
   const { object } = await generateStructured({
     schema: AlternativesResearch,
     operation: "research-alternatives",
@@ -28,6 +36,7 @@ export async function researchAlternatives(record: ShortageRecord): Promise<Alte
     prompt: formatRecordPrompt(record, [
       `RxCUIs: ${record.rxcuis.length > 0 ? record.rxcuis.join(", ") : "none reported"}`,
     ]),
+    ...options,
   });
   return object;
 }

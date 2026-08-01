@@ -18,22 +18,32 @@ WORKDIR /app
 # ---- dependencies (cached on manifests alone) -------------------------------------------
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/alerts/package.json packages/alerts/
 COPY apps/console/package.json apps/console/
 COPY packages/agents/package.json packages/agents/
 COPY packages/comms/package.json packages/comms/
 COPY packages/core/package.json packages/core/
+COPY packages/catalog/package.json packages/catalog/
+COPY packages/compliance/package.json packages/compliance/
 COPY packages/db/package.json packages/db/
 COPY packages/demo/package.json packages/demo/
 COPY packages/ingest/package.json packages/ingest/
 COPY packages/mcp/package.json packages/mcp/
 COPY packages/observability/package.json packages/observability/
 COPY packages/providers/package.json packages/providers/
+COPY packages/scorer/package.json packages/scorer/
 COPY packages/shadow/package.json packages/shadow/
+COPY packages/shadow-ledger/package.json packages/shadow-ledger/
 COPY packages/workflows/package.json packages/workflows/
 RUN pnpm install --frozen-lockfile
 
 # ---- source + console build --------------------------------------------------------------
 FROM deps AS build
+ARG KEYCLOAK_ISSUER=http://localhost:8080/realms/stopgap
+# Next serializes `headers()` into the production route manifest at build time. The runtime
+# container still receives the same value, but the public IdP origin must also be present here so
+# the sign-in form's CSP is built for the deployment rather than the local default.
+ENV KEYCLOAK_ISSUER=${KEYCLOAK_ISSUER}
 COPY . .
 RUN pnpm --filter @stopgap/console build
 

@@ -1,6 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { getEnv, type Role } from "@stopgap/core";
+import { authConfigured, getEnv, type Role } from "@stopgap/core";
 import { SEED_ORG_ID, getOrganization } from "@stopgap/db";
 import { auth } from "../../auth";
 import { rolesAllow } from "./authz";
@@ -65,8 +65,8 @@ export const ACTIVE_ORG_COOKIE_MAX_AGE_SECONDS = 60 * 60;
 /**
  * Resolve the current principal from the Auth.js session, falling back to the anonymous viewer.
  * No session means the caller is a `viewer`: in demo mode that is the intended read-only guest;
- * outside demo it is an unauthenticated request the middleware would have redirected — either
- * way `viewer` holds no mutating role, so the guards refuse it.
+ * outside demo it is an unauthenticated request that middleware either rejects (unconfigured) or
+ * redirects (configured) — either way `viewer` holds no mutating role, so the guards refuse it.
  *
  * THE ORG IS RESOLVED SERVER-SIDE, ALWAYS (PHASE6 §6.5). The precedence is:
  *
@@ -85,7 +85,11 @@ export const ACTIVE_ORG_COOKIE_MAX_AGE_SECONDS = 60 * 60;
  *     change it.
  */
 export async function resolvePrincipal(): Promise<Principal> {
-  const session = await auth();
+  const env = getEnv();
+  // Demo mode is an explicit anonymous surface even when credentials are present for another
+  // deployment shape. Middleware makes the same choice, so never let a stale browser session
+  // select a real tenant or cross the demo's read-only boundary.
+  const session = env.STOPGAP_DEMO_MODE === "on" || !authConfigured(env) ? null : await auth();
   if (session?.user?.id) {
     const roles = session.user.roles ?? [];
     return {
@@ -157,7 +161,8 @@ async function resolveActiveOrg(roles: Role[], ownOrgId: string): Promise<string
  * ordinary case and the badge is never background noise the eye learns to skip.
  */
 export async function getActiveOrgOverride(): Promise<{ slug: string; name: string } | null> {
-  const session = await auth();
+  const env = getEnv();
+  const session = env.STOPGAP_DEMO_MODE === "on" || !authConfigured(env) ? null : await auth();
   const ownOrgId = session?.user?.orgId;
   if (!session?.user?.id || !ownOrgId) return null;
   const activeOrgId = await resolveActiveOrg(session.user.roles ?? [], ownOrgId);

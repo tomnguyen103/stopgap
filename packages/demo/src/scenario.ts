@@ -14,14 +14,10 @@ import { reserveDemoRun, withOrgDb } from "@stopgap/db";
  *   the live openFDA poller opened;
  * - starts are rate limited per rolling hour, counted from a durable table rather than memory.
  *
- * The limit is deployment-wide, not per visitor: with no auth layer there is no honest way to
- * tell two visitors apart (an IP is not a person), and a per-IP limit would read as a
- * stronger guarantee than it is. One busy visitor can therefore use up the hour's runs.
- *
- * "Deployment-wide" now means PER TENANT (PHASE6 §6.5): `demo_runs` carries an `org_id`, so the
- * hourly budget is counted within the org the visitor is looking at. That is the correct reading of
- * the intent — the limit exists to bound what one org's public demo can spend on real agent calls —
- * and the alternative would let a second tenant's demo traffic exhaust the first tenant's quota.
+ * The rolling limits are per anonymous visitor plus an aggregate public-demo bound. The visitor id
+ * is generated and stored by the console as an httpOnly cookie; it is not treated as
+ * authentication, and clearing cookies cannot exceed the aggregate hourly bound. The deployment-
+ * wide daily spend cap remains an additional hard spend boundary for that case.
  */
 
 export interface DemoDrug {
@@ -72,22 +68,25 @@ export type DemoRunResult = { ok: true; workflowId: string; started: boolean } |
 export async function prepareDemoRun(
   orgId: string,
   key: string,
+  visitorId: string,
 ): Promise<{ ok: true; record: ShortageRecord } | DemoRunRefusal> {
   const drug = findDemoDrug(key);
   if (!drug) {
     return { ok: false, reason: "unknown-drug", message: `not a demo drug: ${key}` };
   }
 
-  const limit = getEnv().DEMO_MAX_RUNS_PER_HOUR;
+  const { DEMO_MAX_RUNS_PER_HOUR: visitorLimit, DEMO_MAX_RUNS_PER_HOUR_TOTAL: totalLimit } = getEnv();
   const since = new Date(Date.now() - 60 * 60 * 1000);
   // Count-and-reserve in one atomic step: a separate check-then-record lets concurrent
   // requests all pass the check and blow past the cap.
-  const { allowed } = await withOrgDb(orgId, (db) => reserveDemoRun(db, orgId, drug.key, since, limit));
+  const { allowed } = await withOrgDb(orgId, (db) =>
+    reserveDemoRun(db, orgId, visitorId, drug.key, since, visitorLimit, totalLimit),
+  );
   if (!allowed) {
     return {
       ok: false,
       reason: "rate-limited",
-      message: `demo limit reached (${limit} shortage runs per hour) — try again shortly`,
+      message: `demo hourly limit reached (${visitorLimit} per visitor; ${totalLimit} aggregate) — try again shortly`,
     };
   }
 

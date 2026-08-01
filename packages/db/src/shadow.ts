@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { getDb, type Db } from "./client.js";
 import { shadowRuns } from "./schema.js";
 import type { NewShadowRunRow, ShadowRunRow } from "./schema.js";
@@ -15,8 +15,63 @@ export async function recordShadowRun(
   run: NewShadowRunRow,
   db: Db = getDb(),
 ): Promise<ShadowRunRow> {
-  const [row] = await db.insert(shadowRuns).values(run).returning();
-  return row!;
+  const replayDay = run.replayDay ?? new Date().toISOString().slice(0, 10);
+  const [row] = await db
+    .insert(shadowRuns)
+    .values({ ...run, replayDay })
+    // The replay-day index is partial so legacy duplicate rows can retain a NULL day. Target the
+    // exact index so unrelated unique conflicts cannot be swallowed by the idempotency fallback.
+    .onConflictDoNothing({
+      target: [shadowRuns.orgId, shadowRuns.corpusId, shadowRuns.replayDay],
+      where: isNotNull(shadowRuns.replayDay),
+    })
+    .returning();
+  if (row) return row;
+
+  // A retry of the same UTC replay day is expected to find the already measured sample. The
+  // unique index makes the check race-safe; returning the existing row keeps callers idempotent
+  // without inflating promotion evidence or throwing a false failure.
+  const [existing] = await db
+    .select()
+    .from(shadowRuns)
+    .where(
+      and(
+        eq(shadowRuns.orgId, run.orgId),
+        eq(shadowRuns.corpusId, run.corpusId),
+        eq(shadowRuns.replayDay, replayDay),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new Error(`shadow run conflict without existing row for ${run.corpusId}`);
+  return existing;
+}
+
+/**
+ * Whether this corpus item already has a measured sample for the UTC replay day.
+ *
+ * The replay job checks this before invoking the agents so a retry after one failed corpus item
+ * does not spend model work recomputing entries that already committed successfully. The unique
+ * index remains the race-safe write boundary in `recordShadowRun`; this is an optimization and a
+ * retry guard, not the integrity control.
+ */
+export async function hasShadowRunForReplay(
+  orgId: string,
+  corpusId: string,
+  replayDay: string,
+  db: Db = getDb(),
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: shadowRuns.id })
+    .from(shadowRuns)
+    .where(
+      and(
+        eq(shadowRuns.orgId, orgId),
+        eq(shadowRuns.corpusId, corpusId),
+        eq(shadowRuns.replayDay, replayDay),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
 }
 
 export async function listShadowRuns(

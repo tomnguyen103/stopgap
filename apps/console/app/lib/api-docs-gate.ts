@@ -16,16 +16,15 @@ import { resolvePrincipal } from "./principal";
  * operation it describes stays gated by its own scope check. The floor that matters is "not the
  * open internet", and `viewer` is that floor.
  *
- * The unauthenticated ALLOWANCE mirrors the middleware's stance exactly (see `middleware.ts`): when
- * the deployment is the public read-only demo, or when no IdP is configured at all, there is no
- * session to require and demanding one would be faking an authentication step that cannot happen.
- * That is the same honest-non-configuration position taken everywhere else — and it is what keeps
- * the public demo's docs page reachable and the zero-config local gate green. A deployment that HAS
- * wired an IdP gets the real gate: no session, no docs.
+ * The unauthenticated allowance mirrors the middleware's stance exactly (see `middleware.ts`):
+ * only the public read-only demo may serve the docs without a session. An unconfigured non-demo
+ * deployment fails closed, just like its console routes, instead of turning missing credentials
+ * into a public surface.
  */
 export async function docsAudienceAllowed(): Promise<boolean> {
   const env = getEnv();
-  if (env.STOPGAP_DEMO_MODE === "on" || !authConfigured(env)) return true;
+  if (env.STOPGAP_DEMO_MODE === "on") return true;
+  if (!authConfigured(env)) return false;
   return (await resolvePrincipal()).authenticated;
 }
 

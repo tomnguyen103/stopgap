@@ -14,4 +14,6 @@ The production stack (`deploy/docker-compose.prod.yml`) starts Keycloak with `st
 `--import-realm` and does **not** mount this directory. The operator provisions the prod realm,
 `stopgap-console` client, users, and a freshly generated client secret out of band — see
 `docs/auth.md` → "Provisioning the production realm". Until that is done, auth is honestly
-unconfigured (blank `KEYCLOAK_CLIENT_SECRET`) and the console runs read-only.
+unconfigured (blank `KEYCLOAK_CLIENT_SECRET`). Leave the explicit demo mode default on for an
+anonymous read-only surface; if demo mode is turned off first, the console fails closed with
+`503 authentication_not_configured`.

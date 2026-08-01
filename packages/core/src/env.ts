@@ -98,8 +98,10 @@ const EnvSchema = z.object({
     (v) => (v === "" || v === undefined ? undefined : v),
     z.coerce.number().nonnegative().optional(),
   ),
-  /** Rate limit on visitor-started demo scenarios, per rolling hour (deployment-wide). */
+  /** Per-anonymous-visitor rolling-hour limit for demo scenarios. */
   DEMO_MAX_RUNS_PER_HOUR: z.coerce.number().int().positive().default(6),
+  /** Aggregate rolling-hour limit for the public demo surface; bounds cookie churn. */
+  DEMO_MAX_RUNS_PER_HOUR_TOTAL: z.coerce.number().int().positive().default(60),
 
   /**
    * Keyed-HMAC secret for the audit chain (PHASE6 §6.2, CWE-345). When set, new audit rows
@@ -165,13 +167,12 @@ const EnvSchema = z.object({
    * OIDC SSO / RBAC (PHASE6 §6.1). Every field defaults so the local gate and the public demo
    * run zero-config — but the stance mirrors comms: an UNSET secret is honest non-configuration,
    * never faked auth. `authConfigured()` below reports whether a real IdP session can be
-   * established; when it cannot, the middleware still refuses console mutations (a request with
-   * no session resolves to the anonymous `viewer`, which fails every `requireRole`), so a
-   * deployment without an IdP is locked-down, not wide open.
+   * established; demo mode may use the anonymous read-only viewer, while a non-demo deployment
+   * without an IdP fails closed at middleware instead of exposing that viewer surface.
    */
   AUTH_SECRET: z.preprocess((v) => (v === "" ? undefined : v), z.string().min(1).optional()),
   /** Keycloak (or any OIDC IdP) realm issuer URL. Points at the compose Keycloak by default. */
-  KEYCLOAK_ISSUER: z.string().default("http://localhost:8080/realms/stopgap"),
+  KEYCLOAK_ISSUER: z.string().url().default("http://localhost:8080/realms/stopgap"),
   /** OIDC client id registered in the realm. */
   KEYCLOAK_CLIENT_ID: z.string().default("stopgap-console"),
   /** OIDC client secret. Optional: a public client, or a deployment that has not wired auth. */

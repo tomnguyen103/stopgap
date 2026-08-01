@@ -97,6 +97,7 @@ export {
 export {
   listShadowRuns,
   listShadowRunsForClass,
+  hasShadowRunForReplay,
   recordShadowRun,
   shadowStatsByClass,
   type ShadowClassStats,

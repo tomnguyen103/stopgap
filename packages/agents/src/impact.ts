@@ -1,5 +1,5 @@
 import type { ShortageRecord } from "@stopgap/core";
-import { generateStructured } from "@stopgap/providers";
+import { generateStructured, type ProviderName } from "@stopgap/providers";
 import { formatRecordPrompt, UNTRUSTED_RECORD_NOTICE } from "./prompt.js";
 import { ImpactAssessment } from "./schemas.js";
 
@@ -51,6 +51,11 @@ export const CATALOG_UNAVAILABLE: CatalogFacts = {
   absenceReason: "the facility catalog could not be read for this assessment",
 };
 
+export interface AgentModelOptions {
+  provider?: ProviderName;
+  allowFailover?: boolean;
+}
+
 /**
  * The catalog half of the prompt (ticket 16).
  *
@@ -80,6 +85,7 @@ function formatCatalogFacts(catalog: CatalogFacts): string[] {
 export async function assessImpact(
   record: ShortageRecord,
   catalog: CatalogFacts,
+  options?: AgentModelOptions,
 ): Promise<ImpactAssessment> {
   const { object } = await generateStructured({
     schema: ImpactAssessment,
@@ -102,6 +108,7 @@ export async function assessImpact(
     // byte-indistinguishable from the real thing. Facts the prompt calls trustworthy cannot share
     // a delimiter with text the same prompt calls untrusted.
     prompt: [...formatCatalogFacts(catalog), "", formatRecordPrompt(record)].join("\n"),
+    ...options,
   });
   return object;
 }

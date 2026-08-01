@@ -43,6 +43,8 @@ export interface StructuredOptions<T extends z.ZodTypeAny> {
   prompt: string;
   system?: string;
   provider?: ProviderName;
+  /** Disable health-based provider failover for work that must stay on one provider. */
+  allowFailover?: boolean;
   /** Deterministic by default (temperature 0) — required for the offline eval gate. */
   temperature?: number;
   maxRetries?: number;
@@ -60,7 +62,7 @@ export interface StructuredResult<T> {
 export async function generateStructured<T extends z.ZodTypeAny>(
   opts: StructuredOptions<T>,
 ): Promise<StructuredResult<z.infer<T>>> {
-  const routed = await routeModel(opts.provider);
+  const routed = await routeModel(opts.provider, { allowFailover: opts.allowFailover });
   const start = Date.now();
   let ok = false;
   let inputTokens = 0;

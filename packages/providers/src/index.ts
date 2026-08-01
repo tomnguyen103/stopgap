@@ -1,6 +1,6 @@
 export { resolveModel, providerInfo, geminiInfo, ollamaInfo } from "./registry.js";
 export { isProviderHealthy } from "./health.js";
-export { routeModel, type RouteResult } from "./route.js";
+export { routeModel, type RouteOptions, type RouteResult } from "./route.js";
 export {
   budgetStatus,
   clearBudgetGuard,

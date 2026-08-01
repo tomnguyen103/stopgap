@@ -45,11 +45,14 @@ const nextConfig: NextConfig = {
       nobody could sign in at all. Caught by driving the flow, not by reading the policy:
       "Sending form data to '…/api/auth/signin/keycloak' violates … form-action 'self'".
 
-      Empty when no IdP is configured — a demo deployment has no third origin to allow.
+      The local-dev default is retained when no issuer is supplied so zero-config development
+      matches EnvSchema. Production images receive the public issuer through the Docker build arg;
+      explicit demo mode itself does not invoke Auth.js.
     */
     const idpOrigin = (() => {
       try {
-        return process.env.KEYCLOAK_ISSUER ? new URL(process.env.KEYCLOAK_ISSUER).origin : "";
+        const issuer = process.env.KEYCLOAK_ISSUER ?? "http://localhost:8080/realms/stopgap";
+        return new URL(issuer).origin;
       } catch {
         return "";
       }

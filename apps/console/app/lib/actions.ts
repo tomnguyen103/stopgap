@@ -3,7 +3,7 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { isRole } from "@stopgap/core";
 import { CATALOG_KINDS, planImport } from "@stopgap/catalog";
@@ -72,6 +72,27 @@ const reviewDecisionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("edit"), editedDraft: z.string().min(1).max(20_000) }),
   z.object({ kind: z.literal("reject"), reason: z.string().min(1).max(2_000) }),
 ]);
+
+/** Anonymous quota key for the public demo. It is not an authentication credential. */
+const DEMO_VISITOR_COOKIE = "stopgap_demo_visitor";
+const DEMO_VISITOR_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function getDemoVisitorId(): Promise<string> {
+  const jar = await cookies();
+  const existing = jar.get(DEMO_VISITOR_COOKIE)?.value;
+  if (existing && UUID_RE.test(existing)) return existing;
+
+  const visitorId = randomUUID();
+  jar.set(DEMO_VISITOR_COOKIE, visitorId, {
+    httpOnly: true,
+    maxAge: DEMO_VISITOR_COOKIE_MAX_AGE_SECONDS,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+  });
+  return visitorId;
+}
 
 const resolutionSchema = z.object({
   protocolBody: z.string().min(1).max(20_000),
@@ -632,7 +653,12 @@ export async function startDemoShortage(key: unknown): Promise<DemoRunResult> {
   // so the run is opened in the org the visitor is already looking at rather than in an org named
   // separately here, which could drift from it.
   const principal = await resolvePrincipal();
-  const prepared = await prepareDemoRun(principal.orgId, z.string().min(1).max(120).parse(key));
+  const visitorId = await getDemoVisitorId();
+  const prepared = await prepareDemoRun(
+    principal.orgId,
+    z.string().min(1).max(120).parse(key),
+    visitorId,
+  );
   if (!prepared.ok) return prepared;
   const existing = await withOrgDb(principal.orgId, (db) =>
     getCaseByKey(db, principal.orgId, prepared.record.key),

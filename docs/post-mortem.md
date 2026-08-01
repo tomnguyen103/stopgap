@@ -110,7 +110,10 @@ are the things that *work in the demo* and are wrong everywhere else.
 
 Carried forward in [PHASE5-TODO.md](../PHASE5-TODO.md):
 
-- **No auth layer.** Reviewer identity is a claim. The public demo is read-only because of it.
+- **Historical no-auth gap (closed by Phase 6).** In the original demo snapshot, reviewer identity
+  was a claim and the public surface was read-only because of it. The current repository has
+  Auth.js/Keycloak RBAC; explicit demo mode remains anonymous/read-only and non-demo mode fails
+  closed until credentials are configured.
 - **Under-escalation on no-equivalent drugs.** The model invents a substitute where a
   pharmacist would say there is none — the dangerous direction. ~80–84% eval pass rate on a
   local 7B model, with the failures clustered here.

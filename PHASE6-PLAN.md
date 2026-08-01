@@ -1,9 +1,18 @@
 # Phase 6 — Production hardening: from demo to deployable internal software
 
-**Status:** planned (2026-07-24). Nothing in this file is built yet.
+**Status:** implemented and merged (2026-08-01). All seven workstreams are complete in the
+repository; the progress checklist below records their merged delivery.
 **Goal:** evolve Stopgap from portfolio demo into something shaped like real internal
 hospital software — authenticated, tamper-proof, observable, lifecycle-complete.
 **Source of truth for what exists today:** `PROGRESS.md`, `PHASE5-TODO.md`.
+
+**Closeout receipt (2026-08-01):** `pnpm test:rls` passed 259 tests with the enforcing
+`stopgap_app` role and separate maintenance role; authenticated browser smoke passed 5/5;
+anonymous demo smoke passed 4/4; `pnpm eval` reported 15/19 live Ollama checks passed; and
+`pnpm verify-audit` correctly reported the preserved row-7 historical fork in the local dev
+database. Final `pnpm gate` passed lint, typecheck, 75 test files/892 tests and production build.
+The external deployment, provider credentials and public-release actions remain
+owner-controlled and are recorded in `PHASE5-TODO.md` and `docs/coverage-ledger-2026-08-01.md`.
 
 Ordering rule: identity (6.1) unblocks 6.3/6.5/6.7. 6.2 and 6.6 are independent and
 may land first. Recommended PR sequence: **6.2 → 6.6 → 6.1 → 6.3 → 6.4 → 6.7 → 6.5**.
@@ -253,8 +262,8 @@ programmatic surface is the stdio MCP server with its own ad-hoc gating.
 ## Cross-cutting rules
 
 - **No fake success.** Missing keys/IdP/TSA record honest non-configuration, same
-  stance as comms non-delivery. Demo mode stays functional throughout (read-only
-  viewer session).
+  stance as comms non-delivery. Explicit demo mode stays functional throughout
+  (read-only viewer session); non-demo requests fail closed until auth is configured.
 - **Migrations are additive and reversible**; each PR's migration runs against a
   seeded Phase 5 database in a test before merge.
 - **Every new privileged action lands in the audit chain** with the authenticated

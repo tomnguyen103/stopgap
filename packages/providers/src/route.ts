@@ -12,6 +12,11 @@ export interface RouteResult extends ResolvedModel {
   budgetCapped: boolean;
 }
 
+export interface RouteOptions {
+  /** Keep the requested provider when a health check fails; the budget cap still forces Ollama. */
+  allowFailover?: boolean;
+}
+
 /** The failover order: try the requested provider, then the other. Ollama is the anchor. */
 function failoverOrder(requested: ProviderName): ProviderName[] {
   return requested === "gemini" ? ["gemini", "ollama"] : ["ollama", "gemini"];
@@ -22,13 +27,20 @@ function failoverOrder(requested: ProviderName): ProviderName[] {
  * `LLM_PROVIDER` from env. A stubbed or unhealthy provider is skipped in favor of the
  * next in the failover order. Throws only if no provider is usable.
  */
-export async function routeModel(requested?: ProviderName): Promise<RouteResult> {
+export async function routeModel(
+  requested?: ProviderName,
+  options: RouteOptions = {},
+): Promise<RouteResult> {
   const want = requested ?? getEnv().LLM_PROVIDER;
   // Over the daily cap, only the free local provider is allowed — the call still runs, on a
   // smaller model, and the result records that it was capped.
   const budget = await budgetStatus();
   const capped = budget?.overCap === true;
-  const order = capped ? (["ollama"] as ProviderName[]) : failoverOrder(want);
+  const order = capped
+    ? (["ollama"] as ProviderName[])
+    : options.allowFailover === false
+      ? [want]
+      : failoverOrder(want);
   for (const name of order) {
     if (providerInfo(name).stub) continue;
     if (!(await isProviderHealthy(name))) continue;

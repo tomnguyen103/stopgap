@@ -16,12 +16,15 @@ import { scoreAgreement } from "./score.js";
  * results land in. The ledger is per-org for the same reason the KPI page is — promotion gates read
  * these aggregates, and one hospital must not promote an agent on another hospital's evidence.
  */
-export async function runShadowEntry(orgId: string, entry: ReplayEntry): Promise<void> {
-  // The provider this run is expected to use. It is resolved separately from the agents' own
-  // internal routing, so a failover that happens *inside* one of the two agent calls is not
-  // reflected here — the per-call truth lives in the Langfuse spans (ADR-0003). Good enough
-  // for aggregating the ledger by provider; not a per-call attribution.
-  const routed = await routeModel();
+export async function runShadowEntry(
+  orgId: string,
+  entry: ReplayEntry,
+  replayDay = new Date().toISOString().slice(0, 10),
+): Promise<void> {
+  // Validate the provider once, then pin both agent calls to it. A second independent health
+  // check is allowed to fail, but it must fail the replay rather than silently charging a paid
+  // provider to a ledger row whose cost is recorded as zero.
+  const routed = await routeModel("ollama", { allowFailover: false });
   if (routed.info.usdPer1mInput !== 0 || routed.info.usdPer1mOutput !== 0) {
     throw new Error(
       `shadow replay is local-provider only (routed to ${routed.info.name}/${routed.info.modelId}): ` +
@@ -30,8 +33,9 @@ export async function runShadowEntry(orgId: string, entry: ReplayEntry): Promise
     );
   }
   const start = Date.now();
-  const impact = await assessImpact(entry.record, NO_CATALOG_DATA);
-  const research = await researchAlternatives(entry.record);
+  const modelOptions = { provider: routed.info.name, allowFailover: false } as const;
+  const impact = await assessImpact(entry.record, NO_CATALOG_DATA, modelOptions);
+  const research = await researchAlternatives(entry.record, modelOptions);
   const latencyMs = Date.now() - start;
 
   const score = scoreAgreement(
@@ -43,6 +47,7 @@ export async function runShadowEntry(orgId: string, entry: ReplayEntry): Promise
     recordShadowRun({
       orgId,
       corpusId: entry.id,
+      replayDay,
       key: entry.record.key,
       drugClass: entry.drugClass,
       proposedSeverity: impact.severity,

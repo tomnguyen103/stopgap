@@ -54,8 +54,10 @@ hits these, Prometheus hits `/metrics`.
 
 - **`GET /api/healthz`** (console) — liveness. Always `200` if the process is up; no dependency
   checks. Use it to answer "is the console running."
-- **`GET /api/readyz`** (console) — readiness. `200` when the console can reach its dependencies;
-  `503` if the **DB or Temporal is down**. A `503` here means the console is up but cannot serve
+- **`GET /api/readyz`** (console) — readiness. `200` when the console can reach its dependencies
+  and its authentication posture is usable: explicit demo mode may run anonymously, while
+  non-demo mode requires both auth secrets. `503` if the **DB, Temporal, maintenance connection or
+  required auth is down / unconfigured**. A `503` here means the console is up but cannot serve
   real work — pull it out of rotation, don't restart blindly.
 - **Worker sidecar on `:9464`** — `/healthz` (liveness, up = `200`), `/readyz` (readiness, `503`
   when the worker can't reach its dependencies), and `/metrics` (the Prometheus scrape target).
@@ -100,8 +102,8 @@ and HITL review surface are down.
 **First response:**
 1. Check the console process/container logs.
 2. Hit `/api/healthz` (liveness) and `/api/readyz` (readiness). `healthz` up but `readyz` `503`
-   means the process is fine but the **DB or Temporal** is unreachable — chase that dependency
-   rather than restarting the console.
+   means the process is fine but the **DB, Temporal or maintenance connection** is unreachable —
+   chase that dependency rather than restarting the console.
 3. Restart the console only if `healthz` itself is failing.
 
 ### SpendOver80PctCap

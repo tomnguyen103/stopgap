@@ -59,3 +59,19 @@ describe("WORKER_HTTP_PORT bounds", () => {
     expect(() => getEnv()).toThrow();
   });
 });
+
+describe("OIDC issuer validation", () => {
+  const original = process.env.KEYCLOAK_ISSUER;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.KEYCLOAK_ISSUER;
+    else process.env.KEYCLOAK_ISSUER = original;
+    resetEnvCache();
+  });
+
+  it("rejects a malformed issuer before Auth.js can fail during sign-in", () => {
+    process.env.KEYCLOAK_ISSUER = "not-a-url";
+    resetEnvCache();
+    expect(() => getEnv()).toThrow();
+  });
+});

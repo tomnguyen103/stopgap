@@ -6,6 +6,23 @@ services:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
     extra_hosts: ["host.docker.internal:host-gateway"]
   worker:
+    # The production worker waits for the in-cluster `ollama-pull` one-shot. This override
+    # deliberately replaces that dependency map because localcheck points at host Ollama and
+    # must not start or wait for an unrelated model download.
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts: ["host.docker.internal:host-gateway"]
+  demo-seed:
+    # The nightly seeder also calls the local model for shadow replay. Keep a full-stack
+    # localcheck on host Ollama instead of inheriting the production pull gate and service URL.
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
     environment:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
     extra_hosts: ["host.docker.internal:host-gateway"]

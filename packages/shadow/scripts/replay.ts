@@ -11,7 +11,7 @@
  * tenant comes from `STOPGAP_ORG_ID` and defaults to the seed org. Defaulting is honest here, unlike
  * in a request path: the operator running this command is choosing the deployment it points at.
  */
-import { SEED_ORG_ID, closeDb } from "@stopgap/db";
+import { closeDb, hasShadowRunForReplay, SEED_ORG_ID, withOrgDb } from "@stopgap/db";
 import { initObservability, flushTracing } from "@stopgap/observability";
 import { REPLAY_CORPUS } from "../src/corpus.js";
 import { runShadowEntry } from "../src/run.js";
@@ -29,20 +29,30 @@ if (limitArg !== -1) {
 }
 const entries = REPLAY_CORPUS.slice(0, limit);
 const orgId = process.env.STOPGAP_ORG_ID ?? SEED_ORG_ID;
+const replayDay = new Date().toISOString().slice(0, 10);
 
 initObservability("stopgap-shadow-replay");
 console.log(
   `[shadow] replaying ${entries.length}/${REPLAY_CORPUS.length} corpus entries into org ${orgId}`,
 );
 
+let failures = 0;
 try {
   let done = 0;
   for (const entry of entries) {
     try {
-      await runShadowEntry(orgId, entry);
+      const alreadyRecorded = await withOrgDb(orgId, (db) =>
+        hasShadowRunForReplay(orgId, entry.id, replayDay, db),
+      );
+      if (alreadyRecorded) {
+        console.log(`[shadow] ${entry.id} already recorded for ${replayDay}; skipping model calls`);
+      } else {
+        await runShadowEntry(orgId, entry, replayDay);
+      }
     } catch (err) {
       // One bad entry must not abandon the replay — the ledger is a sample, not a transaction.
       console.error(`[shadow] ${entry.id} failed:`, err instanceof Error ? err.message : err);
+      failures += 1;
     }
     done += 1;
     if (done % 5 === 0) console.log(`[shadow] ${done}/${entries.length}`);
@@ -52,4 +62,9 @@ try {
   await flushTracing().catch(() => {});
   await closeDb();
 }
-console.log("[shadow] done");
+if (failures > 0) {
+  console.error(`[shadow] replay finished with ${failures} failed entr${failures === 1 ? "y" : "ies"}`);
+  process.exitCode = 1;
+} else {
+  console.log("[shadow] done");
+}

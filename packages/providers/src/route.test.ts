@@ -102,4 +102,17 @@ describe("routeModel failover", () => {
 
     await expect(routeModel("ollama")).rejects.toThrow(/no usable LLM provider/);
   });
+
+  it("can refuse health failover when a caller must stay on one provider", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    resetEnvCache();
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error("connection refused");
+    }) as typeof fetch;
+
+    await expect(routeModel("ollama", { allowFailover: false })).rejects.toThrow(
+      /no usable LLM provider/,
+    );
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
 });

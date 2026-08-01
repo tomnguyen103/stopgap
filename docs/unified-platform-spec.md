@@ -1,8 +1,14 @@
 # Spec — unified supply-resilience platform with role-based dashboards
 
-**Status:** draft, ready for review
+**Status:** implemented and closed in the repository (programme closeout PR #38; current
+verification refreshed 2026-08-01)
 **Scope:** absorbing `medical-supply-monitor` into stopgap, plus a role-differentiated interactive console
 **Direction:** fixed — stopgap is the surviving repository; `medical-supply-monitor` is absorbed and archived. The reverse merge is not under consideration.
+
+The implementation follows this contract. Post-build decisions are recorded in the ticket files
+and `docs/coverage-ledger-2026-08-01.md`: the administrator spend-cap criterion is closed rather
+than implemented as an unsafe per-tenant control, and the other-repository README/archive switch
+is prepared for the owner rather than executed from this repository.
 
 ---
 
@@ -12,7 +18,14 @@ A pharmacist opening the stopgap console today sees a chronological list of case
 
 The situation is worse than "unsorted", because the console has no picture of the hospital's actual exposure. Impact assessment runs against a mock formulary and mock inventory. Nobody has told stopgap which drugs this hospital actually stocks, how many days of each it holds, which items come from a single supplier, or which suppliers are themselves under strain. A case for a drug the hospital does not carry looks exactly like a case for the one critical-care item with four days on hand and one manufacturer.
 
-Meanwhile the authorization system is invisible. Stopgap has a genuine four-role matrix enforced server-side on every mutating action, but no user can sign in to experience it: the identity provider is documented and wired and has never been stood up, so `authConfigured()` returns false, everyone resolves to an anonymous viewer, and the deployment sits locked read-only. A pharmacy director evaluating the product cannot log in as themselves and see the surface they would actually work in. A reviewer cannot see the role system exists without attempting to break it.
+At the start of this programme the authorization system was invisible. Stopgap had a genuine
+four-role matrix enforced server-side on every mutating action, but no user could sign in to
+experience it: the identity provider was documented but not stood up, so `authConfigured()`
+returned false and everyone resolved to an anonymous viewer. The delivered repository now stands
+up the seeded local IdP and proves the role surfaces; explicit demo mode remains anonymous and
+read-only, while a non-demo deployment with missing credentials fails closed with 503. A
+pharmacy director evaluating the product can therefore log in locally as themselves and see the
+surface they would actually work in.
 
 Separately, a second codebase — `medical-supply-monitor` — already solves large parts of this. It has a deterministic, versioned, explainable risk scorer; a source-agnostic connector contract with ten feeds behind it; a catalog and CSV import covering items, identifiers, suppliers, facilities and inventory; an alert-rule engine with cooldowns; and a complete interactive dashboard component library. It sits in a separate repository, on an incompatible runtime, duplicating stopgap's feed ingestion and tenancy with weaker guarantees. Every hour spent maintaining two pipelines, two review gates, two deploys and two demo modes is an hour not spent on the product.
 
@@ -146,7 +159,11 @@ Stopgap is the surviving repository. `medical-supply-monitor` contributes code a
 
 The existing four-role rank (`viewer` < `pharmacist` < `pharmacy_director` < `admin`) and the console action matrix are kept exactly as they are. No roles are added, no action requirements change, and the absorbed codebase's organization/authorization model is discarded entirely rather than reconciled — it offers application-layer filtering where stopgap already enforces isolation in the database.
 
-The identity provider is stood up for real: added to the local compose stack and the deployment stack, with a realm seeding one user per role so that the matrix is demonstrable from a clean checkout. The honest-non-configuration stance is preserved unchanged — with secrets absent, no one can sign in, requests resolve to an anonymous viewer, and every mutating action is still refused. Fail-closed, never fail-open.
+The identity provider is stood up for real: added to the local compose stack and the deployment
+stack, with a realm seeding one user per role so that the matrix is demonstrable from a clean
+checkout. The honest-non-configuration stance is preserved: explicit demo mode resolves to an
+anonymous viewer, while secrets absent in non-demo mode produce a 503 before a route renders.
+Fail-closed, never fail-open.
 
 One pure addition to the authorization module: a function mapping roles to a landing route. It takes the caller's held roles, resolves the highest of them by the same rank `rolesAllow` uses, and returns that role's route, with no session, database or framework dependency. Highest-role resolution lives here rather than in the middleware for the same reason the rest of the matrix does: it is pure rank arithmetic, so routing and permission cannot disagree about which role a multi-role user effectively holds, and per-role routing is unit-testable without a browser.
 

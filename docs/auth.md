@@ -74,9 +74,10 @@ Auth follows the same stance as comms non-delivery: a missing secret is recorded
 never faked. `authConfigured()` is true only when **both** `AUTH_SECRET` and
 `KEYCLOAK_CLIENT_SECRET` are set. When it is false:
 
-- the middleware does **not** redirect to a Keycloak that isn't wired — it lets requests through
-  as the anonymous `viewer`, so the zero-config local gate and the public demo keep working;
-- no one can sign in, so every mutation is refused. The deployment is locked read-only, not open.
+- with `STOPGAP_DEMO_MODE=on`, the middleware skips Auth.js and resolves requests as the anonymous
+  `viewer`, so the explicit public demo remains read-only;
+- with `STOPGAP_DEMO_MODE=off`, the middleware returns `503 authentication_not_configured` with
+  `Cache-Control: no-store`; the console and API docs do not silently expose anonymous tenant data.
 
 To enforce the matrix in a real deployment: set `AUTH_SECRET` (e.g. `openssl rand -base64 33`),
 set `KEYCLOAK_CLIENT_SECRET`, and turn `STOPGAP_DEMO_MODE=off`.
@@ -117,8 +118,8 @@ speaks generic OIDC discovery; only the URLs change.)
 
 The seeded client secret is `stopgap-console-dev-secret` (DEV-ONLY). To exercise the real sign-in
 + matrix locally, set BOTH `AUTH_SECRET` and `KEYCLOAK_CLIENT_SECRET=stopgap-console-dev-secret`
-in `.env`, plus `STOPGAP_DEMO_MODE=off` — auth stays unconfigured (read-only) if either secret is
-missing. Leave them at defaults for the read-only demo.
+in `.env`, plus `STOPGAP_DEMO_MODE=off` — missing either secret leaves auth unconfigured and
+non-demo requests fail closed. Leave demo mode on for the read-only demo.
 
 ### Verifying the seeded users without a browser
 
@@ -171,5 +172,6 @@ ever reachable by the prod stack. The operator provisions the realm once, out of
 5. Create real users (or federate your directory) and assign roles — or grant them locally at
    `/admin/users` once an admin exists.
 
-Until step 4 is done, `KEYCLOAK_CLIENT_SECRET` is blank, `authConfigured()` is false, and the
-console runs read-only as the anonymous viewer — honest non-configuration, not a faked sign-in.
+Until step 4 is done, `KEYCLOAK_CLIENT_SECRET` is blank and `authConfigured()` is false. Demo mode
+may run read-only as the anonymous viewer; a non-demo deployment fails closed until credentials are
+configured — honest non-configuration, not a faked sign-in.
