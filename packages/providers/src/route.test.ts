@@ -1,7 +1,7 @@
 import { resetEnvCache } from "@stopgap/core/env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearBudgetGuard, setBudgetGuard } from "./budget.js";
-import { geminiInfo, ollamaInfo } from "./registry.js";
+import { geminiInfo, geminiPricing, ollamaInfo } from "./registry.js";
 import { routeModel } from "./route.js";
 
 describe("provider info", () => {
@@ -24,6 +24,15 @@ describe("provider info", () => {
     expect(o.stub).toBe(false);
     expect(o.usdPer1mInput).toBe(0);
     expect(o.usdPer1mOutput).toBe(0);
+  });
+
+  it("prices gemini at promotional rates until 2027-01-01 UTC, standard after", () => {
+    const lastPromoInstant = new Date(Date.UTC(2026, 11, 31, 23, 59, 59, 999));
+    expect(geminiPricing(lastPromoInstant)).toEqual({ usdPer1mInput: 0.75, usdPer1mOutput: 3.75 });
+    const boundary = new Date(Date.UTC(2027, 0, 1));
+    expect(geminiPricing(boundary)).toEqual({ usdPer1mInput: 1.5, usdPer1mOutput: 7.5 });
+    expect(geminiInfo(boundary).usdPer1mInput).toBe(1.5);
+    expect(geminiInfo(lastPromoInstant).usdPer1mOutput).toBe(3.75);
   });
 });
 

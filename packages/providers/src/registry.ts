@@ -5,20 +5,29 @@ import type { ProviderInfo, ProviderName, ResolvedModel } from "./types.js";
 
 /**
  * Provider registry. Builds AI SDK LanguageModels for each provider and exposes their
- * cost/stub metadata. Gemini 3.7 Flash pricing per Google's published rates
- * (2026-08, promotional through 2026-12-31; rises to 1.50/7.50 on 2027-01-01);
- * Ollama is local and therefore free.
+ * cost/stub metadata. Gemini 3.7 Flash pricing per Google's published rates (2026-08):
+ * promotional through 2026-12-31, standard from 2027-01-01 (UTC boundary). Ollama is
+ * local and therefore free.
  */
-const GEMINI_USD_PER_1M_INPUT = 0.75;
-const GEMINI_USD_PER_1M_OUTPUT = 3.75;
+const GEMINI_PROMO_ENDS_MS = Date.UTC(2027, 0, 1);
+const GEMINI_PROMO_USD = { input: 0.75, output: 3.75 };
+const GEMINI_STANDARD_USD = { input: 1.5, output: 7.5 };
 
-export function geminiInfo(): ProviderInfo {
+/** Gemini 3.7 Flash rates for the given instant — promotional until 2027-01-01 UTC. */
+export function geminiPricing(now: Date = new Date()): {
+  usdPer1mInput: number;
+  usdPer1mOutput: number;
+} {
+  const rates = now.getTime() < GEMINI_PROMO_ENDS_MS ? GEMINI_PROMO_USD : GEMINI_STANDARD_USD;
+  return { usdPer1mInput: rates.input, usdPer1mOutput: rates.output };
+}
+
+export function geminiInfo(now: Date = new Date()): ProviderInfo {
   const env = getEnv();
   return {
     name: "gemini",
     modelId: env.GEMINI_MODEL,
-    usdPer1mInput: GEMINI_USD_PER_1M_INPUT,
-    usdPer1mOutput: GEMINI_USD_PER_1M_OUTPUT,
+    ...geminiPricing(now),
     stub: !env.GEMINI_API_KEY,
   };
 }

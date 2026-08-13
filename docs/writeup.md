@@ -143,7 +143,7 @@ The failures are reproducible clusters, not flakes:
 
 ## 7. Model portability, and the comparison that is empty
 
-One agent layer, two providers (Gemini Flash and local Ollama), health-check failover,
+One agent layer, two providers (Gemini 3.7 Flash and local Ollama), health-check failover,
 per-call cost and latency telemetry into self-hosted Langfuse via OpenTelemetry GenAI spans.
 A real `assessImpact` span: provider, model, token counts, 3.17 s latency, read back through
 Langfuse's API.
