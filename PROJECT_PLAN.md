@@ -4,7 +4,7 @@
 
 **Path: B (greenfield).** Prior candidate (Clearway — referral/prior-auth) abandoned: space crowded (Tennr $101M, Cohere Health $90M, Anterior $40M, Latent $600M val, Basata, plus tutorials). Stopgap selected for double uniqueness: use case nobody has built × architecture patterns nobody demonstrates publicly.
 
-**LLM decision (user-specified): Gemini 3.5 Flash Lite primary · Ollama for local dev, CI, and runtime fallback.** Agent layer = Vercel AI SDK (provider-agnostic, structured outputs). Model routing is a showcase feature.
+**LLM decision (user-specified): Gemini 3.7 Flash primary · Ollama for local dev, CI, and runtime fallback.** Agent layer = Vercel AI SDK (provider-agnostic, structured outputs). Model routing is a showcase feature.
 
 **Current implementation status (2026-08-01):** the repo-controlled deliverables in Phases 1–6
 and the approved unified-platform successor plans are implemented and merged. The Phase 5
@@ -86,7 +86,7 @@ Near-universal: production agents, tool calling, API/webhook integration, relati
 ```
 FDA openFDA + ASHP feeds ──poll──▶ Ingest ──▶ Temporal workflow per shortage case
                                                 ├─ assess impact (formulary/inventory match — deterministic)
-                                                ├─ research alternatives (agent via AI SDK → Gemini 3.5 Flash Lite, structured output)
+                                                ├─ research alternatives (agent via AI SDK → Gemini 3.7 Flash, structured output)
                                                 ├─ protocol memory lookup/draft (agent + versioned store)
                                                 ├─ HITL signal (pharmacist approve/edit/reject)
                                                 ├─ comms out (email, EHR payload — idempotent)
@@ -107,7 +107,7 @@ MCP server ──▶ pipeline tools (query case, approve, protocol lookup)
 | FDA openFDA drug shortages | REST polling | **REAL, live** |
 | ASHP shortage feed | API/scrape | **REAL, live** |
 | RxNorm (therapeutic classes) | NLM REST API | **REAL, live** |
-| Gemini API (3.5 Flash Lite) | Vercel AI SDK google provider | Real |
+| Gemini API (3.7 Flash) | Vercel AI SDK google provider | Real |
 | Ollama | AI SDK ollama provider, local + VPS container | Real (local) |
 | Hospital formulary + inventory | Medplum FHIR + Synthea meds | Mock (realistic) |
 | Provider comms | Resend/SMTP outbound | Real sends to demo inbox |
@@ -146,13 +146,13 @@ MCP server ──▶ pipeline tools (query case, approve, protocol lookup)
 
 ## 10. Full stack
 
-TypeScript · Next.js 15 · Node 22 · PostgreSQL 16 · Temporal TS SDK · Vercel AI SDK (agent layer + structured outputs) · Gemini 3.5 Flash Lite (prod) · Ollama (local dev, CI, fallback) · openFDA / ASHP / RxNorm APIs · Medplum + Synthea · Langfuse self-hosted · OpenTelemetry GenAI · MCP TS SDK · Zod · Drizzle · Auth.js · Resend · Docker Compose · Caddy · Vitest + Playwright · PostHog
+TypeScript · Next.js 15 · Node 22 · PostgreSQL 16 · Temporal TS SDK · Vercel AI SDK (agent layer + structured outputs) · Gemini 3.7 Flash (prod) · Ollama (local dev, CI, fallback) · openFDA / ASHP / RxNorm APIs · Medplum + Synthea · Langfuse self-hosted · OpenTelemetry GenAI · MCP TS SDK · Zod · Drizzle · Auth.js · Resend · Docker Compose · Caddy · Vitest + Playwright · PostHog
 
 ## 11. Deployment & showcase
 
 - **Hetzner VPS (~$9–15/mo), docker-compose:** app, worker, Temporal + UI, single Postgres (3 DBs: app/temporal/langfuse), Langfuse, Ollama container (small model, CPU), Caddy auto-TLS
 - Subdomains: `stopgap.tomnguyen.me` (app) · `temporal.stopgap.tomnguyen.me` (basic-auth — visitors see real durable workflows) · `traces.stopgap.tomnguyen.me` (Langfuse read-only)
-- **Demo design:** instant read-only guest mode (no signup) · nightly re-seed: 3 mid-lifecycle cases (day 2 / 18 / 45), populated shadow ledger, pending + approved protocols, exception queue · **"Run a shortage"** interactive scenario — Flash Lite pricing allows generous per-visitor limits; hard daily budget cap; over cap → auto-switch to VPS Ollama (banner notes local model); final fallback = demo video · live-feed panel with last-polled timestamp
+- **Demo design:** instant read-only guest mode (no signup) · nightly re-seed: 3 mid-lifecycle cases (day 2 / 18 / 45), populated shadow ledger, pending + approved protocols, exception queue · **"Run a shortage"** interactive scenario — Flash pricing still allows generous per-visitor limits; hard daily budget cap; over cap → auto-switch to VPS Ollama (banner notes local model); final fallback = demo video · live-feed panel with last-polled timestamp
 - Ongoing cost: ~$10–15/mo VPS + ~$1–5/mo LLM
 
 ## 12. Portfolio attachment (5 artifacts)

@@ -40,7 +40,7 @@ Ollama (zero API cost, temperature 0, pinned model).
 ## Stack
 
 TypeScript · Next.js 15 · Node 22 · PostgreSQL 16 · Temporal TS SDK · Vercel AI SDK ·
-Gemini 3.5 Flash Lite · Ollama · openFDA / ASHP / RxNorm · Medplum + Synthea (mock
+Gemini 3.7 Flash · Ollama · openFDA / ASHP / RxNorm · Medplum + Synthea (mock
 formulary/inventory) · Langfuse + OpenTelemetry GenAI · MCP TS SDK · Zod · Drizzle ·
 Resend · Docker Compose · Vitest + Playwright · PostHog.
 

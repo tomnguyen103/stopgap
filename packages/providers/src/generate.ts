@@ -73,8 +73,8 @@ export async function generateStructured<T extends z.ZodTypeAny>(
       schema: opts.schema,
       prompt: opts.prompt,
       system: opts.system,
-      // Gemini 3.x deprecates temperature/top_p/top_k (the API expects the defaults on
-      // thinking models) — only pass it to providers that still honor it.
+      // Gemini 3.x deprecates temperature/top_p/top_k — only pass it to providers
+      // that still honor it.
       ...(routed.info.name === "gemini" ? {} : { temperature: opts.temperature ?? 0 }),
       maxRetries: opts.maxRetries ?? 2,
     });
