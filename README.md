@@ -32,7 +32,7 @@ Zod-validated structured outputs and confidence routing. See
 
 ## Model routing
 
-Provider registry (`@stopgap/providers`): `gemini-3.5-flash-lite` (prod default) and a
+Provider registry (`@stopgap/providers`): `gemini-3.7-flash` (prod default) and a
 local Ollama model (dev, CI, runtime fallback), with runtime health-check failover and
 per-provider cost/latency logging. The eval suite runs against both; CI runs against
 Ollama (zero API cost, temperature 0, pinned model).
@@ -40,7 +40,7 @@ Ollama (zero API cost, temperature 0, pinned model).
 ## Stack
 
 TypeScript · Next.js 15 · Node 22 · PostgreSQL 16 · Temporal TS SDK · Vercel AI SDK ·
-Gemini 3.5 Flash Lite · Ollama · openFDA / ASHP / RxNorm · Medplum + Synthea (mock
+Gemini 3.7 Flash · Ollama · openFDA / ASHP / RxNorm · Medplum + Synthea (mock
 formulary/inventory) · Langfuse + OpenTelemetry GenAI · MCP TS SDK · Zod · Drizzle ·
 Resend · Docker Compose · Vitest + Playwright · PostHog.
 

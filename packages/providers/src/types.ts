@@ -4,7 +4,7 @@ export type ProviderName = "gemini" | "ollama";
 
 export interface ProviderInfo {
   name: ProviderName;
-  /** The concrete model id (e.g. "gemini-3.5-flash-lite" or "mistral"). */
+  /** The concrete model id (e.g. "gemini-3.7-flash" or "mistral"). */
   modelId: string;
   /** USD per 1M input / output tokens. Ollama (local) is 0. */
   usdPer1mInput: number;
