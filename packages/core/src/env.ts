@@ -54,7 +54,7 @@ const EnvSchema = z.object({
 
   LLM_PROVIDER: z.enum(["gemini", "ollama"]).default("ollama"),
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().default("gemini-3.5-flash-lite"),
+  GEMINI_MODEL: z.string().default("gemini-3.7-flash"),
   OLLAMA_BASE_URL: z.string().default("http://localhost:11434"),
   OLLAMA_MODEL: z.string().default("mistral"),
 

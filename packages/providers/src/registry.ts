@@ -5,11 +5,12 @@ import type { ProviderInfo, ProviderName, ResolvedModel } from "./types.js";
 
 /**
  * Provider registry. Builds AI SDK LanguageModels for each provider and exposes their
- * cost/stub metadata. Gemini 3.5 Flash Lite pricing per Google's published rates
- * (2026-07); Ollama is local and therefore free.
+ * cost/stub metadata. Gemini 3.7 Flash pricing per Google's published rates
+ * (2026-08, promotional through 2026-12-31; rises to 1.50/7.50 on 2027-01-01);
+ * Ollama is local and therefore free.
  */
-const GEMINI_USD_PER_1M_INPUT = 0.3;
-const GEMINI_USD_PER_1M_OUTPUT = 2.5;
+const GEMINI_USD_PER_1M_INPUT = 0.75;
+const GEMINI_USD_PER_1M_OUTPUT = 3.75;
 
 export function geminiInfo(): ProviderInfo {
   const env = getEnv();

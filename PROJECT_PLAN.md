@@ -97,7 +97,7 @@ MCP server ──▶ pipeline tools (query case, approve, protocol lookup)
 ```
 
 - **Deterministic Temporal spine owns the process; LLM owns judgment only** — schema-validated outputs (Zod via AI SDK `generateObject`), confidence thresholds route to humans, iteration caps
-- **Model routing layer:** provider registry — `gemini-3.5-flash-lite` (prod default) / Ollama local model (dev, CI, demo-budget-exceeded fallback). Runtime health check + automatic failover; per-provider cost + latency logged to Langfuse. Eval suite runs against BOTH providers — provider-comparison table in README (model-portability evidence)
+- **Model routing layer:** provider registry — `gemini-3.7-flash` (prod default) / Ollama local model (dev, CI, demo-budget-exceeded fallback). Runtime health check + automatic failover; per-provider cost + latency logged to Langfuse. Eval suite runs against BOTH providers — provider-comparison table in README (model-portability evidence)
 - CI runs the entire agent test suite against Ollama — zero API cost, deterministic offline tests (temperature 0, pinned local model)
 
 ## 5. Integration map

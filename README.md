@@ -32,7 +32,7 @@ Zod-validated structured outputs and confidence routing. See
 
 ## Model routing
 
-Provider registry (`@stopgap/providers`): `gemini-3.5-flash-lite` (prod default) and a
+Provider registry (`@stopgap/providers`): `gemini-3.7-flash` (prod default) and a
 local Ollama model (dev, CI, runtime fallback), with runtime health-check failover and
 per-provider cost/latency logging. The eval suite runs against both; CI runs against
 Ollama (zero API cost, temperature 0, pinned model).
